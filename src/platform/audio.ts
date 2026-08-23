@@ -16,6 +16,7 @@ export type Sound =
   | "spoke"
   | "ring"
   | "bullseye"
+  | "pure"
   | "spin"
   | "denied"
   | "gameOver";
@@ -122,6 +123,13 @@ export function play(sound: Sound, level = 0): void {
         note(freq, i * 0.055, 0.42, { peak: 0.42 });
       });
       note(98, 0, 0.5, { type: "sine", peak: 0.5 });
+      break;
+
+    case "pure":
+      // Bright and bell-like, clearly not the ordinary clear.
+      [784, 1047, 1319].forEach((freq, i) => {
+        note(freq, i * 0.04, 0.3, { type: "sine", peak: 0.45 });
+      });
       break;
 
     case "spin":

@@ -19,6 +19,7 @@ export type Effect =
   | { kind: "drop"; cells: Cell[]; elapsed: number; duration: number }
   | { kind: "float"; x: number; y: number; text: string; big: boolean; elapsed: number; duration: number }
   | { kind: "spinSettle"; ring: number; from: number; elapsed: number; duration: number }
+  | { kind: "pushSettle"; sector: number; from: number; elapsed: number; duration: number }
   | { kind: "shake"; elapsed: number; duration: number }
   | { kind: "denied"; elapsed: number; duration: number }
   | { kind: "shockwave"; x: number; y: number; radius: number; elapsed: number; duration: number };
@@ -42,6 +43,11 @@ export function floatText(x: number, y: number, text: string, big = false): Effe
  */
 export function spinSettle(ring: number, from: number): Effect {
   return { kind: "spinSettle", ring, from, elapsed: 0, duration: 190 };
+}
+
+/** The same, for a spoke shoved in or out. `from` is in pixels, not radians. */
+export function pushSettle(sector: number, from: number): Effect {
+  return { kind: "pushSettle", sector, from, elapsed: 0, duration: 190 };
 }
 
 export function shake(): Effect {

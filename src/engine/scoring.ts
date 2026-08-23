@@ -12,6 +12,8 @@
  *     and it is the only thing that buys back a spin
  *   - a ring and a spoke completed by the same move sweep the entire disc,
  *     which is the biggest thing that can happen in a round
+ *   - a line cleared in a single colour doubles that clear and pays a push,
+ *     which is the only thing that makes the palette worth planning around
  *   - clearing several lines at once, and clearing on consecutive turns,
  *     both multiply — that is where the ceiling for expert play lives
  */
@@ -32,6 +34,8 @@ export const SCORING = {
   /** Flat prize for taking a ring and a spoke together, which sweeps the disc. */
   bullseyeBonus: 2500,
   bullseyeMultiplier: 2,
+  /** Each line cleared in a single colour doubles what that clear is worth. */
+  pureMultiplier: 2,
 } as const;
 
 export function placementScore(cellsPlaced: number): number {
@@ -48,7 +52,12 @@ export function comboMultiplier(combo: number): number {
   return Math.min(1 + SCORING.comboStep * combo, SCORING.comboCap);
 }
 
-export function clearScore(clears: Clears, combo: number, viaSpin: boolean): number {
+export function clearScore(
+  clears: Clears,
+  combo: number,
+  viaSpin: boolean,
+  pureLines = 0,
+): number {
   const lineCount = clears.rings.length + clears.spokes.length;
   if (lineCount === 0) return 0;
 
@@ -62,7 +71,8 @@ export function clearScore(clears: Clears, combo: number, viaSpin: boolean): num
     simultaneousMultiplier(lineCount) *
     comboMultiplier(combo) *
     (viaSpin ? SCORING.spinBonus : 1) *
-    (bullseye ? SCORING.bullseyeMultiplier : 1);
+    (bullseye ? SCORING.bullseyeMultiplier : 1) *
+    Math.pow(SCORING.pureMultiplier, pureLines);
 
   return Math.round(base * multiplier);
 }

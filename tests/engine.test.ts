@@ -18,7 +18,8 @@ import { PIECES, pieceById } from "../src/engine/pieces.js";
 import { isBullseye } from "../src/engine/board.js";
 import { playOut } from "../src/engine/bot.js";
 import { PACKS, SIZES, bagFor, dailyVariant } from "../src/engine/variants.js";
-import { spinRing } from "../src/engine/rotate.js";
+import { pushSpoke, spinRing } from "../src/engine/rotate.js";
+import { lineColour, pureLines } from "../src/engine/board.js";
 import { clearScore, comboMultiplier, simultaneousMultiplier } from "../src/engine/scoring.js";
 import {
   type Move,
@@ -494,5 +495,138 @@ describe("the bullseye", () => {
     const result = playOut(createGame({ seed: 4242, spec: { rings: 6, sectors: 10 } }), 400);
     expect(result.state.stats.piecesPlaced).toBeGreaterThan(150);
     expect(result.stalled).toBe(false);
+  });
+});
+
+
+describe("pushing a spoke", () => {
+  it("carries cells across the rim, the way a spin carries them across the seam", () => {
+    let board = createBoard(spec);
+    board = place(board, pieceById("dot"), spec.rings - 1, 4, 7);
+
+    const outward = pushSpoke(board, 4, 1);
+    expect(getCell(outward, spec.rings - 1, 4)).toBe(0);
+    // Off the outer rim and back in at the hub: the disc is a torus.
+    expect(getCell(outward, 0, 4)).toBe(7);
+
+    const inward = pushSpoke(board, 4, -1);
+    expect(getCell(inward, spec.rings - 2, 4)).toBe(7);
+  });
+
+  it("only touches the spoke it is given", () => {
+    let board = createBoard(spec);
+    board = place(board, pieceById("dot"), 1, 2, 3);
+    board = place(board, pieceById("dot"), 1, 5, 6);
+
+    const pushed = pushSpoke(board, 2, 1);
+    expect(getCell(pushed, 2, 2)).toBe(3);
+    expect(getCell(pushed, 1, 5)).toBe(6);
+  });
+
+  it("returns to the start after a full lap", () => {
+    let board = createBoard(spec);
+    board = place(board, pieceById("wedge3"), 1, 6, 4);
+    let pushed = board;
+    for (let i = 0; i < spec.rings; i++) pushed = pushSpoke(pushed, 6, 1);
+    expect(Array.from(pushed.cells)).toEqual(Array.from(board.cells));
+  });
+
+  it("loses nothing — a push never destroys a block", () => {
+    let board = createBoard(spec);
+    for (let r = 0; r < spec.rings; r++) board = place(board, pieceById("dot"), r, 3, r + 1);
+    const before = filledCount(board);
+    expect(filledCount(pushSpoke(board, 3, 1))).toBe(before);
+  });
+
+  it("costs a push and is refused without one", () => {
+    let state = createGame({ seed: 11 });
+    expect(state.pushes).toBe(0);
+    expect(applyMove(state, { type: "push", sector: 0, dir: 1 })).toBeNull();
+
+    state = { ...state, pushes: 1 };
+    const result = applyMove(state, { type: "push", sector: 0, dir: 1 })!;
+    expect(result).not.toBeNull();
+    expect(result.state.pushes).toBe(0);
+    expect(result.state.stats.pushesUsed).toBe(1);
+  });
+
+  it("keeps the round alive while a push remains", () => {
+    const board = boardWithHoles([]);
+    const tray = [{ pieceId: "dot", colour: 1 }];
+    expect(isGameOver(board, tray, 0, 1)).toBe(false);
+    expect(isGameOver(board, tray, 0, 0)).toBe(true);
+  });
+});
+
+describe("single-colour clears", () => {
+  it("reads a line's colour only when every cell matches", () => {
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 5);
+    expect(lineColour(board, "ring", 0)).toBe(5);
+
+    const mixed = place(board, pieceById("dot"), 0, 3, 5);
+    expect(lineColour(mixed, "ring", 0)).toBe(5); // same colour, still pure
+  });
+
+  it("is not pure when one cell differs, or when one is missing", () => {
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) {
+      board = place(board, pieceById("dot"), 0, s, s === 2 ? 6 : 5);
+    }
+    expect(lineColour(board, "ring", 0)).toBe(0);
+
+    let gappy = createBoard(spec);
+    for (let s = 0; s < spec.sectors - 1; s++) gappy = place(gappy, pieceById("dot"), 0, s, 5);
+    expect(lineColour(gappy, "ring", 0)).toBe(0);
+  });
+
+  it("counts pure lines among a clear", () => {
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 4);
+    for (let s = 0; s < spec.sectors; s++) {
+      board = place(board, pieceById("dot"), 1, s, s === 0 ? 2 : 3);
+    }
+    const clears = findClears(board);
+    expect(clears.rings).toEqual([0, 1]);
+    expect(pureLines(board, clears)).toBe(1);
+  });
+
+  it("pays a push and doubles the score", () => {
+    const plain = clearScore({ rings: [0], spokes: [] }, 0, false, 0);
+    const pure = clearScore({ rings: [0], spokes: [] }, 0, false, 1);
+    expect(pure).toBe(plain * 2);
+  });
+
+  it("hands a push to the player who earns one", () => {
+    // A ring one cell short, all in one colour, and a matching piece to finish it.
+    let state = createGame({ seed: 21, spec: { rings: 5, sectors: 8 } });
+    const cells = new Uint8Array(state.board.cells.length);
+    for (let s = 1; s < 8; s++) cells[s] = 4;
+    state = {
+      ...state,
+      board: { spec: state.spec, cells },
+      tray: [{ pieceId: "dot", colour: 4 }, null, null],
+    };
+
+    const result = applyMove(state, { type: "place", slot: 0, r: 0, s: 0 })!;
+    expect(result).not.toBeNull();
+    expect(result.events.pureClears).toBe(1);
+    expect(result.events.pushesGained).toBe(1);
+    expect(result.state.pushes).toBe(1);
+  });
+
+  it("gives no push for a clear of mixed colours", () => {
+    let state = createGame({ seed: 22, spec: { rings: 5, sectors: 8 } });
+    const cells = new Uint8Array(state.board.cells.length);
+    for (let s = 1; s < 8; s++) cells[s] = s === 3 ? 6 : 4;
+    state = {
+      ...state,
+      board: { spec: state.spec, cells },
+      tray: [{ pieceId: "dot", colour: 4 }, null, null],
+    };
+
+    const result = applyMove(state, { type: "place", slot: 0, r: 0, s: 0 })!;
+    expect(result.events.pureClears).toBe(0);
+    expect(result.state.pushes).toBe(0);
   });
 });

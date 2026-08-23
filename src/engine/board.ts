@@ -185,6 +185,41 @@ export function applyClears(board: Board, clears: Clears): { board: Board; cells
   return { board: next, cells };
 }
 
+/**
+ * The colour every cell of a line shares, or 0 if they do not all match.
+ *
+ * Colour has been decoration until now. A line cleared in a single colour is
+ * the one thing that earns a push, which gives the palette a job: it is worth
+ * planning around without adding a rule anyone has to learn.
+ *
+ * Must be asked before the line is cleared, obviously.
+ */
+export function lineColour(board: Board, kind: "ring" | "spoke", index: number): number {
+  const { rings, sectors } = board.spec;
+  const length = kind === "ring" ? sectors : rings;
+  let colour = 0;
+
+  for (let i = 0; i < length; i++) {
+    const value =
+      kind === "ring"
+        ? board.cells[cellIndex(board.spec, index, i)]!
+        : board.cells[cellIndex(board.spec, i, index)]!;
+    if (value === 0) return 0;
+    if (colour === 0) colour = value;
+    else if (colour !== value) return 0;
+  }
+
+  return colour;
+}
+
+/** How many of these cleared lines were a single colour. */
+export function pureLines(board: Board, clears: Clears): number {
+  let pure = 0;
+  for (const r of clears.rings) if (lineColour(board, "ring", r) !== 0) pure++;
+  for (const s of clears.spokes) if (lineColour(board, "spoke", s) !== 0) pure++;
+  return pure;
+}
+
 export function filledCount(board: Board): number {
   let n = 0;
   for (const value of board.cells) if (value !== 0) n++;

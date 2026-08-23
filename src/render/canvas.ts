@@ -32,6 +32,11 @@ export interface BoardLayout {
    * drives one ring away from zero and back as it settles into its new sector.
    */
   readonly ringOffset: readonly number[];
+  /**
+   * Live radial offset per sector, in pixels. The push gesture's equivalent of
+   * ringOffset: it tugs one spoke in or out while the finger is down.
+   */
+  readonly spokeOffset: readonly number[];
 }
 
 export interface LayoutOptions {
@@ -66,7 +71,13 @@ export function computeLayout(
     pad: options.pad ?? Math.max(1.5, ringWidth * 0.055),
     corner: options.corner ?? ringWidth * 0.28,
     ringOffset: new Array(spec.rings).fill(0),
+    spokeOffset: new Array(spec.sectors).fill(0),
   };
+}
+
+/** Average width of one ring. The distance a push has to travel. */
+export function ringWidth(layout: BoardLayout): number {
+  return (layout.outerRadius - layout.innerRadius) / layout.spec.rings;
 }
 
 export function withRingOffset(layout: BoardLayout, ring: number, radians: number): BoardLayout {
@@ -75,14 +86,23 @@ export function withRingOffset(layout: BoardLayout, ring: number, radians: numbe
   return { ...layout, ringOffset };
 }
 
+export function withSpokeOffset(layout: BoardLayout, sector: number, pixels: number): BoardLayout {
+  const spokeOffset = [...layout.spokeOffset];
+  spokeOffset[sector] = pixels;
+  return { ...layout, spokeOffset };
+}
+
 export function cellGeometry(layout: BoardLayout, r: number, s: number): SectorGeometry {
   const offset = layout.ringOffset[r] ?? 0;
   const start = ANGLE_ORIGIN + s * layout.sectorAngle + offset;
+  const radial = layout.spokeOffset[((s % layout.spec.sectors) + layout.spec.sectors) % layout.spec.sectors] ?? 0;
   return {
     cx: layout.cx,
     cy: layout.cy,
-    innerRadius: layout.radii[r]!,
-    outerRadius: layout.radii[r + 1]!,
+    // Clamped above zero: a spoke tugged hard inwards would otherwise ask for
+    // an arc of negative radius.
+    innerRadius: Math.max(1, layout.radii[r]! + radial),
+    outerRadius: Math.max(2, layout.radii[r + 1]! + radial),
     startAngle: start,
     endAngle: start + layout.sectorAngle,
     pad: layout.pad,

@@ -363,6 +363,7 @@ function showHowTo(): void {
       ["2", t("how2")],
       ["3", t("how3")],
       ["★", t("how4")],
+      ["◆", t("how5")],
     ] as Array<[string, string]>
   ).forEach(
     ([num, text]) => {
@@ -418,7 +419,7 @@ function shareCardFor(state: GameState, mode: "daily" | "endless", puzzle: numbe
     score: localeNumber(state.score),
     stats: [
       [t("rings"), String(state.stats.ringsCleared)],
-      [t("spokes"), String(state.stats.spokesCleared)],
+      [t("pureClears"), String(state.stats.pureClears)],
       [t("bestCombo"), `x${state.stats.bestCombo}`],
     ],
   };
@@ -540,6 +541,14 @@ if (import.meta.env.DEV) {
      * the tray, so the burst and the sweep can be captured without playing a
      * whole round to reach one.
      */
+    /** Hands the player pushes, for exercising the spoke gesture. */
+    givePush: (n = 1) => {
+      const current = screen?.getState();
+      if (!current || !screen) return null;
+      screen.replaceState({ ...current, pushes: n });
+      return n;
+    },
+
     /** Renders the share card for whatever is on the board right now. */
     shareCard: () => {
       const current = screen?.getState();

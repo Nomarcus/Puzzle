@@ -88,7 +88,7 @@ check("the chosen disc is the one dealt", before?.spec.rings === 6 && before?.sp
 check("starts with one spin", before?.spins === 1, `spins=${before?.spins}`);
 
 // --- geometry, mirrored from ui/game-screen.ts measure() -------------------
-const headerBottom = 74 + 38;
+const headerBottom = 74 + 82;
 const trayTop = VIEWPORT.height - 168 - 14;
 const boardRadius = Math.min(VIEWPORT.width * 0.485, (trayTop - headerBottom) / 2 - 10);
 const cx = VIEWPORT.width / 2;
@@ -230,6 +230,27 @@ for (let turn = 0; turn < 16; turn++) {
 }
 await shot("08-large-chunks");
 check("no errors across every disc size", problems.length === 0, problems.join(" | "));
+
+// --- the push: the other axis ----------------------------------------------
+await page.evaluate(() => window.__shiftle.givePush(2));
+await page.waitForTimeout(200);
+const withPush = await state();
+check("pushes can be held", withPush?.pushes === 2, `pushes=${withPush?.pushes}`);
+
+// Straight out from the hub along one spoke: radial travel, no arc travel.
+const spokeAngle = (-90 * Math.PI) / 180;
+const from = { x: cx + bigRadius * 0.5 * Math.cos(spokeAngle), y: cy + bigRadius * 0.5 * Math.sin(spokeAngle) };
+const to = { x: cx + bigRadius * 0.95 * Math.cos(spokeAngle), y: cy + bigRadius * 0.95 * Math.sin(spokeAngle) };
+await drag(from, to);
+await page.waitForTimeout(320);
+
+const afterPush = await state();
+check(
+  "dragging out along a spoke spends a push, not a spin",
+  afterPush.pushes === withPush.pushes - 1 && afterPush.spins === withPush.spins,
+  `pushes ${withPush.pushes}->${afterPush.pushes}, spins ${withPush.spins}->${afterPush.spins}`,
+);
+await shot("18-push");
 
 // --- being stuck, and dying ------------------------------------------------
 // Jam the disc with a spin still in hand: the round must stay alive and say so.

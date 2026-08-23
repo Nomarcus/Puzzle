@@ -9,10 +9,16 @@ A block puzzle on a round board. You drag arcs, wedges and curved bricks onto a
 disc of rings and sectors. A full ring pops, and so does a full spoke. Complete
 one of each with the same move and the entire disc is swept — the bullseye.
 
-The one special move is spinning a ring by a single sector, which needs no
-wrap-around rule to explain because a ring has no edge. Only rings pay for
-spins, and spins act as lives: the round ends when nothing fits *and* no spins
-remain.
+Two special moves, and they are the same rule stated on the two axes. Drag
+around the disc to **spin** a ring one sector; drag in or out to **push** a
+spoke one ring. Both wrap, which makes the board a torus and means neither
+needs a wrap-around rule explained — a ring has no edge, and a push simply
+carries a block off the rim and back in at the hub.
+
+Spins are common: every ring cleared buys one back. Pushes are the prize, and
+the only thing that pays for one is clearing a line in a **single colour**, or
+a bullseye. That is what gives the palette a job. Both act as lives: the round
+ends only when nothing fits *and* neither power remains.
 
 Two modes. **Free play** runs indefinitely — it is a high-score chase, not a
 puzzle with an ending. **Daily** derives its board, piece pack and sequence from

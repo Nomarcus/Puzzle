@@ -49,6 +49,43 @@ export function drawSpinPip(
   ctx.restore();
 }
 
+/** A double-headed arrow, up and down: the push along a spoke. */
+export function drawPushPip(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  filled: boolean,
+  theme: Theme,
+): void {
+  const colour = filled ? theme.text : theme.textSoft;
+  const reach = radius * 0.92;
+  const head = radius * 0.5;
+
+  ctx.save();
+  ctx.globalAlpha = filled ? 1 : 0.32;
+  ctx.strokeStyle = colour;
+  ctx.fillStyle = colour;
+  ctx.lineWidth = radius * 0.34;
+  ctx.lineCap = "round";
+
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - reach * 0.45);
+  ctx.lineTo(cx, cy + reach * 0.45);
+  ctx.stroke();
+
+  for (const sign of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + sign * reach);
+    ctx.lineTo(cx - head * 0.72, cy + sign * (reach - head));
+    ctx.lineTo(cx + head * 0.72, cy + sign * (reach - head));
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 /** The row of spin pips: filled ones first, then spent ones ghosted out. */
 export function drawSpinMeter(
   ctx: CanvasRenderingContext2D,
@@ -63,5 +100,22 @@ export function drawSpinMeter(
   for (let i = 0; i < maxSpins; i++) {
     const cx = rightX - radius - (maxSpins - 1 - i) * gap;
     drawSpinPip(ctx, cx, cy, radius, i < spins, theme);
+  }
+}
+
+/** Always drawn, even at zero, so the player knows the power exists. */
+export function drawPushMeter(
+  ctx: CanvasRenderingContext2D,
+  rightX: number,
+  cy: number,
+  pushes: number,
+  maxPushes: number,
+  theme: Theme,
+): void {
+  const radius = 11;
+  const gap = radius * 2.9;
+  for (let i = 0; i < maxPushes; i++) {
+    const cx = rightX - radius - (maxPushes - 1 - i) * gap;
+    drawPushPip(ctx, cx, cy, radius, i < pushes, theme);
   }
 }

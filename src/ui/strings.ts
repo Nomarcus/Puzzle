@@ -21,6 +21,7 @@ const TABLE = {
   best: { sv: "REKORD", en: "BEST" },
   score: { sv: "POÄNG", en: "SCORE" },
   spins: { sv: "SNURR", en: "SPINS" },
+  pushes: { sv: "SKJUT", en: "PUSH" },
   rings: { sv: "RINGAR", en: "RINGS" },
   pieces: { sv: "BITAR", en: "PIECES" },
   spokes: { sv: "EKAR", en: "SPOKES" },
@@ -49,6 +50,10 @@ const TABLE = {
     sv: "Ring och eke i samma drag sopar hela brädet. Det är den stora.",
     en: "A ring and a spoke in the same move sweeps the whole board. That is the big one.",
   },
+  how5: {
+    sv: "Rensa en linje i en enda färg så får du ett SKJUT — dra då upp eller ner på skivan för att flytta en hel eke inåt eller utåt.",
+    en: "Clear a line in a single colour to earn a PUSH — then drag up or down on the disc to move a whole spoke in or out.",
+  },
   gotIt: { sv: "Kör!", en: "Got it!" },
   how: { sv: "Så spelar du", en: "How to play" },
 
@@ -65,8 +70,11 @@ const TABLE = {
   confirm: { sv: "Ja", en: "Yes" },
 
   stuckHint: { sv: "Inget passar — snurra en ring", en: "Nothing fits — spin a ring" },
+  stuckPush: { sv: "Inget passar — skjut en eke", en: "Nothing fits — push a spoke" },
   stuckOver: { sv: "Inget passar längre", en: "Nothing fits any more" },
   bullseye: { sv: "FULLTRÄFF!", en: "BULLSEYE!" },
+  pure: { sv: "ENFÄRGAT!", en: "ALL ONE COLOUR!" },
+  pureClears: { sv: "ENFÄRGADE", en: "PURE" },
   soundOn: { sv: "Ljud på", en: "Sound on" },
   soundOff: { sv: "Ljud av", en: "Sound off" },
 

@@ -29,3 +29,26 @@ export function spinRing(board: Board, ring: number, dir: SpinDirection): Board 
   }
   return next;
 }
+
+/**
+ * Pushes one spoke a single ring inwards or outwards.
+ *
+ * The sibling of a spin, along the other axis. It wraps too — a block shoved
+ * off the rim comes back at the hub — which makes the disc a torus and means
+ * the two moves are the same rule stated twice rather than two rules to learn.
+ * Nothing is ever destroyed by a push.
+ */
+export function pushSpoke(board: Board, sector: number, dir: SpinDirection): Board {
+  const { spec } = board;
+  if (sector < 0 || sector >= spec.sectors) {
+    throw new Error(`Sector ${sector} is outside the board`);
+  }
+
+  const next = cloneBoard(board);
+  for (let r = 0; r < spec.rings; r++) {
+    const from = board.cells[cellIndex(spec, r, sector)]!;
+    const to = ((r + dir) % spec.rings + spec.rings) % spec.rings;
+    next.cells[cellIndex(spec, to, sector)] = from;
+  }
+  return next;
+}

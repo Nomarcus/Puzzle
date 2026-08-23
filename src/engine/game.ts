@@ -20,13 +20,15 @@ import {
   findClears,
   hasClears,
   hasPlacement,
+  isBullseye,
   pieceCells,
   place,
+  pureLines,
 } from "./board.js";
 import { type Piece, drawPiece, pieceById } from "./pieces.js";
 import { type PackId, DEFAULT_PACK, bagFor } from "./variants.js";
 import { nextInt } from "./rng.js";
-import { type SpinDirection, spinRing } from "./rotate.js";
+import { type SpinDirection, pushSpoke, spinRing } from "./rotate.js";
 import { clearScore, placementScore } from "./scoring.js";
 
 export const RULES = {
@@ -50,6 +52,11 @@ export interface RuleSet {
    * source of lives, which is what stops spins from becoming unlimited.
    */
   readonly spinSource: "any" | "rings";
+  /**
+   * Pushes shift a spoke instead of a ring. They are the rare power: only a
+   * line cleared in a single colour, or a bullseye, pays for one.
+   */
+  readonly maxPushes: number;
   /** Ends the round after this many pieces. 0 means play until stuck. */
   readonly pieceLimit: number;
 }
@@ -61,6 +68,7 @@ export const DEFAULT_RULES: RuleSet = {
   // spokes would hand out unlimited escapes and nothing would ever be at stake.
   clearsPerSpin: 1,
   spinSource: "rings",
+  maxPushes: 2,
   pieceLimit: 0,
 };
 
@@ -73,7 +81,8 @@ export interface TraySlot {
 
 export type Move =
   | { readonly type: "place"; readonly slot: number; readonly r: number; readonly s: number }
-  | { readonly type: "spin"; readonly ring: number; readonly dir: SpinDirection };
+  | { readonly type: "spin"; readonly ring: number; readonly dir: SpinDirection }
+  | { readonly type: "push"; readonly sector: number; readonly dir: SpinDirection };
 
 export interface GameStats {
   piecesPlaced: number;
@@ -81,6 +90,9 @@ export interface GameStats {
   ringsCleared: number;
   spokesCleared: number;
   spinsUsed: number;
+  pushesUsed: number;
+  pureClears: number;
+  bullseyes: number;
   bestCombo: number;
   bestClear: number;
 }
@@ -101,6 +113,7 @@ export interface GameState {
   /** Consecutive clearing turns so far. Feeds the combo multiplier. */
   readonly combo: number;
   readonly spins: number;
+  readonly pushes: number;
   readonly clearsTowardSpin: number;
   readonly over: boolean;
   readonly stats: Readonly<GameStats>;
@@ -108,7 +121,7 @@ export interface GameState {
 }
 
 export interface MoveEvents {
-  readonly kind: "place" | "spin";
+  readonly kind: "place" | "spin" | "push";
   readonly placedCells: Cell[];
   readonly colour: number;
   readonly spin: { ring: number; dir: SpinDirection } | null;
@@ -117,6 +130,10 @@ export interface MoveEvents {
   readonly scoreDelta: number;
   readonly combo: number;
   readonly spinsGained: number;
+  readonly pushesGained: number;
+  /** Cleared lines that were a single colour. Worth shouting about. */
+  readonly pureClears: number;
+  readonly bullseye: boolean;
   readonly trayRefilled: boolean;
   readonly gameOver: boolean;
 }
@@ -133,6 +150,9 @@ function emptyStats(): GameStats {
     ringsCleared: 0,
     spokesCleared: 0,
     spinsUsed: 0,
+    pushesUsed: 0,
+    pureClears: 0,
+    bullseyes: 0,
     bestCombo: 0,
     bestClear: 0,
   };
@@ -230,6 +250,7 @@ export function createGame(options: {
     score: 0,
     combo: 0,
     spins: rules.startingSpins,
+    pushes: 0,
     clearsTowardSpin: 0,
     over: false,
     stats: emptyStats(),
@@ -246,8 +267,13 @@ export function slotPiece(slot: TraySlot | null): Piece | null {
  * must also be out of spins. That is what turns spins into lives and makes a
  * doomed board survivable — if you can see the rescue.
  */
-export function isGameOver(board: Board, tray: readonly (TraySlot | null)[], spins: number): boolean {
-  if (spins > 0) return false;
+export function isGameOver(
+  board: Board,
+  tray: readonly (TraySlot | null)[],
+  spins: number,
+  pushes = 0,
+): boolean {
+  if (spins > 0 || pushes > 0) return false;
   for (const slot of tray) {
     const piece = slotPiece(slot);
     if (piece && hasPlacement(board, piece)) return false;
@@ -291,9 +317,22 @@ function grantSpins(
 }
 
 /** Returns null when the move is illegal, so replays can be validated. */
+/**
+ * Pushes come only from a single-colour line or a bullseye, so they stay rare
+ * enough to feel like a prize rather than a second currency to manage.
+ */
+function grantPushes(rules: RuleSet, current: number, pure: number, bullseye: boolean): [pushes: number, gained: number] {
+  const earned = pure + (bullseye ? 1 : 0);
+  if (earned === 0) return [current, 0];
+  const pushes = Math.min(rules.maxPushes, current + earned);
+  return [pushes, pushes - current];
+}
+
 export function applyMove(state: GameState, move: Move): MoveResult | null {
   if (state.over) return null;
-  return move.type === "place" ? applyPlace(state, move) : applySpin(state, move);
+  if (move.type === "place") return applyPlace(state, move);
+  if (move.type === "spin") return applySpin(state, move);
+  return applyPush(state, move);
 }
 
 function applyPlace(
@@ -309,16 +348,20 @@ function applyPlace(
   let board = place(state.board, piece, move.r, move.s, slot.colour);
 
   const clears = findClears(board, state.spokeClears);
+  // Asked before the clear, while the colours are still on the board.
+  const pure = pureLines(board, clears);
+  const bullseye = isBullseye(clears);
   const cleared = applyClears(board, clears);
   board = cleared.board;
 
   const didClear = hasClears(clears);
-  const gained = clearScore(clears, state.combo, false);
+  const gained = clearScore(clears, state.combo, false, pure);
   const scoreDelta = placementScore(piece.size) + gained;
   const combo = didClear ? state.combo + 1 : 0;
   const [spins, clearsTowardSpin, spinsGained] = didClear
     ? grantSpins(state.rules, state.spins, state.clearsTowardSpin, clears)
     : [state.spins, state.clearsTowardSpin, 0];
+  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, bullseye);
 
   // The tray only refills once all three slots are spent — that is what makes
   // the third piece a genuine planning problem rather than an afterthought.
@@ -335,7 +378,7 @@ function applyPlace(
 
   const piecesPlaced = state.stats.piecesPlaced + 1;
   const outOfPieces = state.rules.pieceLimit > 0 && piecesPlaced >= state.rules.pieceLimit;
-  const over = outOfPieces || isGameOver(board, nextTray, spins);
+  const over = outOfPieces || isGameOver(board, nextTray, spins, pushes);
 
   const stats: GameStats = {
     ...state.stats,
@@ -357,6 +400,7 @@ function applyPlace(
       score: state.score + scoreDelta,
       combo,
       spins,
+      pushes,
       clearsTowardSpin,
       over,
       stats,
@@ -372,6 +416,9 @@ function applyPlace(
       scoreDelta,
       combo,
       spinsGained,
+      pushesGained,
+      pureClears: pure,
+      bullseye,
       trayRefilled,
       gameOver: over,
     },
@@ -385,28 +432,33 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
   let board = spinRing(state.board, move.ring, move.dir);
 
   const clears = findClears(board, state.spokeClears);
+  const pure = pureLines(board, clears);
+  const bullseye = isBullseye(clears);
   const cleared = applyClears(board, clears);
   board = cleared.board;
 
   const didClear = hasClears(clears);
-  const gained = clearScore(clears, state.combo, true);
+  const gained = clearScore(clears, state.combo, true, pure);
   const combo = didClear ? state.combo + 1 : state.combo;
 
   const spentSpins = state.spins - 1;
   const [spins, clearsTowardSpin, spinsGained] = didClear
     ? grantSpins(state.rules, spentSpins, state.clearsTowardSpin, clears)
     : [spentSpins, state.clearsTowardSpin, 0];
+  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, bullseye);
 
   const stats: GameStats = {
     ...state.stats,
     ringsCleared: state.stats.ringsCleared + clears.rings.length,
     spokesCleared: state.stats.spokesCleared + clears.spokes.length,
+    pureClears: state.stats.pureClears + pure,
+    bullseyes: state.stats.bullseyes + (bullseye ? 1 : 0),
     spinsUsed: state.stats.spinsUsed + 1,
     bestCombo: Math.max(state.stats.bestCombo, combo),
     bestClear: Math.max(state.stats.bestClear, gained),
   };
 
-  const over = isGameOver(board, state.tray, spins);
+  const over = isGameOver(board, state.tray, spins, pushes);
 
   return {
     state: {
@@ -415,6 +467,7 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
       score: state.score + gained,
       combo,
       spins,
+      pushes,
       clearsTowardSpin,
       over,
       stats,
@@ -430,6 +483,79 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
       scoreDelta: gained,
       combo,
       spinsGained,
+      pushesGained,
+      pureClears: pure,
+      bullseye,
+      trayRefilled: false,
+      gameOver: over,
+    },
+  };
+}
+
+/**
+ * The sibling of a spin, along the other axis: shove one spoke a ring in or
+ * out. Costs a push, which only a single-colour clear or a bullseye pays for.
+ */
+function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): MoveResult | null {
+  if (state.pushes <= 0) return null;
+  if (move.sector < 0 || move.sector >= state.spec.sectors) return null;
+
+  let board = pushSpoke(state.board, move.sector, move.dir);
+
+  const clears = findClears(board, state.spokeClears);
+  const pure = pureLines(board, clears);
+  const bullseye = isBullseye(clears);
+  const cleared = applyClears(board, clears);
+  board = cleared.board;
+
+  const didClear = hasClears(clears);
+  const gained = clearScore(clears, state.combo, true, pure);
+  const combo = didClear ? state.combo + 1 : state.combo;
+
+  const [spins, clearsTowardSpin, spinsGained] = didClear
+    ? grantSpins(state.rules, state.spins, state.clearsTowardSpin, clears)
+    : [state.spins, state.clearsTowardSpin, 0];
+  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes - 1, pure, bullseye);
+
+  const stats: GameStats = {
+    ...state.stats,
+    ringsCleared: state.stats.ringsCleared + clears.rings.length,
+    spokesCleared: state.stats.spokesCleared + clears.spokes.length,
+    pureClears: state.stats.pureClears + pure,
+    bullseyes: state.stats.bullseyes + (bullseye ? 1 : 0),
+    pushesUsed: state.stats.pushesUsed + 1,
+    bestCombo: Math.max(state.stats.bestCombo, combo),
+    bestClear: Math.max(state.stats.bestClear, gained),
+  };
+
+  const over = isGameOver(board, state.tray, spins, pushes);
+
+  return {
+    state: {
+      ...state,
+      board,
+      score: state.score + gained,
+      combo,
+      spins,
+      pushes,
+      clearsTowardSpin,
+      over,
+      stats,
+      moves: [...state.moves, move],
+    },
+    events: {
+      kind: "push",
+      placedCells: [],
+      colour: 0,
+      spin: null,
+      clears,
+      clearedCells: cleared.cells,
+      scoreDelta: gained,
+      combo,
+      spinsGained,
+      pushesGained,
+      pureClears: pure,
+      bullseye,
       trayRefilled: false,
       gameOver: over,
     },

@@ -28,6 +28,7 @@ import {
   floatText,
   progress,
   shake,
+  pushSettle,
   shockwave,
   spinSettle,
   stepEffects,
@@ -44,9 +45,11 @@ import {
   drawGhost,
   fitCanvas,
   paintBackdrop,
+  ringWidth,
   withRingOffset,
+  withSpokeOffset,
 } from "../render/canvas.js";
-import { drawSpinMeter } from "../render/icons.js";
+import { drawPushMeter, drawSpinMeter } from "../render/icons.js";
 import { type Theme, blockColour } from "../render/theme.js";
 import { t } from "./strings.js";
 import { play as playSound, unlock as unlockAudio } from "../platform/audio.js";
@@ -54,8 +57,12 @@ import { type Box, drawPiece } from "../render/tray.js";
 import {
   angleAt,
   angleTravelled,
+  clampPushPreview,
   clampSpinPreview,
+  discAxis,
   dragTarget,
+  pushCommits,
+  radiusAt,
   spinCommits,
 } from "../input/gestures.js";
 
@@ -80,7 +87,19 @@ export interface GameScreenOptions {
 type Pointer =
   | { kind: "none" }
   | { kind: "drag"; slot: number; piece: Piece; x: number; y: number; target: Cell | null }
-  | { kind: "spin"; ring: number; startAngle: number; delta: number };
+  /**
+   * One gesture on the disc, whose axis is decided by the first few pixels of
+   * travel and then locked: around the rings is a spin, in and out is a push.
+   */
+  | {
+      kind: "disc";
+      ring: number;
+      sector: number;
+      startAngle: number;
+      startRadius: number;
+      axis: "spin" | "push" | null;
+      delta: number;
+    };
 
 interface ScreenLayout {
   readonly width: number;
@@ -202,7 +221,9 @@ export class GameScreen {
     // Row one is the quit and restart buttons (DOM, in the corners); the
     // score and spin meter sit on row two.
     const headerY = safeTop + 74;
-    const headerBottom = headerY + 38;
+    // Two meter rows on the right, always reserved: the board must not jump
+    // the moment a push is earned.
+    const headerBottom = headerY + 82;
     // A generous tray: these pieces are the thing you grab, so they get room
     // to be drawn fat rather than dainty.
     const trayHeight = 168;
@@ -241,13 +262,20 @@ export class GameScreen {
   private liveBoardLayout(): BoardLayout {
     let layout = this.layout.board;
 
-    if (this.pointer.kind === "spin") {
+    if (this.pointer.kind === "disc" && this.pointer.axis === "spin") {
       layout = withRingOffset(layout, this.pointer.ring, this.pointer.delta);
+    }
+    if (this.pointer.kind === "disc" && this.pointer.axis === "push") {
+      layout = withSpokeOffset(layout, this.pointer.sector, this.pointer.delta);
     }
     for (const effect of this.effects) {
       if (effect.kind === "spinSettle") {
         const eased = 1 - easeOutCubic(progress(effect));
         layout = withRingOffset(layout, effect.ring, effect.from * eased);
+      }
+      if (effect.kind === "pushSettle") {
+        const eased = 1 - easeOutCubic(progress(effect));
+        layout = withSpokeOffset(layout, effect.sector, effect.from * eased);
       }
     }
     return layout;
@@ -301,19 +329,23 @@ export class GameScreen {
       return;
     }
 
-    // ...and a drag that starts on the disc is a spin. The two can never be
-    // mistaken for one another, which is why there is no mode button.
+    // ...and a drag that starts on the disc turns a ring or shoves a spoke,
+    // decided by which way the thumb goes. The two can never be mistaken for a
+    // placement, which is why there is no mode button.
     const cell = cellAtPoint(this.layout.board, x, y);
     if (cell) {
-      if (this.state.spins <= 0) {
+      if (this.state.spins <= 0 && this.state.pushes <= 0) {
         this.effects.push(denied());
         playSound("denied");
         return;
       }
       this.pointer = {
-        kind: "spin",
+        kind: "disc",
         ring: cell.r,
+        sector: cell.s,
         startAngle: angleAt(this.layout.board, x, y),
+        startRadius: radiusAt(this.layout.board, x, y),
+        axis: null,
         delta: 0,
       };
     }
@@ -330,8 +362,26 @@ export class GameScreen {
       return;
     }
 
-    const travelled = angleTravelled(this.pointer.startAngle, angleAt(this.layout.board, x, y));
-    this.pointer.delta = clampSpinPreview(travelled, this.layout.board.sectorAngle);
+    const board = this.layout.board;
+    const angle = angleTravelled(this.pointer.startAngle, angleAt(board, x, y));
+    const radial = radiusAt(board, x, y) - this.pointer.startRadius;
+    const width = ringWidth(board);
+
+    if (this.pointer.axis === null) {
+      // Arc travel in pixels, so the two axes are compared in the same units.
+      const arcPixels = angle * this.pointer.startRadius;
+      const axis = discAxis(arcPixels, radial);
+      if (axis === null) return;
+      // Only offer an axis the player can actually pay for.
+      if (axis === "spin" && this.state.spins <= 0) return;
+      if (axis === "push" && this.state.pushes <= 0) return;
+      this.pointer.axis = axis;
+    }
+
+    this.pointer.delta =
+      this.pointer.axis === "spin"
+        ? clampSpinPreview(angle, board.sectorAngle)
+        : clampPushPreview(radial, width);
   };
 
   private onUp = (event: PointerEvent): void => {
@@ -350,7 +400,23 @@ export class GameScreen {
       return;
     }
 
-    const sectorAngle = this.layout.board.sectorAngle;
+    const board = this.layout.board;
+
+    if (pointer.axis === "push") {
+      const width = ringWidth(board);
+      const dir = pushCommits(pointer.delta, width);
+      if (dir === 0) {
+        this.effects.push(pushSettle(pointer.sector, pointer.delta));
+        return;
+      }
+      const carry = pointer.delta - dir * width;
+      this.effects.push(pushSettle(pointer.sector, carry));
+      playSound("spin");
+      this.commit({ type: "push", sector: pointer.sector, dir: dir as SpinDirection }, null, null);
+      return;
+    }
+
+    const sectorAngle = board.sectorAngle;
     const dir = spinCommits(pointer.delta, sectorAngle);
     if (dir === 0) {
       this.effects.push(spinSettle(pointer.ring, pointer.delta));
@@ -367,8 +433,11 @@ export class GameScreen {
   };
 
   private onCancel = (): void => {
-    if (this.pointer.kind === "spin") {
+    if (this.pointer.kind === "disc" && this.pointer.axis === "spin") {
       this.effects.push(spinSettle(this.pointer.ring, this.pointer.delta));
+    }
+    if (this.pointer.kind === "disc" && this.pointer.axis === "push") {
+      this.effects.push(pushSettle(this.pointer.sector, this.pointer.delta));
     }
     this.pointer = { kind: "none" };
   };
@@ -444,6 +513,10 @@ export class GameScreen {
         this.effects.push(shake());
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius));
         playSound("bullseye");
+      } else if (events.pureClears > 0) {
+        this.effects.push(floatText(cx, cy - 40, t("pure"), true));
+        this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
+        playSound("pure");
       } else {
         playSound(events.clears.rings.length > 0 ? "ring" : "spoke", events.combo);
       }
@@ -457,7 +530,7 @@ export class GameScreen {
       playSound("place");
     }
 
-    if (events.spinsGained > 0) this.options.haptic?.("success");
+    if (events.spinsGained > 0 || events.pushesGained > 0) this.options.haptic?.("success");
 
     this.refreshPlaceable();
     this.options.onChange?.(this.state);
@@ -514,9 +587,10 @@ export class GameScreen {
    * the player to work out from pieces that refuse to move.
    */
   private drawStuckHint(ctx: CanvasRenderingContext2D): void {
-    if (!this.stuck || this.diedAt || this.state.spins <= 0) return;
+    if (!this.stuck || this.diedAt) return;
+    if (this.state.spins <= 0 && this.state.pushes <= 0) return;
 
-    const text = t("stuckHint");
+    const text = this.state.spins > 0 ? t("stuckHint") : t("stuckPush");
     const y = this.layout.trayTop - 26;
     const pulse = 1 + Math.sin(performance.now() / 260) * 0.03;
 
@@ -630,7 +704,7 @@ export class GameScreen {
     ctx.save();
     ctx.translate(nudge, 0);
     // While nothing fits, the meter breathes: it is the only way out.
-    if (this.stuck && this.state.spins > 0 && !this.diedAt) {
+    if (this.stuck && (this.state.spins > 0 || this.state.pushes > 0) && !this.diedAt) {
       const beat = 1 + Math.sin(performance.now() / 260) * 0.12;
       ctx.translate(width - 24, headerY - 2);
       ctx.scale(beat, beat);
@@ -643,6 +717,12 @@ export class GameScreen {
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = this.theme.textSoft;
     ctx.fillText(t("spins"), width - 24, headerY + 26);
+
+    drawPushMeter(ctx, width - 24, headerY + 52, this.state.pushes, this.state.rules.maxPushes, this.theme);
+    ctx.textAlign = "right";
+    ctx.font = `700 12px ${FONT}`;
+    ctx.fillStyle = this.theme.textSoft;
+    ctx.fillText(t("pushes"), width - 24, headerY + 78);
 
     // A rationed round has to show what is left of the ration.
     const limit = this.state.rules.pieceLimit;

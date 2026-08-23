@@ -75,6 +75,36 @@ export function angleAt(layout: BoardLayout, x: number, y: number): number {
   return Math.atan2(y - layout.cy, x - layout.cx) - ANGLE_ORIGIN;
 }
 
+export function radiusAt(layout: BoardLayout, x: number, y: number): number {
+  return Math.hypot(x - layout.cx, y - layout.cy);
+}
+
+/**
+ * Which way the thumb is going: around the disc, or in and out of it.
+ *
+ * The finger picks the axis, so both powers live on the same surface with no
+ * mode to switch. Returns null until the drag has travelled far enough for the
+ * answer to be meaningful — guessing from the first pixel picks wrong.
+ */
+export function discAxis(
+  arcTravel: number,
+  radialTravel: number,
+  deadzone = 10,
+): "spin" | "push" | null {
+  if (Math.abs(arcTravel) < deadzone && Math.abs(radialTravel) < deadzone) return null;
+  return Math.abs(arcTravel) >= Math.abs(radialTravel) ? "spin" : "push";
+}
+
+/** A push preview never runs past one ring, for the same reason a spin does not. */
+export function clampPushPreview(delta: number, ringWidth: number): number {
+  return Math.max(-ringWidth, Math.min(ringWidth, delta));
+}
+
+export function pushCommits(delta: number, ringWidth: number): 1 | -1 | 0 {
+  if (Math.abs(delta) < ringWidth * SPIN_COMMIT_FRACTION) return 0;
+  return delta > 0 ? 1 : -1;
+}
+
 /** Signed angle travelled since the gesture began, unwrapped across the seam. */
 export function angleTravelled(from: number, to: number): number {
   let delta = to - from;
