@@ -95,8 +95,15 @@ export function hasPlacement(board: Board, piece: Piece): boolean {
 /**
  * Rings and spokes are checked together and pop simultaneously, so a placement
  * that completes both cashes in as one big combined clear.
+ *
+ * Spoke clears are off by default, and that is a measured decision rather than
+ * a simplification. A spoke is only as long as the disc has rings, so it was
+ * far cheaper than a ring and cleared constantly — which drained the board
+ * faster than it could fill, so rounds never ended, rings almost never
+ * completed and the spin was never needed. The flag stays so tools/experiment
+ * can re-check that call against any future board shape.
  */
-export function findClears(board: Board): Clears {
+export function findClears(board: Board, spokeClears = false): Clears {
   const { rings: ringCount, sectors } = board.spec;
   const rings: number[] = [];
   const spokes: number[] = [];
@@ -112,15 +119,17 @@ export function findClears(board: Board): Clears {
     if (full) rings.push(r);
   }
 
-  for (let s = 0; s < sectors; s++) {
-    let full = true;
-    for (let r = 0; r < ringCount; r++) {
-      if (board.cells[cellIndex(board.spec, r, s)] === 0) {
-        full = false;
-        break;
+  if (spokeClears) {
+    for (let s = 0; s < sectors; s++) {
+      let full = true;
+      for (let r = 0; r < ringCount; r++) {
+        if (board.cells[cellIndex(board.spec, r, s)] === 0) {
+          full = false;
+          break;
+        }
       }
+      if (full) spokes.push(s);
     }
-    if (full) spokes.push(s);
   }
 
   return { rings, spokes };

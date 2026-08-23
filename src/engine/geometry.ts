@@ -15,7 +15,7 @@ export interface BoardSpec {
 }
 
 /** Starting point, not a decision — tools/balance.ts settles the real numbers. */
-export const DEFAULT_SPEC: BoardSpec = { rings: 5, sectors: 12 };
+export const DEFAULT_SPEC: BoardSpec = { rings: 6, sectors: 10 };
 
 export type Cell = { readonly r: number; readonly s: number };
 

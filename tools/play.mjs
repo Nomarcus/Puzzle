@@ -73,7 +73,7 @@ await shot("02-fresh-board");
 
 let before = await state();
 check("game started with a full tray", before && before.tray.every((s) => s !== null));
-check("the chosen disc is the one dealt", before?.spec.rings === 5 && before?.spec.sectors === 12,
+check("the chosen disc is the one dealt", before?.spec.rings === 6 && before?.spec.sectors === 10,
   `${before?.spec.rings}x${before?.spec.sectors}`);
 check("starts with one spin", before?.spins === 1, `spins=${before?.spins}`);
 
@@ -201,7 +201,7 @@ await page.locator('[data-action="start"]').click();
 await page.waitForTimeout(450);
 
 const big = await state();
-check("the large disc is 6 rings by 13 sectors", big?.spec.rings === 6 && big?.spec.sectors === 13,
+check("the large disc is 7 rings by 12 sectors", big?.spec.rings === 7 && big?.spec.sectors === 12,
   `${big?.spec.rings}x${big?.spec.sectors}`);
 
 // Geometry differs on this board, so recompute the radius before dropping.

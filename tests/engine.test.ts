@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SPEC, sectorDelta, wrapSector } from "../src/engine/geometry.js";
+import { sectorDelta, wrapSector } from "../src/engine/geometry.js";
+import { DEFAULT_RULES } from "../src/engine/game.js";
 import { dailyNumber, dailySeed, hashSeed, nextRandom } from "../src/engine/rng.js";
 import {
   applyClears,
@@ -27,7 +28,12 @@ import {
   slotPiece,
 } from "../src/engine/game.js";
 
-const spec = DEFAULT_SPEC;
+/**
+ * Pinned rather than taken from DEFAULT_SPEC: these tests are about wrapping
+ * and clearing, and they should not start failing because the shipped disc
+ * changed shape.
+ */
+const spec = { rings: 5, sectors: 12 };
 
 /** Fills every cell of the board except the ones listed, so clears are easy to set up. */
 function boardWithHoles(holes: Array<[number, number]>) {
@@ -150,7 +156,9 @@ describe("clears", () => {
     for (let r = 0; r < spec.rings; r++) {
       board = place(board, pieceById("dot"), r, 7, 4);
     }
-    const clears = findClears(board);
+    // Spokes only pop when the rule is switched on.
+    expect(findClears(board).spokes).toEqual([]);
+    const clears = findClears(board, true);
     expect(clears.spokes).toEqual([7]);
     expect(clears.rings).toEqual([]);
   });
@@ -160,7 +168,7 @@ describe("clears", () => {
     const board = boardWithHoles([[2, 3]]);
     const full = place(board, pieceById("dot"), 2, 3, 5);
 
-    const clears = findClears(full);
+    const clears = findClears(full, true);
     expect(clears.rings.length).toBe(spec.rings);
     expect(clears.spokes.length).toBe(spec.sectors);
 
@@ -175,7 +183,7 @@ describe("clears", () => {
     for (let r = 0; r < spec.rings; r++) board = place(board, pieceById("dot"), r, 7, 4);
     board = place(board, pieceById("dot"), 0, 9, 6);
 
-    const { board: after } = applyClears(board, findClears(board));
+    const { board: after } = applyClears(board, findClears(board, true));
     expect(getCell(after, 0, 7)).toBe(0);
     expect(getCell(after, 0, 9)).toBe(6);
   });
@@ -218,9 +226,9 @@ describe("spinning a ring", () => {
     for (const r of [0, 1, 3, 4]) board = place(board, pieceById("dot"), r, 0, 1);
     board = place(board, pieceById("dot"), 2, 1, 1);
 
-    expect(findClears(board).spokes).toEqual([]);
+    expect(findClears(board, true).spokes).toEqual([]);
     const spun = spinRing(board, 2, -1);
-    expect(findClears(spun).spokes).toEqual([0]);
+    expect(findClears(spun, true).spokes).toEqual([0]);
   });
 });
 
@@ -251,7 +259,7 @@ describe("game reducer", () => {
     const game = createGame({ seed: 1 });
     expect(game.tray.length).toBe(RULES.traySize);
     expect(game.tray.every((slot) => slot !== null)).toBe(true);
-    expect(game.spins).toBe(RULES.startingSpins);
+    expect(game.spins).toBe(game.rules.startingSpins);
     expect(game.over).toBe(false);
   });
 
@@ -420,6 +428,16 @@ describe("variants", () => {
       }
       expect(turns).toBeGreaterThan(3);
     }
+  });
+
+  it("clears rings only, unless spokes are asked for", () => {
+    expect(DEFAULT_RULES.spinSource).toBe("any");
+    let board = createBoard(spec);
+    for (let r = 0; r < spec.rings; r++) board = place(board, pieceById("dot"), r, 3, 1);
+    // A full spoke is inert by default — measurement showed spokes drained the
+    // disc faster than it filled, so rounds never ended.
+    expect(findClears(board).spokes).toEqual([]);
+    expect(findClears(board, true).spokes).toEqual([3]);
   });
 
   it("needs a full ring of the right length on each size", () => {

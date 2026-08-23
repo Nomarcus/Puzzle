@@ -5,7 +5,7 @@
 
 import { DEFAULT_SPEC } from "./engine/geometry.js";
 import { hasPlacement, placements } from "./engine/board.js";
-import { type GameState, RULES, applyMove, createGame, slotPiece } from "./engine/game.js";
+import { type GameState, applyMove, createGame, slotPiece } from "./engine/game.js";
 import { pieceById } from "./engine/pieces.js";
 import { THEMES, type Theme } from "./render/theme.js";
 import { computeLayout, drawBoard, paintBackdrop } from "./render/canvas.js";
@@ -63,7 +63,7 @@ function drawScreen(ctx: CanvasRenderingContext2D, theme: Theme, state: GameStat
   ctx.fillStyle = theme.textSoft;
   ctx.fillText("POÄNG", 27, 92);
 
-  drawSpinMeter(ctx, WIDTH - 26, 62, 2, RULES.maxSpins, theme);
+  drawSpinMeter(ctx, WIDTH - 26, 62, 2, 3, theme);
   ctx.textAlign = "right";
   ctx.font = "700 13px -apple-system, system-ui, sans-serif";
   ctx.fillStyle = theme.textSoft;

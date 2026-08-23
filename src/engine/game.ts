@@ -31,13 +31,36 @@ import { clearScore, placementScore } from "./scoring.js";
 
 export const RULES = {
   traySize: 3,
-  startingSpins: 1,
-  maxSpins: 3,
-  /** Lines you must clear to earn one spin back. */
-  clearsPerSpin: 2,
   /** Number of distinct block colours. Must match the palette in the theme. */
   colours: 8,
 } as const;
+
+/**
+ * The knobs the balance tool turns. They live on the state rather than in a
+ * module constant so tools/economy.ts can sweep them, and so a mode can run
+ * different numbers without a second copy of the engine.
+ */
+export interface RuleSet {
+  readonly startingSpins: number;
+  readonly maxSpins: number;
+  /** Lines you must clear to earn one spin back. */
+  readonly clearsPerSpin: number;
+  /**
+   * Which clears pay for spins. "rings" makes the rare, hard clear the only
+   * source of lives, which is what stops spins from becoming unlimited.
+   */
+  readonly spinSource: "any" | "rings";
+  /** Ends the round after this many pieces. 0 means play until stuck. */
+  readonly pieceLimit: number;
+}
+
+export const DEFAULT_RULES: RuleSet = {
+  startingSpins: 1,
+  maxSpins: 3,
+  clearsPerSpin: 2,
+  spinSource: "any",
+  pieceLimit: 0,
+};
 
 export type GameMode = "daily" | "endless";
 
@@ -64,6 +87,11 @@ export interface GameState {
   readonly mode: GameMode;
   readonly spec: BoardSpec;
   readonly pack: PackId;
+  /** Whether a full spoke pops as well as a full ring. */
+  readonly spokeClears: boolean;
+  readonly rules: RuleSet;
+  /** Whether the deal avoids handing out pieces with nowhere to go. */
+  readonly fairDeal: boolean;
   readonly board: Board;
   readonly tray: readonly (TraySlot | null)[];
   readonly rngState: number;
@@ -108,8 +136,8 @@ function emptyStats(): GameStats {
   };
 }
 
-/** Draws a full tray. Called at the start and whenever all three are used up. */
-function fillTray(rngState: number, spec: BoardSpec, pack: PackId): [tray: TraySlot[], next: number] {
+/** Draws three pieces blind. */
+function drawTray(rngState: number, spec: BoardSpec, pack: PackId): [tray: TraySlot[], next: number] {
   const bag = bagFor(spec.rings, pack);
   const tray: TraySlot[] = [];
   let state = rngState;
@@ -122,26 +150,84 @@ function fillTray(rngState: number, spec: BoardSpec, pack: PackId): [tray: TrayS
   return [tray, state];
 }
 
+/**
+ * Deals a tray, preferring one where every piece has somewhere to go.
+ *
+ * This is what stops a round ending on a coin flip. Blind dealing can hand you
+ * three shapes that fit nowhere, and losing to the deal rather than to your own
+ * play is the complaint this whole game exists to answer.
+ *
+ * It is deliberately not used for the daily. The deal depends on the board, so
+ * two players who played differently would be handed different pieces, and the
+ * daily's entire claim — the same puzzle for everyone — would be false. The
+ * daily protects itself the other way, by vetting its seed up front.
+ */
+function dealTray(
+  rngState: number,
+  spec: BoardSpec,
+  pack: PackId,
+  board: Board,
+  fairDeal: boolean,
+): [tray: TraySlot[], next: number] {
+  if (!fairDeal) return drawTray(rngState, spec, pack);
+
+  let state = rngState;
+  let bestTray: TraySlot[] | null = null;
+  let bestNext = rngState;
+  let bestLive = -1;
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const [tray, next] = drawTray(state, spec, pack);
+    let live = 0;
+    for (const slot of tray) {
+      if (hasPlacement(board, pieceById(slot.pieceId))) live++;
+    }
+
+    if (live > bestLive) {
+      bestLive = live;
+      bestTray = tray;
+      bestNext = next;
+    }
+    // Every piece playable is the best we can ask for; stop looking.
+    if (live === RULES.traySize) break;
+    state = next;
+  }
+
+  return [bestTray!, bestNext];
+}
+
 export function createGame(options: {
   seed: number;
   mode?: GameMode;
   spec?: BoardSpec;
   pack?: PackId;
+  spokeClears?: boolean;
+  rules?: Partial<RuleSet>;
+  fairDeal?: boolean;
 }): GameState {
   const spec = options.spec ?? DEFAULT_SPEC;
   const pack = options.pack ?? DEFAULT_PACK;
-  const [tray, rngState] = fillTray(options.seed, spec, pack);
+  const spokeClears = options.spokeClears ?? false;
+  const rules: RuleSet = { ...DEFAULT_RULES, ...options.rules };
+  const mode = options.mode ?? "endless";
+  // The daily must deal the same pieces to everyone, so it never adapts.
+  const fairDeal = options.fairDeal ?? mode !== "daily";
+  const board = createBoard(spec);
+  const [tray, rngState] = dealTray(options.seed, spec, pack, board, fairDeal);
 
   return {
-    mode: options.mode ?? "endless",
+    mode,
     spec,
     pack,
-    board: createBoard(spec),
+    spokeClears,
+    rules,
+    fairDeal,
+    board,
     tray,
     rngState,
     score: 0,
     combo: 0,
-    spins: RULES.startingSpins,
+    spins: rules.startingSpins,
     clearsTowardSpin: 0,
     over: false,
     stats: emptyStats(),
@@ -173,21 +259,31 @@ export function canPlaceSlot(state: GameState, slot: number, r: number, s: numbe
   return piece ? canPlace(state.board, piece, r, s) : false;
 }
 
-function grantSpins(current: number, progress: number, linesCleared: number): [spins: number, progress: number, gained: number] {
-  if (current >= RULES.maxSpins) return [current, progress, 0];
+function grantSpins(
+  rules: RuleSet,
+  current: number,
+  progress: number,
+  clears: Clears,
+): [spins: number, progress: number, gained: number] {
+  // Counting only rings is what keeps spins scarce: spokes are cheap and
+  // constant, so paying spins for them hands the player unlimited escapes and
+  // the round never ends.
+  const earned =
+    rules.spinSource === "rings" ? clears.rings.length : clears.rings.length + clears.spokes.length;
+  if (earned === 0 || current >= rules.maxSpins) return [current, progress, 0];
 
   let spins = current;
-  let acc = progress + linesCleared;
+  let acc = progress + earned;
   let gained = 0;
 
-  while (acc >= RULES.clearsPerSpin && spins < RULES.maxSpins) {
-    acc -= RULES.clearsPerSpin;
+  while (acc >= rules.clearsPerSpin && spins < rules.maxSpins) {
+    acc -= rules.clearsPerSpin;
     spins++;
     gained++;
   }
   // Banking progress while capped would hand out a free spin the instant one
   // is spent, so hold it just below the threshold instead.
-  if (spins >= RULES.maxSpins) acc = Math.min(acc, RULES.clearsPerSpin - 1);
+  if (spins >= rules.maxSpins) acc = Math.min(acc, rules.clearsPerSpin - 1);
 
   return [spins, acc, gained];
 }
@@ -210,7 +306,7 @@ function applyPlace(
   const placedCells = pieceCells(state.board, piece, move.r, move.s);
   let board = place(state.board, piece, move.r, move.s, slot.colour);
 
-  const clears = findClears(board);
+  const clears = findClears(board, state.spokeClears);
   const cleared = applyClears(board, clears);
   board = cleared.board;
 
@@ -218,10 +314,8 @@ function applyPlace(
   const gained = clearScore(clears, state.combo, false);
   const scoreDelta = placementScore(piece.size) + gained;
   const combo = didClear ? state.combo + 1 : 0;
-  const lineCount = clears.rings.length + clears.spokes.length;
-
   const [spins, clearsTowardSpin, spinsGained] = didClear
-    ? grantSpins(state.spins, state.clearsTowardSpin, lineCount)
+    ? grantSpins(state.rules, state.spins, state.clearsTowardSpin, clears)
     : [state.spins, state.clearsTowardSpin, 0];
 
   // The tray only refills once all three slots are spent — that is what makes
@@ -232,14 +326,18 @@ function applyPlace(
   let rngState = state.rngState;
   let nextTray: (TraySlot | null)[] = tray;
   if (trayRefilled) {
-    const [filled, afterFill] = fillTray(rngState, state.spec, state.pack);
+    const [filled, afterFill] = dealTray(rngState, state.spec, state.pack, board, state.fairDeal);
     nextTray = filled;
     rngState = afterFill;
   }
 
+  const piecesPlaced = state.stats.piecesPlaced + 1;
+  const outOfPieces = state.rules.pieceLimit > 0 && piecesPlaced >= state.rules.pieceLimit;
+  const over = outOfPieces || isGameOver(board, nextTray, spins);
+
   const stats: GameStats = {
     ...state.stats,
-    piecesPlaced: state.stats.piecesPlaced + 1,
+    piecesPlaced,
     cellsPlaced: state.stats.cellsPlaced + piece.size,
     ringsCleared: state.stats.ringsCleared + clears.rings.length,
     spokesCleared: state.stats.spokesCleared + clears.spokes.length,
@@ -247,7 +345,6 @@ function applyPlace(
     bestClear: Math.max(state.stats.bestClear, gained),
   };
 
-  const over = isGameOver(board, nextTray, spins);
 
   return {
     state: {
@@ -285,18 +382,17 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
 
   let board = spinRing(state.board, move.ring, move.dir);
 
-  const clears = findClears(board);
+  const clears = findClears(board, state.spokeClears);
   const cleared = applyClears(board, clears);
   board = cleared.board;
 
   const didClear = hasClears(clears);
   const gained = clearScore(clears, state.combo, true);
   const combo = didClear ? state.combo + 1 : state.combo;
-  const lineCount = clears.rings.length + clears.spokes.length;
 
   const spentSpins = state.spins - 1;
   const [spins, clearsTowardSpin, spinsGained] = didClear
-    ? grantSpins(spentSpins, state.clearsTowardSpin, lineCount)
+    ? grantSpins(state.rules, spentSpins, state.clearsTowardSpin, clears)
     : [spentSpins, state.clearsTowardSpin, 0];
 
   const stats: GameStats = {
@@ -342,7 +438,14 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
 export function replay(
   seed: number,
   moves: readonly Move[],
-  options: { mode?: GameMode; spec?: BoardSpec; pack?: PackId } = {},
+  options: {
+    mode?: GameMode;
+    spec?: BoardSpec;
+    pack?: PackId;
+    spokeClears?: boolean;
+    rules?: Partial<RuleSet>;
+    fairDeal?: boolean;
+  } = {},
 ): GameState | null {
   let state = createGame({ seed, ...options });
   for (const move of moves) {

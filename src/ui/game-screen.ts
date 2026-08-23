@@ -577,7 +577,7 @@ export class GameScreen {
       ctx.scale(beat, beat);
       ctx.translate(-(width - 24), -(headerY - 2));
     }
-    drawSpinMeter(ctx, width - 24, headerY - 2, this.state.spins, RULES.maxSpins, this.theme);
+    drawSpinMeter(ctx, width - 24, headerY - 2, this.state.spins, this.state.rules.maxSpins, this.theme);
     ctx.restore();
 
     ctx.textAlign = "right";

@@ -12,9 +12,14 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "play": "node tools/play.mjs",
-    "shoot": "node tools/shoot.mjs"
+    "shoot": "node tools/shoot.mjs",
+    "balance": "vite-node tools/balance.ts",
+    "experiment": "vite-node tools/experiment.ts",
+    "economy": "vite-node tools/economy.ts",
+    "fairness": "vite-node tools/fairness.ts"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
     "playwright": "^1.62.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",

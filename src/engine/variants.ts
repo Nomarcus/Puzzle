@@ -6,10 +6,9 @@
  * the whole trick: there is never anything new to learn, so variety can be
  * added without the game becoming a mess.
  *
- * Changing the size is not just cosmetic. A ring on the large disc is 13 cells
- * and a spoke is 6, so rings become a distant ambition and spokes the daily
- * bread; on the small disc a ring is 10 and genuinely worth chasing. The same
- * rules produce different games.
+ * Changing the size is not just cosmetic — a ring is as long as the disc has
+ * sectors, so the small disc asks for 8 in a row and the large one for 12. The
+ * same rules produce a quick scramble or a long haul.
  */
 
 import type { BoardSpec } from "./geometry.js";
@@ -25,9 +24,9 @@ export interface BoardSize {
 }
 
 export const SIZES: readonly BoardSize[] = [
-  { id: "small", spec: { rings: 4, sectors: 10 } },
-  { id: "standard", spec: { rings: 5, sectors: 12 } },
-  { id: "large", spec: { rings: 6, sectors: 13 } },
+  { id: "small", spec: { rings: 5, sectors: 8 } },
+  { id: "standard", spec: { rings: 6, sectors: 10 } },
+  { id: "large", spec: { rings: 7, sectors: 12 } },
 ];
 
 /**

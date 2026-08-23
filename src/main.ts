@@ -7,7 +7,8 @@
  */
 
 import { type GameState, createGame, isGameOver } from "./engine/game.js";
-import { dailyNumber, dailySeed, dateKey, hashSeed } from "./engine/rng.js";
+import { dateKey, hashSeed } from "./engine/rng.js";
+import { dailyPuzzle } from "./engine/daily.js";
 import {
   type PackId,
   type SizeId,
@@ -15,7 +16,6 @@ import {
   DEFAULT_SIZE,
   PACKS,
   SIZES,
-  dailyVariant,
   sizeById,
 } from "./engine/variants.js";
 import { THEMES } from "./render/theme.js";
@@ -129,7 +129,7 @@ function stopEverything(): void {
 function bankDaily(state: GameState): void {
   writeJson("daily", {
     date: dateKey(new Date()),
-    puzzle: dailyNumber(new Date()),
+    puzzle: dailyPuzzle(new Date()).number,
     score: state.score,
     ringsCleared: state.stats.ringsCleared,
     bestCombo: state.stats.bestCombo,
@@ -233,8 +233,8 @@ function showMenu(): void {
 
   // Today's disc is worth showing: the daily rotates size and pack, so the
   // player can see at a glance that it is a different puzzle from yesterday.
-  const today = dailyVariant(dailySeed(new Date()));
-  node.append(el("div", "best", variantLabel(today.size, today.pack)));
+  const today = dailyPuzzle(new Date());
+  node.append(el("div", "best", `#${today.number} · ${variantLabel(today.size, today.pack)}`));
 
   const endless = el("button", "big alt", t("endless"));
   endless.dataset.action = "endless";
@@ -364,11 +364,20 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   stopEverything();
   applyThemeChrome();
 
-  const seed = mode === "daily" ? dailySeed(new Date()) : hashSeed(`endless:${Date.now()}`);
-  const setup = mode === "daily" ? dailyVariant(seed) : (variant ?? { size: savedSize(), pack: savedPack() });
+  // The daily's seed is vetted before anyone sees it, so a day nobody could
+  // get a round out of never ships.
+  const puzzle = mode === "daily" ? dailyPuzzle(new Date()) : null;
+  const setup = puzzle
+    ? { size: puzzle.size, pack: puzzle.pack }
+    : (variant ?? { size: savedSize(), pack: savedPack() });
   lastVariant = setup;
 
-  const game = createGame({ seed, mode, spec: sizeById(setup.size).spec, pack: setup.pack });
+  const game = createGame({
+    seed: puzzle ? puzzle.seed : hashSeed(`endless:${Date.now()}`),
+    mode,
+    spec: sizeById(setup.size).spec,
+    pack: setup.pack,
+  });
   screen = new GameScreen(canvas, game, {
     theme,
     haptic,
@@ -384,7 +393,7 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
 
   const result: DailyResult = {
     date: dateKey(new Date()),
-    puzzle: dailyNumber(new Date()),
+    puzzle: dailyPuzzle(new Date()).number,
     score: state.score,
     ringsCleared: state.stats.ringsCleared,
     bestCombo: state.stats.bestCombo,
@@ -400,7 +409,7 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   const stats = el("div", "stats");
   const entries: Array<[string, string]> = [
     [t("rings"), String(state.stats.ringsCleared)],
-    [t("spokes"), String(state.stats.spokesCleared)],
+    [t("pieces"), String(state.stats.piecesPlaced)],
     [t("bestCombo"), `x${state.stats.bestCombo}`],
   ];
   for (const [label, value] of entries) {

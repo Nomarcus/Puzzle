@@ -15,9 +15,9 @@
 import type { Clears } from "./board.js";
 
 export const SCORING = {
-  perCellPlaced: 1,
+  perCellPlaced: 2,
   perSpoke: 60,
-  perRing: 250,
+  perRing: 1000,
   /** Each extra line in the same clear adds this much to the multiplier. */
   simultaneousStep: 0.5,
   /** Each consecutive clearing turn adds this much to the multiplier. */
