@@ -6,6 +6,9 @@ workflows:
     integrations:
       app_store_connect: "Codemagic"
     environment:
+      ios_signing:
+        certificates:
+          - foraldrahjalpen_distribution
       vars:
         BUNDLE_ID: "com.nomarcus.shiftle"
         XCODE_PROJECT: "ios/App/App.xcodeproj"
@@ -32,8 +35,54 @@ workflows:
 
       - name: Set up App Store signing
         script: |
+          set -euo pipefail
+
+          json_first_id() {
+            python3 -c 'import json, sys
+          value = json.load(sys.stdin)
+          def ids(node):
+              if isinstance(node, dict):
+                  if isinstance(node.get("id"), str):
+                      yield node["id"]
+                  for child in node.values():
+                      yield from ids(child)
+              elif isinstance(node, list):
+                  for child in node:
+                      yield from ids(child)
+          print(next(ids(value), ""))'
+          }
+
           keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE
+
+          BUNDLE_RESOURCE_ID="$(
+            app-store-connect bundle-ids list \
+              --bundle-id-identifier "$BUNDLE_ID" \
+              --strict-match-identifier \
+              --json | json_first_id
+          )"
+          if [ -z "$BUNDLE_RESOURCE_ID" ]; then
+            BUNDLE_RESOURCE_ID="$(
+              app-store-connect bundle-ids create "$BUNDLE_ID" \
+                --name "Shiftle" \
+                --platform IOS \
+                --json | json_first_id
+            )"
+          fi
+
+          CERTIFICATE_RESOURCE_ID="$(
+            app-store-connect certificates list \
+              --profile-type IOS_APP_STORE \
+              --json | json_first_id
+          )"
+
+          app-store-connect profiles create "$BUNDLE_RESOURCE_ID" \
+            --certificate-ids "$CERTIFICATE_RESOURCE_ID" \
+            --type IOS_APP_STORE \
+            --name "shiftle_appstore_profile" \
+            --save || \
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE
+
           keychain add-certificates
           xcode-project use-profiles
 
