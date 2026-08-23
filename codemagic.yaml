@@ -4,8 +4,8 @@ workflows:
     max_build_duration: 60
     instance_type: linux_x2
     environment:
-      android_signing:
-        - shiftle_upload
+      groups:
+        - shiftle_android_signing
       vars:
         PACKAGE_NAME: "com.nomarcus.shiftle"
       node: 22
@@ -31,10 +31,18 @@ workflows:
           npx @capacitor/assets generate --android
           npm run android:sync
 
-      - name: Lock Android to portrait
+      - name: Configure Android release signing
         script: |
+          mkdir -p "$CM_BUILD_DIR/.shiftle-signing"
+          echo "$CM_SIGNING_BUNDLE_BASE64" | base64 --decode > /tmp/shiftle-signing.zip
+          unzip -q /tmp/shiftle-signing.zip -d "$CM_BUILD_DIR/.shiftle-signing"
+
           python3 - <<'PY'
+          import json
           from pathlib import Path
+
+          signing_dir = Path.cwd() / ".shiftle-signing"
+          password = (signing_dir / "keystore-password.txt").read_text().strip()
           path = Path("android/app/src/main/AndroidManifest.xml")
           text = path.read_text()
           text = text.replace(
@@ -42,6 +50,21 @@ workflows:
               'android:exported="true" android:screenOrientation="portrait">',
           )
           path.write_text(text)
+
+          gradle = Path("android/app/build.gradle")
+          text = gradle.read_text()
+          signing = f'''    signingConfigs {{
+                  release {{
+                      storeFile file({json.dumps(str(signing_dir / "shiftle-upload.jks"))})
+                      storePassword {json.dumps(password)}
+                      keyAlias "shiftle_upload"
+                      keyPassword {json.dumps(password)}
+                  }}
+              }}
+          '''
+          text = text.replace("    buildTypes {", signing + "    buildTypes {")
+          text = text.replace("        release {", "        release {\n            signingConfig signingConfigs.release")
+          gradle.write_text(text)
           PY
 
       - name: Set Android build number
