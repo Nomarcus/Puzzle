@@ -45,14 +45,14 @@ function candy(base: string, light: string, dark: string): BlockColour {
  * hue alone.
  */
 const CANDY_BLOCKS: readonly BlockColour[] = [
-  candy("#FF4D5E", "#FF8A95", "#D62A3D"), // 1 strawberry
-  candy("#FF8A1F", "#FFB264", "#D96706"), // 2 orange
-  candy("#FFC61A", "#FFDD70", "#D9A000"), // 3 lemon
-  candy("#5FCC28", "#93E066", "#3EA111"), // 4 apple
-  candy("#00C3BE", "#5BDCD8", "#009B97", ), // 5 mint
-  candy("#2E8BFF", "#77B4FF", "#1568D6"), // 6 blueberry
-  candy("#9B5DE5", "#BE93F0", "#7638C4"), // 7 grape
-  candy("#FF5FA2", "#FF97C2", "#DB3A7E"), // 8 bubblegum
+  candy("#FF2D42", "#FF7080", "#D40A22"), // 1 strawberry
+  candy("#FF7A00", "#FFA63D", "#D65A00"), // 2 orange
+  candy("#FFC400", "#FFDC4D", "#DB9E00"), // 3 lemon
+  candy("#4FD31A", "#87E95C", "#35A408"), // 4 apple
+  candy("#00CFC9", "#47E5E0", "#00A39E"), // 5 mint
+  candy("#0A7CFF", "#55A8FF", "#005FD6"), // 6 blueberry
+  candy("#A03CF0", "#C47EF7", "#7A1FC4"), // 7 grape
+  candy("#FF3D93", "#FF7DB5", "#DB1C71"), // 8 bubblegum
 ];
 
 /** Bright sky. Reads instantly as a mobile puzzle game. */
@@ -62,8 +62,8 @@ export const SKY: Theme = {
   backdrop: ["#63CDFF", "#2E9BE8"],
   plate: "#F3FAFF",
   plateEdge: "#C2E4F7",
-  empty: "#DCEBF5",
-  emptyEdge: "#C3DCEC",
+  empty: "#C9DFEE",
+  emptyEdge: "#AECEE2",
   blockOutline: "rgba(28, 52, 74, 0.20)",
   text: "#12384F",
   textSoft: "#5B8AA6",
@@ -77,8 +77,8 @@ export const CREAM: Theme = {
   backdrop: ["#FFE9BF", "#FFC377"],
   plate: "#FFFBF0",
   plateEdge: "#F0DCB8",
-  empty: "#EFE0C6",
-  emptyEdge: "#DCC8A6",
+  empty: "#E5D2B0",
+  emptyEdge: "#CDB58E",
   blockOutline: "rgba(90, 60, 20, 0.20)",
   text: "#5A3B14",
   textSoft: "#A5824F",
@@ -92,8 +92,8 @@ export const MINT: Theme = {
   backdrop: ["#B8F2D8", "#63D6A8"],
   plate: "#F4FFFA",
   plateEdge: "#BCE8D3",
-  empty: "#D9EFE4",
-  emptyEdge: "#BADCC9",
+  empty: "#C6E5D6",
+  emptyEdge: "#A8D0BC",
   blockOutline: "rgba(20, 66, 48, 0.20)",
   text: "#14513A",
   textSoft: "#579B7C",
