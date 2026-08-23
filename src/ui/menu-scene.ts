@@ -11,24 +11,20 @@
 import { DEFAULT_SPEC } from "../engine/geometry.js";
 import { type Board, createBoard } from "../engine/board.js";
 import { cellIndex } from "../engine/geometry.js";
-import { computeLayout, drawBoard, paintBackdrop, fitCanvas, withRingOffset } from "../render/canvas.js";
+import { computeLayout, drawBoard, fitCanvas, withRingOffset } from "../render/canvas.js";
 import type { Theme } from "../render/theme.js";
-import { drawCandySquare } from "../render/candy.js";
+import {
+  type Drifter,
+  drawBackdropSheet,
+  drawDrifters,
+  makeBackdropSheet,
+  makeDrifters,
+} from "../render/backdrop.js";
 
 const SPEC = DEFAULT_SPEC;
 
 /** How fast each ring turns, in radians per second. Alternating signs. */
 const RING_SPEED = [0.16, -0.11, 0.075, -0.05, 0.032];
-
-interface Drifter {
-  x: number;
-  y: number;
-  size: number;
-  colour: number;
-  angle: number;
-  spin: number;
-  driftY: number;
-}
 
 /**
  * A rainbow wheel with a few gaps punched out. The gaps stop it reading as a
@@ -45,39 +41,13 @@ function decorativeBoard(): Board {
   return board;
 }
 
-function makeDrifters(width: number, height: number): Drifter[] {
-  const drifters: Drifter[] = [];
-  // Fixed arrangement rather than random, so the menu looks the same every
-  // time the player opens it.
-  const spots: Array<[number, number, number, number]> = [
-    [0.1, 0.12, 30, 3],
-    [0.88, 0.18, 24, 6],
-    [0.16, 0.72, 26, 8],
-    [0.84, 0.66, 32, 4],
-    [0.5, 0.06, 20, 1],
-    [0.08, 0.44, 18, 2],
-    [0.92, 0.42, 22, 7],
-  ];
-  for (const [fx, fy, size, colour] of spots) {
-    drifters.push({
-      x: width * fx,
-      y: height * fy,
-      size,
-      colour,
-      angle: fx * 6 + fy * 3,
-      spin: 0.25 + fx * 0.4,
-      driftY: 0,
-    });
-  }
-  return drifters;
-}
-
 export class MenuScene {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly board = decorativeBoard();
   private theme: Theme;
   private drifters: Drifter[] = [];
+  private sheet: HTMLCanvasElement | null = null;
   private width = 0;
   private height = 0;
   private frame = 0;
@@ -95,11 +65,31 @@ export class MenuScene {
     const size = fitCanvas(this.canvas, Math.min(window.devicePixelRatio || 1, 3));
     this.width = size.width;
     this.height = size.height;
-    this.drifters = makeDrifters(this.width, this.height);
+    this.sheet = makeBackdropSheet(this.width, this.height, this.theme, {
+      x: this.width / 2,
+      y: this.height * 0.3,
+      radius: this.discRadius(),
+    });
+    // The disc is the logo and the column underneath is the menu itself.
+    // Confetti behind either just makes them harder to read.
+    const column = Math.min(this.width, 380);
+    this.drifters = makeDrifters(
+      this.width,
+      this.height,
+      { x: this.width / 2, y: this.height * 0.3, radius: this.discRadius() * 1.12 },
+      {
+        x: (this.width - column) / 2,
+        y: this.height * 0.58,
+        width: column,
+        height: this.height * 0.42,
+      },
+    );
   }
 
   setTheme(theme: Theme): void {
     this.theme = theme;
+    // The background has the theme's colours baked into it.
+    this.measure();
   }
 
   start(): void {
@@ -109,7 +99,7 @@ export class MenuScene {
       const dt = Math.min(now - this.last, 64) / 1000;
       this.last = now;
       this.clock += dt;
-      this.render(dt);
+      this.render();
       this.frame = requestAnimationFrame(tick);
     };
     this.frame = requestAnimationFrame(tick);
@@ -129,24 +119,13 @@ export class MenuScene {
     return Math.min(this.width * 0.4, this.height * 0.21);
   }
 
-  private render(dt: number): void {
+  private render(): void {
     const ctx = this.ctx;
-    paintBackdrop(ctx, this.width, this.height, this.theme);
+    const scene = { width: this.width, height: this.height, clock: this.clock };
 
-    for (const drifter of this.drifters) {
-      drifter.angle += drifter.spin * dt;
-      drifter.driftY = Math.sin(this.clock * 0.6 + drifter.x * 0.01) * 12;
-      drawCandySquare(
-        ctx,
-        drifter.x,
-        drifter.y + drifter.driftY,
-        drifter.size,
-        drifter.angle,
-        drifter.colour,
-        this.theme,
-        0.42,
-      );
-    }
+    drawBackdropSheet(ctx, this.sheet, this.width, this.height, this.theme);
+    // Bolder here than in a round: the menu has nothing else to look at.
+    drawDrifters(ctx, this.drifters, this.theme, { ...scene, alpha: 0.46 });
 
     let layout = computeLayout(SPEC, this.width / 2, this.height * 0.3, this.discRadius());
     for (let r = 0; r < SPEC.rings; r++) {

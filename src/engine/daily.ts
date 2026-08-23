@@ -14,7 +14,7 @@
 
 import { playOut } from "./bot.js";
 import { createGame } from "./game.js";
-import { dailyNumber, dailySeed, hashSeed } from "./rng.js";
+import { dateKey, dailyNumber, dailySeed, hashSeed } from "./rng.js";
 import { type PackId, type SizeId, dailyVariant, sizeById } from "./variants.js";
 
 /**
@@ -40,7 +40,25 @@ export interface DailyPuzzle {
   readonly botPlacements: number;
 }
 
+/**
+ * Vetting a day costs up to six full bot playouts, and the answer only ever
+ * changes at midnight UTC. The result screen asks for today's puzzle at exactly
+ * the wrong moment — while the player is watching an animation — so the work is
+ * done once per day per launch and remembered.
+ */
+const vetted = new Map<string, DailyPuzzle>();
+
 export function dailyPuzzle(date: Date): DailyPuzzle {
+  const key = dateKey(date);
+  const known = vetted.get(key);
+  if (known) return known;
+
+  const puzzle = vetDaily(date);
+  vetted.set(key, puzzle);
+  return puzzle;
+}
+
+function vetDaily(date: Date): DailyPuzzle {
   const base = dailySeed(date);
   // The disc and pack come from the date itself, so vetting only ever changes
   // which pieces turn up — never what today's board looks like.

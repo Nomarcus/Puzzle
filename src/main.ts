@@ -449,8 +449,15 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   const card = shareCardFor(state, mode, result.puzzle);
 
   // Show the picture itself rather than a summary of it, so the player can see
-  // exactly what they are about to post.
-  const preview = renderShareDataUrl(state.board, theme, card);
+  // exactly what they are about to post. Drawing it is the only part of this
+  // screen that can fail, and failing here would leave the player staring at
+  // the empty overlay we just put up — so it falls back to text instead.
+  let preview: string | null = null;
+  try {
+    preview = renderShareDataUrl(state.board, theme, card);
+  } catch (error) {
+    console.error("Shiftle: could not draw the share card", error);
+  }
   if (preview) {
     const image = el("img", "card-preview");
     image.src = preview;

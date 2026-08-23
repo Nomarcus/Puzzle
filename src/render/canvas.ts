@@ -168,69 +168,76 @@ export function drawBlock(
   if (width <= 0) return;
 
   ctx.save();
-  // Compose with whatever the caller already set — globalAlpha is absolute, so
-  // assigning here would wipe out a fade applied further up the stack.
-  ctx.globalAlpha *= alpha;
+  try {
+    // Compose with whatever the caller already set — globalAlpha is absolute,
+    // so assigning here would wipe out a fade applied further up the stack.
+    ctx.globalAlpha *= alpha;
 
-  annularSectorPath(ctx, g);
-  ctx.save();
-  ctx.clip();
+    annularSectorPath(ctx, g);
+    ctx.save();
+    try {
+      ctx.clip();
 
-  ctx.fillStyle = colour.base;
-  ctx.fillRect(g.cx - g.outerRadius, g.cy - g.outerRadius, g.outerRadius * 2, g.outerRadius * 2);
+      ctx.fillStyle = colour.base;
+      ctx.fillRect(g.cx - g.outerRadius, g.cy - g.outerRadius, g.outerRadius * 2, g.outerRadius * 2);
 
-  // Lit edge facing out, shaded edge facing the hub — the bevel that makes it
-  // look like a sweet rather than a flat tile.
-  const bandOut = width * 0.3;
-  ctx.strokeStyle = colour.light;
-  ctx.lineWidth = bandOut;
-  ctx.beginPath();
-  ctx.arc(g.cx, g.cy, ro - bandOut / 2, g.startAngle - 0.2, g.endAngle + 0.2);
-  ctx.stroke();
+      // Lit edge facing out, shaded edge facing the hub — the bevel that makes
+      // it look like a sweet rather than a flat tile.
+      const bandOut = width * 0.3;
+      ctx.strokeStyle = colour.light;
+      ctx.lineWidth = bandOut;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ro - bandOut / 2, g.startAngle - 0.2, g.endAngle + 0.2);
+      ctx.stroke();
 
-  const bandIn = width * 0.26;
-  ctx.strokeStyle = colour.dark;
-  ctx.lineWidth = bandIn;
-  ctx.beginPath();
-  ctx.arc(g.cx, g.cy, ri + bandIn / 2, g.startAngle - 0.2, g.endAngle + 0.2);
-  ctx.stroke();
+      const bandIn = width * 0.26;
+      ctx.strokeStyle = colour.dark;
+      ctx.lineWidth = bandIn;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ri + bandIn / 2, g.startAngle - 0.2, g.endAngle + 0.2);
+      ctx.stroke();
 
-  // Narrow specular streak.
-  const gloss = width * 0.1;
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
-  ctx.lineWidth = gloss;
-  ctx.beginPath();
-  ctx.arc(g.cx, g.cy, ro - bandOut * 0.72, g.startAngle - 0.2, g.endAngle + 0.2);
-  ctx.stroke();
+      // Narrow specular streak.
+      const gloss = width * 0.1;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+      ctx.lineWidth = gloss;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ro - bandOut * 0.72, g.startAngle - 0.2, g.endAngle + 0.2);
+      ctx.stroke();
 
-  if (striped) {
-    // A cross of bright bands: one around the ring, one across it. The mark
-    // shows the two lines the block will take when it goes off.
-    const mid = (ri + ro) / 2;
-    const midAngle = (g.startAngle + g.endAngle) / 2;
+      if (striped) {
+        // A cross of bright bands: one around the ring, one across it. The mark
+        // shows the two lines the block will take when it goes off.
+        const mid = (ri + ro) / 2;
+        const midAngle = (g.startAngle + g.endAngle) / 2;
 
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-    ctx.lineWidth = width * 0.2;
-    ctx.lineCap = "butt";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+        ctx.lineWidth = width * 0.2;
+        ctx.lineCap = "butt";
 
-    ctx.beginPath();
-    ctx.arc(g.cx, g.cy, mid, g.startAngle - 0.3, g.endAngle + 0.3);
+        ctx.beginPath();
+        ctx.arc(g.cx, g.cy, mid, g.startAngle - 0.3, g.endAngle + 0.3);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(g.cx + (ri - width) * Math.cos(midAngle), g.cy + (ri - width) * Math.sin(midAngle));
+        ctx.lineTo(g.cx + (ro + width) * Math.cos(midAngle), g.cy + (ro + width) * Math.sin(midAngle));
+        ctx.stroke();
+      }
+    } finally {
+      ctx.restore();
+    }
+
+    annularSectorPath(ctx, g);
+    ctx.strokeStyle = theme.blockOutline;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(g.cx + (ri - width) * Math.cos(midAngle), g.cy + (ri - width) * Math.sin(midAngle));
-    ctx.lineTo(g.cx + (ro + width) * Math.cos(midAngle), g.cy + (ro + width) * Math.sin(midAngle));
-    ctx.stroke();
+  } finally {
+    // Balanced whatever happens inside. An unbalanced save is not a cosmetic
+    // problem: the clip and the transform it holds stay alive into the next
+    // frame, and they compound until nothing lands on screen at all.
+    ctx.restore();
   }
-
-  ctx.restore();
-
-  annularSectorPath(ctx, g);
-  ctx.strokeStyle = theme.blockOutline;
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  ctx.restore();
 }
 
 /** The dish the puzzle sits on, plus the hub in the middle. */

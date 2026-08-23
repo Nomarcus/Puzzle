@@ -25,28 +25,34 @@ export function drawCandySquare(
   const radius = size * 0.28;
 
   ctx.save();
-  ctx.globalAlpha *= alpha;
-  ctx.translate(x, y);
-  ctx.rotate(angle);
+  try {
+    ctx.globalAlpha *= alpha;
+    ctx.translate(x, y);
+    ctx.rotate(angle);
 
-  ctx.beginPath();
-  ctx.moveTo(-half + radius, -half);
-  ctx.arcTo(half, -half, half, half, radius);
-  ctx.arcTo(half, half, -half, half, radius);
-  ctx.arcTo(-half, half, -half, -half, radius);
-  ctx.arcTo(-half, -half, half, -half, radius);
-  ctx.closePath();
+    ctx.beginPath();
+    ctx.moveTo(-half + radius, -half);
+    ctx.arcTo(half, -half, half, half, radius);
+    ctx.arcTo(half, half, -half, half, radius);
+    ctx.arcTo(-half, half, -half, -half, radius);
+    ctx.arcTo(-half, -half, half, -half, radius);
+    ctx.closePath();
 
-  ctx.fillStyle = colour.base;
-  ctx.fill();
+    ctx.fillStyle = colour.base;
+    ctx.fill();
 
-  ctx.save();
-  ctx.clip();
-  ctx.fillStyle = colour.light;
-  ctx.fillRect(-half, -half, size, size * 0.3);
-  ctx.fillStyle = colour.dark;
-  ctx.fillRect(-half, half - size * 0.24, size, size * 0.24);
-  ctx.restore();
-
-  ctx.restore();
+    ctx.save();
+    try {
+      ctx.clip();
+      ctx.fillStyle = colour.light;
+      ctx.fillRect(-half, -half, size, size * 0.3);
+      ctx.fillStyle = colour.dark;
+      ctx.fillRect(-half, half - size * 0.24, size, size * 0.24);
+    } finally {
+      ctx.restore();
+    }
+  } finally {
+    // Never leave a rotation or a clip behind for the next frame to inherit.
+    ctx.restore();
+  }
 }

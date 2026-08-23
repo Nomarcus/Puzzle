@@ -808,3 +808,94 @@ describe("striped blocks", () => {
     expect(count(99)).toEqual(count(99));
   });
 });
+
+/**
+ * The bug behind the white screen Marcus hit: spin twice and the page goes
+ * blank.
+ *
+ * The renderer used to recover the colour of a cleared cell by reading the
+ * board from before the move. That is right for a placement and wrong for a
+ * spin — the disc has already turned, so those coordinates hold somebody
+ * else's block or nothing at all. When it read nothing it fell back to
+ * `events.colour`, which is 0 for a spin, and colour 0 is not a colour: it
+ * indexed off the end of the palette, threw mid-draw, and left the canvas with
+ * an unbalanced save whose transform compounded frame after frame until the
+ * board was being drawn off screen.
+ *
+ * So the engine now reports the colour it wiped, and these pin that it always
+ * reports a real one.
+ */
+describe("cleared cells carry their own colour", () => {
+  it("reports the colour that was standing there", () => {
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 5);
+
+    const { cells } = applyClears(board, findClears(board));
+    expect(cells.length).toBe(spec.sectors);
+    expect(cells.every((cell) => cell.colour === 5)).toBe(true);
+  });
+
+  it("never reports an empty cell as cleared", () => {
+    // A stripe widens a clear onto a spoke that is not itself full, so most of
+    // that spoke is empty space. Empty space has no colour and nothing to burst.
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 2);
+    board.cells[cellIndex(spec, 0, 5)] = 2 | STRIPE_FLAG;
+    board = place(board, pieceById("dot"), 3, 5, 7);
+
+    const fired = detonate(board, findClears(board));
+    expect(fired.clears.spokes).toContain(5);
+
+    const { cells } = applyClears(board, fired.clears, fired.sweep);
+    expect(cells.every((cell) => cell.colour > 0)).toBe(true);
+    // Ring 0 plus the one block further down the spoke the stripe reached.
+    expect(cells.length).toBe(spec.sectors + 1);
+  });
+
+  it("a clear triggered by a spin still names real colours", () => {
+    // Spoke 0 is one cell short: ring 2 is empty there, and the block that
+    // fills it is sitting one sector round. Spinning ring 2 by +1 carries it
+    // into sector 0 and the spoke pops.
+    //
+    // This is the exact shape of the bug. At those coordinates the pre-move
+    // board held nothing, so recovering the colour from it gave 0 — and 0 is
+    // not a colour.
+    const cells = new Uint8Array(spec.rings * spec.sectors);
+    for (let r = 0; r < spec.rings; r++) {
+      if (r !== 2) cells[cellIndex(spec, r, 0)] = r + 1;
+    }
+    cells[cellIndex(spec, 2, spec.sectors - 1)] = 7;
+
+    const state = createGame({ seed: 7, spec });
+    const before = { ...state, board: { spec, cells }, spins: 2 };
+    expect(getCell(before.board, 2, 0)).toBe(0);
+
+    const result = applyMove(before, { type: "spin", ring: 2, dir: 1 });
+    expect(result).not.toBeNull();
+    expect(result!.events.clears.spokes).toContain(0);
+    expect(result!.events.clearedCells.length).toBe(spec.rings);
+    // The colour that moved in must be reported, not the nothing that was
+    // there before the disc turned.
+    expect(result!.events.clearedCells.every((cell) => cell.colour > 0)).toBe(true);
+    expect(result!.events.clearedCells.find((cell) => cell.r === 2)!.colour).toBe(7);
+  });
+
+  it("every clear a full bot game produces names a drawable colour", () => {
+    // The broad net: whatever the bot stumbles into over a long run, no move
+    // may ever hand the renderer a colour it cannot look up.
+    for (const seed of [3, 17, 91, 404]) {
+      let state = createGame({ seed, spec });
+      for (let turn = 0; turn < 220 && !state.over; turn++) {
+        const move = chooseMove(state);
+        if (!move) break;
+        const result = applyMove(state, move);
+        if (!result) break;
+        for (const cell of result.events.clearedCells) {
+          expect(cell.colour).toBeGreaterThan(0);
+          expect(cell.colour).toBeLessThanOrEqual(RULES.colours);
+        }
+        state = result.state;
+      }
+    }
+  });
+});

@@ -226,22 +226,36 @@ export function detonate(board: Board, base: Clears): Detonation {
   };
 }
 
+export interface ClearedCell extends Cell {
+  /**
+   * The colour that was standing there. Reported rather than left for the
+   * renderer to recover: after a spin the board has already moved, so the only
+   * place this can be read correctly is here, before the cell is wiped.
+   */
+  readonly colour: number;
+}
+
 export function applyClears(
   board: Board,
   clears: Clears,
   sweep = isBullseye(clears),
-): { board: Board; cells: Cell[] } {
+): { board: Board; cells: ClearedCell[] } {
   if (!hasClears(clears)) return { board, cells: [] };
 
   const next = cloneBoard(board);
   const seen = new Set<number>();
-  const cells: Cell[] = [];
+  const cells: ClearedCell[] = [];
 
   const take = (r: number, s: number) => {
     const index = cellIndex(board.spec, r, s);
     if (seen.has(index)) return;
     seen.add(index);
-    cells.push({ r, s });
+    // A stripe widens a clear onto lines that are not themselves full, so some
+    // of what it takes is empty space. Nothing happens to an empty cell and
+    // there is nothing there to burst, so it is not a cleared cell.
+    const value = colourOf(board.cells[index]!);
+    if (value === 0) return;
+    cells.push({ r, s, colour: value });
     next.cells[index] = 0;
   };
 

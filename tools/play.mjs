@@ -309,8 +309,10 @@ await shot("09-stuck");
 // Now with no spins left: the board is dead and the card follows after a beat.
 await page.evaluate(() => window.__shiftle.jam(0));
 await page.waitForTimeout(300);
-await shot("10-death-beat");
+// Asked before the screenshot: capturing a retina page costs the best part of
+// a second, which is most of the beat we are trying to measure.
 check("the dead board is held on screen before the card", !(await page.locator(".overlay").isVisible()));
+await shot("10-death-beat");
 
 await page.waitForTimeout(1400);
 check("the result card arrives after the beat", await page.locator(".overlay").isVisible());

@@ -14,6 +14,7 @@ import { type BoardSpec, type Cell, DEFAULT_SPEC } from "./geometry.js";
 import {
   type Board,
   type Clears,
+  type ClearedCell,
   applyClears,
   canPlace,
   createBoard,
@@ -138,7 +139,8 @@ export interface MoveEvents {
   readonly colour: number;
   readonly spin: { ring: number; dir: SpinDirection } | null;
   readonly clears: Clears;
-  readonly clearedCells: Cell[];
+  /** What went, and what colour it was. The renderer bursts exactly these. */
+  readonly clearedCells: ClearedCell[];
   readonly scoreDelta: number;
   readonly combo: number;
   readonly spinsGained: number;
@@ -381,7 +383,7 @@ function grantPushes(rules: RuleSet, current: number, pure: number, bullseye: bo
 interface Resolution {
   readonly board: Board;
   readonly clears: Clears;
-  readonly clearedCells: Cell[];
+  readonly clearedCells: ClearedCell[];
   readonly pure: number;
   readonly bullseye: boolean;
   readonly stripes: number;

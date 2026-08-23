@@ -36,6 +36,7 @@ puzzle. One attempt per day.
 |---|---|
 | Game engine | Done. Pure, deterministic, 37 unit tests. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
+| iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Tuned against bot measurements (`npm run balance`). |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
@@ -66,9 +67,11 @@ npm run ios:sync      # vite build + cap sync ios
 npx cap open ios      # or: open ios/App/App.xcodeproj
 ```
 
-The compiled web bundle is committed at `ios/App/App/public/`, so the Xcode
-project will build even without running the Node steps. Run `npm run ios:sync`
-whenever the web source changes.
+`npm run ios:sync` is not optional. Capacitor's own `ios/.gitignore` excludes
+`ios/App/App/public/`, which is where the compiled web bundle lands, so a fresh
+clone has an empty one and the app would launch to a blank screen. Run it after
+cloning and again whenever the web source changes. (The Codemagic workflow
+already does both steps, so CI builds are unaffected.)
 
 In Xcode, on the **App** target:
 

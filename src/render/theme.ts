@@ -107,6 +107,15 @@ export const MINT: Theme = {
 
 export const THEMES: readonly Theme[] = [SKY, CREAM, MINT];
 
+/**
+ * Colour ids run 1..8 and every caller is supposed to hold one. The wrap is
+ * written to survive a caller that does not: a plain modulo turns id 0 into
+ * index -1, which is `undefined`, and the first property read off it takes the
+ * whole frame down mid-draw. Painting the wrong sweet is a blemish; throwing
+ * here left the canvas in a state the next frame inherited.
+ */
 export function blockColour(theme: Theme, colourId: number): BlockColour {
-  return theme.blocks[(colourId - 1) % theme.blocks.length]!;
+  const n = theme.blocks.length;
+  const index = (((Math.trunc(colourId) - 1) % n) + n) % n;
+  return theme.blocks[index]!;
 }

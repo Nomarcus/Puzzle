@@ -8,7 +8,7 @@
  */
 
 import { type Cell } from "../engine/geometry.js";
-import { colourOf, getCell, hasPlacement } from "../engine/board.js";
+import { colourOf, getCell, hasPlacement, isStripedValue } from "../engine/board.js";
 import {
   type GameState,
   type Move,
@@ -45,11 +45,17 @@ import {
   drawBoard,
   drawGhost,
   fitCanvas,
-  paintBackdrop,
   ringWidth,
   withRingOffset,
   withSpokeOffset,
 } from "../render/canvas.js";
+import {
+  type Drifter,
+  drawBackdropSheet,
+  drawDrifters,
+  makeBackdropSheet,
+  makeDrifters,
+} from "../render/backdrop.js";
 import { drawPushMeter, drawSpinMeter } from "../render/icons.js";
 import { type Theme, blockColour } from "../render/theme.js";
 import { t } from "./strings.js";
@@ -105,6 +111,15 @@ type Pointer =
 interface ScreenLayout {
   readonly width: number;
   readonly height: number;
+  /** Kept so a frame can restore the base transform without re-measuring. */
+  readonly dpr: number;
+  /**
+   * The band the game itself occupies. The canvas fills the whole window so
+   * the background can too, but on an iPad a board stretched to the full width
+   * would be absurd, so the playable column is capped and centred.
+   */
+  readonly contentLeft: number;
+  readonly contentWidth: number;
   readonly board: BoardLayout;
   readonly boardRadius: number;
   readonly trayTop: number;
@@ -127,6 +142,11 @@ export class GameScreen {
   private frame = 0;
   private lastTime = 0;
   private displayScore = 0;
+  /** Seconds since the screen opened. Only the background reads it. */
+  private clock = 0;
+  private drifters: Drifter[] = [];
+  /** The static background, baked once per size and theme. */
+  private sheet: HTMLCanvasElement | null = null;
   /** Which tray slots still have somewhere to go. Recomputed after every move. */
   private placeable: boolean[] = [];
   private stuck = false;
@@ -184,12 +204,20 @@ export class GameScreen {
     const tick = (now: number) => {
       const dt = Math.min(now - this.lastTime, 64);
       this.lastTime = now;
+      this.clock += dt / 1000;
       this.effects = stepEffects(this.effects, dt);
       this.particles = stepParticles(this.particles, dt);
       this.animateScore(dt);
       if (this.diedAt && !this.announced && now - this.diedAt > DEATH_BEAT) {
         this.announced = true;
-        this.options.onGameOver?.(this.state);
+        // The result screen is somebody else's code. A throw in it must not
+        // take the animation loop with it: that would strand the player on
+        // whatever half-built screen the throw left behind.
+        try {
+          this.options.onGameOver?.(this.state);
+        } catch (error) {
+          console.error("Shiftle: the result screen failed", error);
+        }
       }
 
       // The frame is scheduled whatever happens. Painting is cosmetic, and a
@@ -209,12 +237,13 @@ export class GameScreen {
   private paintFailed = false;
 
   private reportPaintFailure(error: unknown): void {
-    if (this.paintFailed) return;
-    this.paintFailed = true;
-    // Drop the transient state most likely to be the cause, so the next frame
-    // has a chance of painting a usable board.
+    // Dropped on every failure, not just the first: the effects are the most
+    // likely cause, and leaving them in place after the second one lets a bad
+    // frame repeat forever. Only the logging is rationed.
     this.particles = [];
     this.effects = [];
+    if (this.paintFailed) return;
+    this.paintFailed = true;
     console.error("Shiftle: paint failed, dropping effects", error);
   }
 
@@ -225,6 +254,8 @@ export class GameScreen {
 
   setTheme(theme: Theme): void {
     this.theme = theme;
+    // The background has the theme's colours baked into it.
+    this.measure();
   }
 
   /**
@@ -265,10 +296,23 @@ export class GameScreen {
   // ------------------------------------------------------------------ layout
 
   private measure(): void {
-    const { width, height } = fitCanvas(this.canvas, Math.min(window.devicePixelRatio || 1, 3));
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const { width, height } = fitCanvas(this.canvas, dpr);
 
     const safeTop = readSafeInset("--safe-top");
     const safeBottom = readSafeInset("--safe-bottom");
+
+    // The playable column. A tablet is far wider than anyone wants to drag
+    // across, so the game is capped and centred — but capped generously, since
+    // the same disc marooned in a sea of empty blue looks worse than a large
+    // one. Everything else on this screen is measured from this band, not from
+    // the window, which is what keeps the tablet layout from spreading out to
+    // the corners.
+    const contentWidth = Math.min(width, 680);
+    const contentLeft = (width - contentWidth) / 2;
+    // Furniture grows with the column so a tablet gets a bigger game rather
+    // than phone-sized furniture floating in it.
+    const scale = Math.min(1.3, contentWidth / 390);
 
     // Row one is the quit and restart buttons (DOM, in the corners); the
     // score and spin meter sit on row two.
@@ -278,20 +322,19 @@ export class GameScreen {
     const headerBottom = headerY + 82;
     // A generous tray: these pieces are the thing you grab, so they get room
     // to be drawn fat rather than dainty.
-    const trayHeight = 168;
+    const trayHeight = Math.round(168 * scale);
     const trayTop = height - safeBottom - trayHeight - 14;
 
-    // The disc is limited by the width of the phone, not its height.
-    const boardRadius = Math.min(width * 0.485, (trayTop - headerBottom) / 2 - 10);
+    const boardRadius = Math.min(contentWidth * 0.485, (trayTop - headerBottom) / 2 - 10);
     const cx = width / 2;
     const cy = headerBottom + (trayTop - headerBottom) / 2;
 
-    const gutter = 16;
-    const slotWidth = (width - gutter * 2) / RULES.traySize;
+    const gutter = 16 * scale;
+    const slotWidth = (contentWidth - gutter * 2) / RULES.traySize;
     const slots: Box[] = [];
     for (let i = 0; i < RULES.traySize; i++) {
       slots.push({
-        x: gutter + i * slotWidth,
+        x: contentLeft + gutter + i * slotWidth,
         y: trayTop,
         width: slotWidth,
         height: trayHeight,
@@ -301,6 +344,9 @@ export class GameScreen {
     this.layout = {
       width,
       height,
+      dpr,
+      contentLeft,
+      contentWidth,
       board: computeLayout(this.state.spec, cx, cy, boardRadius),
       boardRadius,
       trayTop,
@@ -308,6 +354,24 @@ export class GameScreen {
       slots,
       headerY,
     };
+
+    // Scattered over the whole window, not just the playable column: on a
+    // tablet the margins around the disc are the part that needs filling.
+    // A fixed margin rather than a multiple of the radius, so a big disc keeps
+    // the same clean gap around it instead of clearing half the screen.
+    this.sheet = makeBackdropSheet(width, height, this.theme, {
+      x: cx,
+      y: cy,
+      radius: boardRadius,
+    });
+    this.drifters = makeDrifters(width, height, { x: cx, y: cy, radius: boardRadius + 44 }).filter(
+      (drifter) => {
+        // The score and the meters have to stay readable, and the tray is
+        // something you aim at — neither wants confetti behind it.
+        const y = drifter.fy * height;
+        return y > headerBottom - 12 && y < trayTop - 30;
+      },
+    );
   }
 
   /** The board layout with any in-flight spin offset folded in. */
@@ -566,12 +630,12 @@ export class GameScreen {
     }
 
     if (events.clearedCells.length > 0) {
-      // The colours have already been wiped from the board, so recover them
-      // from the pre-move board — falling back to the colour just placed.
-      const cells = events.clearedCells.map((cell) => {
-        const previous = colourOf(getCell(before.board, cell.r, cell.s));
-        return { ...cell, colour: previous === 0 ? events.colour : previous };
-      });
+      // Colours come from the engine, which read them off the board at the
+      // moment it wiped them. Recovering them here from the pre-move board
+      // used to work for placements and was simply wrong after a spin: the
+      // disc has already turned, so those coordinates hold somebody else's
+      // block, or nothing at all.
+      const cells = events.clearedCells;
       this.effects.push(clearBurst(cells));
       this.effects.push(shake());
 
@@ -644,44 +708,83 @@ export class GameScreen {
     this.displayScore += gap * Math.min(1, dt / 120);
   }
 
+  /**
+   * Puts the canvas back to a known state before anything is drawn.
+   *
+   * A frame that throws part-way through can leave save()s unbalanced, and an
+   * unbalanced save is not a cosmetic problem — it keeps a clip and a
+   * transform alive into the next frame, where they compound. A few dozen
+   * frames of that and the disc is being drawn far off screen, which is what a
+   * player sees as the page going blank. So no frame trusts the one before it
+   * to have tidied up after itself.
+   */
+  private resetContext(): void {
+    const ctx = this.ctx;
+    // Restoring an empty stack is a no-op, so this simply unwinds whatever is
+    // there. The cap keeps it a bounded amount of work.
+    for (let i = 0; i < 64; i++) ctx.restore();
+    ctx.setTransform(this.layout.dpr, 0, 0, this.layout.dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+  }
+
   private render(): void {
     const ctx = this.ctx;
     const { width, height } = this.layout;
 
+    this.resetContext();
     ctx.save();
-
-    const jolt = this.shakeOffset();
-    if (jolt !== 0) ctx.translate(jolt, jolt * 0.5);
-
-    paintBackdrop(ctx, width, height, this.theme);
-    this.drawHeader(ctx);
-
-    const board = this.liveBoardLayout();
-    drawBoard(ctx, this.state.board, board, this.theme);
-
-    // Decoration, in its own pass. If any of it throws, the player still gets
-    // a board and a tray they can act on.
     try {
-      this.drawDropPops(ctx, board);
-      this.drawClearBursts(ctx, board);
-      if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
-      this.drawShockwaves(ctx);
-      drawParticles(ctx, this.particles, this.theme);
-    } catch (error) {
-      this.reportPaintFailure(error);
+      const jolt = this.shakeOffset();
+      if (jolt !== 0) ctx.translate(jolt, jolt * 0.5);
+
+      drawBackdropSheet(ctx, this.sheet, width, height, this.theme);
+
+      const board = this.liveBoardLayout();
+
+      // The drift, in its own pass: it is the layer nobody would miss, so it
+      // is never allowed to cost the player a frame of the board. Fainter than
+      // on the menu — here it sits behind a puzzle somebody is concentrating on.
+      try {
+        drawDrifters(ctx, this.drifters, this.theme, {
+          width,
+          height,
+          clock: this.clock,
+          alpha: 0.3,
+        });
+      } catch (error) {
+        this.reportPaintFailure(error);
+      }
+
+      this.drawHeader(ctx);
+      drawBoard(ctx, this.state.board, board, this.theme);
+
+      // Decoration, in its own pass. If any of it throws, the player still gets
+      // a board and a tray they can act on.
+      try {
+        this.drawDropPops(ctx, board);
+        this.drawClearBursts(ctx, board);
+        if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
+        this.drawShockwaves(ctx);
+        drawParticles(ctx, this.particles, this.theme);
+      } catch (error) {
+        this.reportPaintFailure(error);
+      }
+
+      this.drawTray(ctx);
+      this.drawStuckHint(ctx);
+
+      try {
+        this.drawFloatingText(ctx);
+        this.drawDeathBeat(ctx);
+      } catch (error) {
+        this.reportPaintFailure(error);
+      }
+    } finally {
+      ctx.restore();
     }
-
-    this.drawTray(ctx);
-    this.drawStuckHint(ctx);
-
-    try {
-      this.drawFloatingText(ctx);
-      this.drawDeathBeat(ctx);
-    } catch (error) {
-      this.reportPaintFailure(error);
-    }
-
-    ctx.restore();
   }
 
   /**
@@ -784,17 +887,20 @@ export class GameScreen {
   }
 
   private drawHeader(ctx: CanvasRenderingContext2D): void {
-    const { headerY, width } = this.layout;
+    const { headerY, contentLeft, contentWidth } = this.layout;
+    const left = contentLeft + 24;
+    const right = contentLeft + contentWidth - 24;
+    const centre = contentLeft + contentWidth / 2;
 
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
     ctx.fillStyle = this.theme.text;
     ctx.font = `800 38px ${FONT}`;
-    ctx.fillText(Math.round(this.displayScore).toLocaleString("sv-SE"), 24, headerY);
+    ctx.fillText(Math.round(this.displayScore).toLocaleString("sv-SE"), left, headerY);
 
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = this.theme.textSoft;
-    ctx.fillText(t("score"), 25, headerY + 26);
+    ctx.fillText(t("score"), left + 1, headerY + 26);
 
     // The spin meter flinches when a spin is attempted with none left.
     let nudge = 0;
@@ -809,35 +915,35 @@ export class GameScreen {
     // While nothing fits, the meter breathes: it is the only way out.
     if (this.stuck && (this.state.spins > 0 || this.state.pushes > 0) && !this.diedAt) {
       const beat = 1 + Math.sin(performance.now() / 260) * 0.12;
-      ctx.translate(width - 24, headerY - 2);
+      ctx.translate(right, headerY - 2);
       ctx.scale(beat, beat);
-      ctx.translate(-(width - 24), -(headerY - 2));
+      ctx.translate(-right, -(headerY - 2));
     }
-    drawSpinMeter(ctx, width - 24, headerY - 2, this.state.spins, this.state.rules.maxSpins, this.theme);
+    drawSpinMeter(ctx, right, headerY - 2, this.state.spins, this.state.rules.maxSpins, this.theme);
     ctx.restore();
 
     ctx.textAlign = "right";
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = this.theme.textSoft;
-    ctx.fillText(t("spins"), width - 24, headerY + 26);
+    ctx.fillText(t("spins"), right, headerY + 26);
 
-    drawPushMeter(ctx, width - 24, headerY + 52, this.state.pushes, this.state.rules.maxPushes, this.theme);
+    drawPushMeter(ctx, right, headerY + 52, this.state.pushes, this.state.rules.maxPushes, this.theme);
     ctx.textAlign = "right";
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = this.theme.textSoft;
-    ctx.fillText(t("pushes"), width - 24, headerY + 78);
+    ctx.fillText(t("pushes"), right, headerY + 78);
 
     // A rationed round has to show what is left of the ration.
     const limit = this.state.rules.pieceLimit;
     if (limit > 0) {
-      const left = Math.max(0, limit - this.state.stats.piecesPlaced);
+      const remaining = Math.max(0, limit - this.state.stats.piecesPlaced);
       ctx.textAlign = "center";
       ctx.font = `800 22px ${FONT}`;
       ctx.fillStyle = this.theme.text;
-      ctx.fillText(String(left), width / 2, headerY - 2);
+      ctx.fillText(String(remaining), centre, headerY - 2);
       ctx.font = `700 12px ${FONT}`;
       ctx.fillStyle = this.theme.textSoft;
-      ctx.fillText(t("pieces"), width / 2, headerY + 26);
+      ctx.fillText(t("pieces"), centre, headerY + 26);
     }
   }
 
@@ -847,12 +953,18 @@ export class GameScreen {
       const t = easeOutBack(progress(effect));
       for (const cell of effect.cells) {
         const g = cellGeometry(board, cell.r, cell.s);
-        const colour = getCell(this.state.board, cell.r, cell.s);
-        if (colour === 0) continue;
+        // The raw cell carries the stripe flag in a high bit, so it has to be
+        // unpacked: handing it over whole picks the wrong colour and loses the
+        // stripe's cross.
+        const value = getCell(this.state.board, cell.r, cell.s);
+        if (value === 0) continue;
         ctx.save();
-        ctx.globalAlpha = Math.min(1, t * 2);
-        drawBlock(ctx, g, colour, this.theme);
-        ctx.restore();
+        try {
+          ctx.globalAlpha = Math.min(1, t * 2);
+          drawBlock(ctx, g, colourOf(value), this.theme, 1, false, isStripedValue(value));
+        } finally {
+          ctx.restore();
+        }
       }
     }
   }
@@ -867,26 +979,33 @@ export class GameScreen {
         const g = cellGeometry(board, cell.r, cell.s);
         const grow = 1 + easeOutCubic(t) * 0.22;
         ctx.save();
-        ctx.translate(g.cx, g.cy);
-        ctx.scale(grow, grow);
-        ctx.translate(-g.cx, -g.cy);
-        drawBlock(ctx, g, cell.colour, this.theme, fade);
+        try {
+          ctx.translate(g.cx, g.cy);
+          ctx.scale(grow, grow);
+          ctx.translate(-g.cx, -g.cy);
+          drawBlock(ctx, g, cell.colour, this.theme, fade);
 
-        // A white flash on the way out.
-        if (t < 0.4) {
-          ctx.globalAlpha = (1 - t / 0.4) * 0.7;
-          ctx.fillStyle = "#FFFFFF";
-          ctx.beginPath();
-          ctx.arc(
-            g.cx + ((g.innerRadius + g.outerRadius) / 2) * Math.cos((g.startAngle + g.endAngle) / 2),
-            g.cy + ((g.innerRadius + g.outerRadius) / 2) * Math.sin((g.startAngle + g.endAngle) / 2),
-            (g.outerRadius - g.innerRadius) * 0.36,
-            0,
-            Math.PI * 2,
-          );
-          ctx.fill();
+          // A white flash on the way out.
+          if (t < 0.4) {
+            ctx.globalAlpha = (1 - t / 0.4) * 0.7;
+            ctx.fillStyle = "#FFFFFF";
+            ctx.beginPath();
+            ctx.arc(
+              g.cx + ((g.innerRadius + g.outerRadius) / 2) * Math.cos((g.startAngle + g.endAngle) / 2),
+              g.cy + ((g.innerRadius + g.outerRadius) / 2) * Math.sin((g.startAngle + g.endAngle) / 2),
+              (g.outerRadius - g.innerRadius) * 0.36,
+              0,
+              Math.PI * 2,
+            );
+            ctx.fill();
+          }
+        } finally {
+          // A throw between save and restore is not cosmetic: it leaves the
+          // scale above alive into the next frame, where it compounds until
+          // the disc is drawn far off screen and the player is left with a
+          // blank page. The frame is always handed back balanced.
+          ctx.restore();
         }
-        ctx.restore();
       }
     }
   }
@@ -919,11 +1038,11 @@ export class GameScreen {
   }
 
   private drawTray(ctx: CanvasRenderingContext2D): void {
-    const { slots, trayTop, trayHeight, width } = this.layout;
+    const { slots, trayTop, trayHeight, contentLeft, contentWidth } = this.layout;
 
     ctx.save();
     ctx.globalAlpha = 0.55;
-    roundRect(ctx, 12, trayTop - 6, width - 24, trayHeight + 8, 26);
+    roundRect(ctx, contentLeft + 12, trayTop - 6, contentWidth - 24, trayHeight + 8, 26);
     ctx.fillStyle = this.theme.plate;
     ctx.fill();
     ctx.restore();
