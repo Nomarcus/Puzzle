@@ -6,9 +6,6 @@ workflows:
     integrations:
       app_store_connect: "Codemagic"
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.nomarcus.shiftle
       vars:
         BUNDLE_ID: "com.nomarcus.shiftle"
         XCODE_PROJECT: "ios/App/App.xcodeproj"
