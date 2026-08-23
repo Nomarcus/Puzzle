@@ -18,10 +18,13 @@
     "economy": "vite-node tools/economy.ts",
     "fairness": "vite-node tools/fairness.ts",
     "ios:sync": "vite build && cap sync ios",
-    "ios:assets": "node tools/assets.mjs && npx @capacitor/assets generate --ios"
+    "ios:assets": "node tools/assets.mjs && npx @capacitor/assets generate --ios",
+    "android:sync": "vite build && cap sync android",
+    "android:assets": "node tools/assets.mjs && npx @capacitor/assets generate --android"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
+    "@capacitor/android": "^8.5.0",
     "@capacitor/cli": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
     "@types/node": "^26.2.0",

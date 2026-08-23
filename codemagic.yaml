@@ -1,4 +1,77 @@
 workflows:
+  android-google-play:
+    name: Shiftle — Android Google Play
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      android_signing:
+        - shiftle_upload
+      vars:
+        PACKAGE_NAME: "com.nomarcus.shiftle"
+      node: 22
+      java: 21
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "release/android-store"
+          include: true
+      cancel_previous_builds: true
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm config set fetch-retries 5
+          npm config set fetch-retry-mintimeout 20000
+          npm config set fetch-retry-maxtimeout 120000
+          npm ci
+
+      - name: Create and sync the Android project
+        script: |
+          npx cap add android
+          npx @capacitor/assets generate --android
+          npm run android:sync
+
+      - name: Lock Android to portrait
+        script: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          text = path.read_text()
+          text = text.replace(
+              'android:exported="true">',
+              'android:exported="true" android:screenOrientation="portrait">',
+          )
+          path.write_text(text)
+          PY
+
+      - name: Set Android build number
+        script: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+          text = text.replace("versionCode 1", f"versionCode {int(os.environ['BUILD_NUMBER'])}")
+          path.write_text(text)
+          PY
+
+      - name: Build signed Android App Bundle
+        script: |
+          cd android
+          ./gradlew bundleRelease
+
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/*.apk
+      - android/app/build/reports/**
+    publishing:
+      email:
+        recipients:
+          - nomarcus@hotmail.com
+        notify:
+          success: true
+          failure: true
+
   ios-testflight:
     name: Shiftle — iOS TestFlight
     max_build_duration: 60
