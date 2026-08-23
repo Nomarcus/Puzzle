@@ -10,7 +10,7 @@ workflows:
         BUNDLE_ID: "com.nomarcus.shiftle"
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-      node: 20.19.0
+      node: 22
       xcode: latest
     triggering:
       events:
