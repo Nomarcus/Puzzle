@@ -28,12 +28,15 @@ import {
   floatText,
   progress,
   shake,
+  shockwave,
   spinSettle,
   stepEffects,
 } from "../render/animate.js";
+import { type Particle, burst, drawParticles, stepParticles } from "../render/particles.js";
 import {
   type BoardLayout,
   cellAtPoint,
+  cellCentre,
   cellGeometry,
   computeLayout,
   drawBlock,
@@ -46,6 +49,7 @@ import {
 import { drawSpinMeter } from "../render/icons.js";
 import { type Theme, blockColour } from "../render/theme.js";
 import { t } from "./strings.js";
+import { play as playSound, unlock as unlockAudio } from "../platform/audio.js";
 import { type Box, drawPiece } from "../render/tray.js";
 import {
   angleAt,
@@ -98,6 +102,7 @@ export class GameScreen {
   private theme: Theme;
   private layout!: ScreenLayout;
   private effects: Effect[] = [];
+  private particles: Particle[] = [];
   private pointer: Pointer = { kind: "none" };
   private frame = 0;
   private lastTime = 0;
@@ -145,6 +150,7 @@ export class GameScreen {
       const dt = Math.min(now - this.lastTime, 64);
       this.lastTime = now;
       this.effects = stepEffects(this.effects, dt);
+      this.particles = stepParticles(this.particles, dt);
       this.animateScore(dt);
       if (this.diedAt && !this.announced && now - this.diedAt > DEATH_BEAT) {
         this.announced = true;
@@ -173,6 +179,7 @@ export class GameScreen {
     this.state = state;
     this.displayScore = state.score;
     this.effects = [];
+    this.particles = [];
     this.pointer = { kind: "none" };
     // A state handed in already dead still earns its beat before the card.
     this.diedAt = state.over ? performance.now() : 0;
@@ -270,6 +277,7 @@ export class GameScreen {
   }
 
   private onDown = (event: PointerEvent): void => {
+    unlockAudio();
     if (this.state.over) return;
     const { x, y } = this.pointAt(event);
     this.canvas.setPointerCapture(event.pointerId);
@@ -282,6 +290,7 @@ export class GameScreen {
         // Silence here reads as a broken game, so say no out loud.
         this.effects.push(shake());
         this.options.haptic?.("medium");
+        playSound("denied");
         return;
       }
       if (piece) {
@@ -298,6 +307,7 @@ export class GameScreen {
     if (cell) {
       if (this.state.spins <= 0) {
         this.effects.push(denied());
+        playSound("denied");
         return;
       }
       this.pointer = {
@@ -351,6 +361,7 @@ export class GameScreen {
     // that sector and eases to zero — the ring appears to carry on turning.
     const carry = pointer.delta - dir * sectorAngle;
     this.effects.push(spinSettle(pointer.ring, carry));
+    playSound("spin");
     this.commit({ type: "spin", ring: pointer.ring, dir: dir as SpinDirection }, null, null);
     void event;
   };
@@ -415,10 +426,26 @@ export class GameScreen {
       const bullseye = isBullseye(events.clears);
       const { cx, cy } = this.layout.board;
 
+      // Debris flies outwards from the hub, so a ring throws its blocks off
+      // the rim like a wheel and a bullseye throws the entire disc.
+      const board = this.liveBoardLayout();
+      for (const cell of cells) {
+        const at = cellCentre(board, cell.r, cell.s);
+        burst(this.particles, at.x, at.y, cell.colour, {
+          count: bullseye ? 5 : 7,
+          speed: bullseye ? 300 : 220,
+          awayFrom: { x: board.cx, y: board.cy },
+        });
+      }
+
       if (bullseye) {
         // The whole disc just went. It gets its own announcement.
         this.effects.push(floatText(cx, cy - 40, t("bullseye"), true));
         this.effects.push(shake());
+        this.effects.push(shockwave(cx, cy, this.layout.boardRadius));
+        playSound("bullseye");
+      } else {
+        playSound(events.clears.rings.length > 0 ? "ring" : "spoke", events.combo);
       }
       this.effects.push(floatText(cx, cy, `+${events.scoreDelta}`, bullseye || events.clears.rings.length > 0));
       if (events.combo >= 2) {
@@ -427,13 +454,17 @@ export class GameScreen {
       this.options.haptic?.(bullseye || lines > 1 || events.clears.rings.length > 0 ? "heavy" : "medium");
     } else if (move.type === "place") {
       this.options.haptic?.("light");
+      playSound("place");
     }
 
     if (events.spinsGained > 0) this.options.haptic?.("success");
 
     this.refreshPlaceable();
     this.options.onChange?.(this.state);
-    if (events.gameOver && !this.diedAt) this.diedAt = performance.now();
+    if (events.gameOver && !this.diedAt) {
+      this.diedAt = performance.now();
+      playSound("gameOver");
+    }
   }
 
   // ------------------------------------------------------------------ paint
@@ -465,6 +496,9 @@ export class GameScreen {
     this.drawClearBursts(ctx, board);
 
     if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
+
+    this.drawShockwaves(ctx);
+    drawParticles(ctx, this.particles, this.theme);
 
     this.drawTray(ctx);
     this.drawStuckHint(ctx);
@@ -538,6 +572,26 @@ export class GameScreen {
     ctx.fillStyle = "#FFFFFF";
     ctx.fillText(t("stuckOver"), width / 2, this.layout.board.cy);
     ctx.restore();
+  }
+
+  /** The ring of light that races out on a bullseye. */
+  private drawShockwaves(ctx: CanvasRenderingContext2D): void {
+    for (const effect of this.effects) {
+      if (effect.kind !== "shockwave") continue;
+      const t0 = progress(effect);
+      const eased = easeOutCubic(t0);
+
+      ctx.save();
+      ctx.globalAlpha = 1 - eased;
+      // White vanished against the near-white plate; the warm accent reads on
+      // the plate and on the backdrop alike.
+      ctx.strokeStyle = blockColour(this.theme, 2).base;
+      ctx.lineWidth = 24 * (1 - eased) + 4;
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, effect.radius * (0.05 + eased * 1.25), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   private shakeOffset(): number {

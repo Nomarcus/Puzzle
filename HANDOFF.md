@@ -29,7 +29,8 @@ puzzle. One attempt per day.
 | Balance | Tuned against bot measurements (`npm run balance`). |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
-| Particles, sound, share image | Not done yet — cosmetic, not blocking. |
+| Particles and sound | Done. Sound is synthesised, no audio files. |
+| Share image | Not done yet — the result shares as a text line. |
 
 ## Key facts
 
@@ -65,6 +66,26 @@ In Xcode, on the **App** target:
 2. Set **Marketing Version** and **Build** (currently `1.0` / `1`).
 3. Select **Any iOS Device (arm64)** → **Product ▸ Archive** → **Distribute App**
    → **App Store Connect** → **Upload**.
+
+## One native detail worth knowing: the silent switch
+
+The game synthesises its sound with WebAudio. In a WKWebView that respects the
+iOS silent switch by default, so a player with the ringer off hears nothing —
+which is usually correct, but arcade games normally opt out.
+
+To make sound play regardless, set the audio session category to `.playback`
+in `AppDelegate.swift`:
+
+```swift
+import AVFoundation
+// in application(_:didFinishLaunchingWithOptions:)
+try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+try? AVAudioSession.sharedInstance().setActive(true)
+```
+
+`.mixWithOthers` keeps the player's music going instead of stopping it. This is
+a judgement call, not a bug — leave it out and the silent switch silences the
+game, which many people prefer. There is a sound toggle in the menu either way.
 
 ## Game Center
 

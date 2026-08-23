@@ -67,6 +67,8 @@ const TABLE = {
   stuckHint: { sv: "Inget passar — snurra en ring", en: "Nothing fits — spin a ring" },
   stuckOver: { sv: "Inget passar längre", en: "Nothing fits any more" },
   bullseye: { sv: "FULLTRÄFF!", en: "BULLSEYE!" },
+  soundOn: { sv: "Ljud på", en: "Sound on" },
+  soundOff: { sv: "Ljud av", en: "Sound off" },
 
   setupTitle: { sv: "Välj skiva", en: "Choose your disc" },
   sizeLabel: { sv: "SKIVA", en: "DISC" },

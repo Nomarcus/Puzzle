@@ -59,6 +59,16 @@ await page.waitForTimeout(400);
 await shot("01-menu");
 check("menu renders", await page.locator(".title").isVisible());
 
+// --- sound can be switched off, and the choice sticks ----------------------
+const sound = page.locator('[data-action="sound"]');
+const soundLabelBefore = await sound.textContent();
+await sound.click();
+await page.waitForTimeout(150);
+check("the sound toggle flips", (await sound.textContent()) !== soundLabelBefore);
+await sound.click();
+await page.waitForTimeout(150);
+check("the sound toggle flips back", (await sound.textContent()) === soundLabelBefore);
+
 // --- start a free game -----------------------------------------------------
 // Selected by data-action, not by label — the UI ships in two languages.
 await page.locator('[data-action="endless"]').click();

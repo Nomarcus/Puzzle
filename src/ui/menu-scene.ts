@@ -12,7 +12,8 @@ import { DEFAULT_SPEC } from "../engine/geometry.js";
 import { type Board, createBoard } from "../engine/board.js";
 import { cellIndex } from "../engine/geometry.js";
 import { computeLayout, drawBoard, paintBackdrop, fitCanvas, withRingOffset } from "../render/canvas.js";
-import { type Theme, blockColour } from "../render/theme.js";
+import type { Theme } from "../render/theme.js";
+import { drawCandySquare } from "../render/candy.js";
 
 const SPEC = DEFAULT_SPEC;
 
@@ -69,48 +70,6 @@ function makeDrifters(width: number, height: number): Drifter[] {
     });
   }
   return drifters;
-}
-
-function candySquare(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number,
-  angle: number,
-  colourId: number,
-  theme: Theme,
-  alpha: number,
-): void {
-  const colour = blockColour(theme, colourId);
-  const half = size / 2;
-  const radius = size * 0.28;
-
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(x, y);
-  ctx.rotate(angle);
-
-  ctx.beginPath();
-  ctx.moveTo(-half + radius, -half);
-  ctx.arcTo(half, -half, half, half, radius);
-  ctx.arcTo(half, half, -half, half, radius);
-  ctx.arcTo(-half, half, -half, -half, radius);
-  ctx.arcTo(-half, -half, half, -half, radius);
-  ctx.closePath();
-
-  ctx.fillStyle = colour.base;
-  ctx.fill();
-
-  ctx.save();
-  ctx.clip();
-  // Lit along the top, shaded along the bottom — same language as the board.
-  ctx.fillStyle = colour.light;
-  ctx.fillRect(-half, -half, size, size * 0.3);
-  ctx.fillStyle = colour.dark;
-  ctx.fillRect(-half, half - size * 0.24, size, size * 0.24);
-  ctx.restore();
-
-  ctx.restore();
 }
 
 export class MenuScene {
@@ -177,7 +136,7 @@ export class MenuScene {
     for (const drifter of this.drifters) {
       drifter.angle += drifter.spin * dt;
       drifter.driftY = Math.sin(this.clock * 0.6 + drifter.x * 0.01) * 12;
-      candySquare(
+      drawCandySquare(
         ctx,
         drifter.x,
         drifter.y + drifter.driftY,

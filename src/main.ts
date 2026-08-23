@@ -23,6 +23,7 @@ import { GameScreen } from "./ui/game-screen.js";
 import { MenuScene } from "./ui/menu-scene.js";
 import { type Lang, type StringKey, lang, setLang, t } from "./ui/strings.js";
 import { haptic } from "./platform/haptics.js";
+import { isMuted, setMuted, unlock as unlockAudio } from "./platform/audio.js";
 import { shareResult } from "./platform/share.js";
 import { LEADERBOARDS, signIn, submitScore } from "./platform/gamecenter.js";
 import {
@@ -271,6 +272,16 @@ function showMenu(): void {
     });
     langs.append(pill);
   }
+  const sound = el("button", "pill wide", isMuted() ? t("soundOff") : t("soundOn"));
+  sound.dataset.action = "sound";
+  sound.setAttribute("aria-pressed", String(!isMuted()));
+  sound.addEventListener("click", () => {
+    setMuted(!isMuted());
+    sound.textContent = isMuted() ? t("soundOff") : t("soundOn");
+    sound.setAttribute("aria-pressed", String(!isMuted()));
+  });
+  langs.append(sound);
+
   const help = el("button", "pill wide", t("how"));
   help.addEventListener("click", showHowTo);
   langs.append(help);
@@ -459,6 +470,9 @@ function onResize(): void {
   menu?.measure();
 }
 
+// iOS refuses to start audio outside a user gesture, so take the first one.
+app.addEventListener("pointerdown", () => unlockAudio(), { once: true });
+
 window.addEventListener("resize", onResize);
 window.addEventListener("orientationchange", onResize);
 
@@ -501,6 +515,36 @@ if (import.meta.env.DEV) {
       };
       screen.replaceState(jammed);
       return jammed;
+    },
+
+    /**
+     * Sets the disc one cell short of a bullseye, with a single-cell piece in
+     * the tray, so the burst and the sweep can be captured without playing a
+     * whole round to reach one.
+     */
+    primeBullseye: () => {
+      const current = screen?.getState();
+      if (!current || !screen) return null;
+      const { rings, sectors } = current.spec;
+      const hole = { r: 0, s: 3 };
+
+      const cells = new Uint8Array(current.board.cells.length);
+      for (let s = 0; s < sectors; s++) {
+        if (s !== hole.s) cells[hole.r * sectors + s] = ((s % 8) + 1);
+      }
+      for (let r = 1; r < rings; r++) cells[r * sectors + hole.s] = ((r % 8) + 1);
+      // Some unrelated blocks, so the sweep visibly takes more than two lines.
+      for (const [r, s] of [[2, 6], [3, 8], [4, 1], [1, 7], [5, 5]] as Array<[number, number]>) {
+        if (r < rings && s < sectors) cells[r * sectors + s] = ((r + s) % 8) + 1;
+      }
+
+      const primed: GameState = {
+        ...current,
+        board: { spec: current.spec, cells },
+        tray: [{ pieceId: "dot", colour: 4 }, null, null],
+      };
+      screen.replaceState(primed);
+      return { hole };
     },
   };
 }

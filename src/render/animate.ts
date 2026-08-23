@@ -20,7 +20,8 @@ export type Effect =
   | { kind: "float"; x: number; y: number; text: string; big: boolean; elapsed: number; duration: number }
   | { kind: "spinSettle"; ring: number; from: number; elapsed: number; duration: number }
   | { kind: "shake"; elapsed: number; duration: number }
-  | { kind: "denied"; elapsed: number; duration: number };
+  | { kind: "denied"; elapsed: number; duration: number }
+  | { kind: "shockwave"; x: number; y: number; radius: number; elapsed: number; duration: number };
 
 export function clearBurst(cells: ClearedCell[]): Effect {
   return { kind: "clear", cells, elapsed: 0, duration: 420 };
@@ -50,6 +51,11 @@ export function shake(): Effect {
 /** The nudge that says "you have no spins left". */
 export function denied(): Effect {
   return { kind: "denied", elapsed: 0, duration: 360 };
+}
+
+/** A ring of light racing outwards. Reserved for the bullseye. */
+export function shockwave(x: number, y: number, radius: number): Effect {
+  return { kind: "shockwave", x, y, radius, elapsed: 0, duration: 700 };
 }
 
 export function progress(effect: Effect): number {

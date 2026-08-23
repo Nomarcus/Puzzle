@@ -90,6 +90,14 @@ export function cellGeometry(layout: BoardLayout, r: number, s: number): SectorG
   };
 }
 
+/** The middle of a cell, in screen coordinates. Where its debris flies from. */
+export function cellCentre(layout: BoardLayout, r: number, s: number): { x: number; y: number } {
+  const g = cellGeometry(layout, r, s);
+  const radius = (g.innerRadius + g.outerRadius) / 2;
+  const angle = (g.startAngle + g.endAngle) / 2;
+  return { x: g.cx + radius * Math.cos(angle), y: g.cy + radius * Math.sin(angle) };
+}
+
 /** Which cell a screen point falls in, or null if it missed the disc. */
 export function cellAtPoint(layout: BoardLayout, x: number, y: number): { r: number; s: number } | null {
   const dx = x - layout.cx;
