@@ -13,7 +13,8 @@ import {
   place,
   placements,
 } from "../src/engine/board.js";
-import { pieceById } from "../src/engine/pieces.js";
+import { PIECES, pieceById } from "../src/engine/pieces.js";
+import { PACKS, SIZES, bagFor, dailyVariant } from "../src/engine/variants.js";
 import { spinRing } from "../src/engine/rotate.js";
 import { clearScore, comboMultiplier, simultaneousMultiplier } from "../src/engine/scoring.js";
 import {
@@ -344,5 +345,92 @@ describe("game reducer", () => {
 
     const other = createGame({ seed: dailySeed(new Date("2026-08-24T09:00:00Z")), mode: "daily" });
     expect(other.tray).not.toEqual(a.tray);
+  });
+});
+
+describe("variants", () => {
+  it("gives every player the same disc and bag on the same day", () => {
+    const seed = dailySeed(new Date("2026-08-23T09:00:00Z"));
+    expect(dailyVariant(seed)).toEqual(dailyVariant(seed));
+  });
+
+  it("rotates the setup across days", () => {
+    const days = ["2026-08-23", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"];
+    const variants = days.map((day) => {
+      const v = dailyVariant(dailySeed(new Date(`${day}T09:00:00Z`)));
+      return `${v.size}:${v.pack}`;
+    });
+    // Not every day differs, but a week must not be one single setup.
+    expect(new Set(variants).size).toBeGreaterThan(1);
+  });
+
+  it("keeps every family reachable in every pack", () => {
+    for (const pack of PACKS) {
+      const bag = bagFor(6, pack.id);
+      const families = new Set(bag.pieces.map((piece) => piece.family));
+      // A pack that dropped a family outright could strand a board — the
+      // single cell especially is the piece that rescues a full disc.
+      expect(families.has("dot")).toBe(true);
+      expect(bag.pieces.length).toBe(PIECES.length);
+      expect(bag.total).toBeGreaterThan(0);
+    }
+  });
+
+  it("weights chunks towards blocks and curves away from them", () => {
+    const share = (packId: "mixed" | "curves" | "chunks") => {
+      const bag = bagFor(6, packId);
+      let brick = 0;
+      let previous = 0;
+      bag.pieces.forEach((piece, i) => {
+        const weight = bag.cumulative[i]! - previous;
+        previous = bag.cumulative[i]!;
+        if (piece.family === "brick") brick += weight;
+      });
+      return brick / bag.total;
+    };
+    expect(share("chunks")).toBeGreaterThan(share("mixed"));
+    expect(share("curves")).toBeLessThan(share("mixed"));
+  });
+
+  it("leaves out shapes too tall for the disc", () => {
+    // Every shape spans at most 3 rings, so a 3-ring disc still takes them all
+    // while a 2-ring disc must drop the tall ones.
+    expect(bagFor(3, "mixed").pieces.length).toBe(PIECES.length);
+    const shallow = bagFor(2, "mixed");
+    expect(shallow.pieces.length).toBeLessThan(PIECES.length);
+    expect(shallow.pieces.every((piece) => piece.radialExtent <= 2)).toBe(true);
+  });
+
+  it("plays a full game on every size", () => {
+    for (const size of SIZES) {
+      let state = createGame({ seed: 7, spec: size.spec, pack: "chunks" });
+      expect(state.spec).toEqual(size.spec);
+
+      let turns = 0;
+      while (!state.over && turns < 200) {
+        const slot = state.tray.findIndex((entry) => {
+          const piece = slotPiece(entry ?? null);
+          return piece !== null && hasPlacement(state.board, piece);
+        });
+        if (slot < 0) break;
+        const piece = slotPiece(state.tray[slot] ?? null)!;
+        const spot = placements(state.board, piece)[0]!;
+        state = applyMove(state, { type: "place", slot, r: spot.r, s: spot.s })!.state;
+        turns++;
+      }
+      expect(turns).toBeGreaterThan(3);
+    }
+  });
+
+  it("needs a full ring of the right length on each size", () => {
+    for (const size of SIZES) {
+      let board = createBoard(size.spec);
+      for (let s = 0; s < size.spec.sectors - 1; s++) {
+        board = place(board, pieceById("dot"), 0, s, 1);
+      }
+      expect(findClears(board).rings).toEqual([]);
+      board = place(board, pieceById("dot"), 0, size.spec.sectors - 1, 1);
+      expect(findClears(board).rings).toEqual([0]);
+    }
   });
 });

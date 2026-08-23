@@ -58,6 +58,17 @@ const TABLE = {
   },
   cancel: { sv: "Fortsätt spela", en: "Keep playing" },
   confirm: { sv: "Ja", en: "Yes" },
+
+  setupTitle: { sv: "Välj skiva", en: "Choose your disc" },
+  sizeLabel: { sv: "SKIVA", en: "DISC" },
+  packLabel: { sv: "BITAR", en: "PIECES" },
+  start: { sv: "Starta", en: "Start" },
+  small: { sv: "Liten", en: "Small" },
+  standard: { sv: "Standard", en: "Standard" },
+  large: { sv: "Stor", en: "Large" },
+  mixed: { sv: "Blandat", en: "Mixed" },
+  curves: { sv: "Kurvor", en: "Curves" },
+  chunks: { sv: "Klumpar", en: "Chunks" },
 } as const;
 
 export type StringKey = keyof typeof TABLE;

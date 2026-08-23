@@ -62,11 +62,19 @@ check("menu renders", await page.locator(".title").isVisible());
 // --- start a free game -----------------------------------------------------
 // Selected by data-action, not by label — the UI ships in two languages.
 await page.locator('[data-action="endless"]').click();
+await page.waitForTimeout(300);
+check("free play asks which disc to use", await page.locator(".setup").isVisible());
+await shot("07-setup");
+await page.locator('.choices [data-choice="standard"]').click();
+await page.locator('.choices [data-choice="mixed"]').click();
+await page.locator('[data-action="start"]').click();
 await page.waitForTimeout(500);
 await shot("02-fresh-board");
 
 let before = await state();
 check("game started with a full tray", before && before.tray.every((s) => s !== null));
+check("the chosen disc is the one dealt", before?.spec.rings === 5 && before?.spec.sectors === 12,
+  `${before?.spec.rings}x${before?.spec.sectors}`);
 check("starts with one spin", before?.spins === 1, `spins=${before?.spins}`);
 
 // --- geometry, mirrored from ui/game-screen.ts measure() -------------------
@@ -156,6 +164,8 @@ await page.waitForTimeout(400);
 check("quit returns to the menu", await page.locator(".title").isVisible());
 
 await page.locator('[data-action="endless"]').click();
+await page.waitForTimeout(300);
+await page.locator('[data-action="start"]').click();
 await page.waitForTimeout(400);
 
 // --- a longer session, to shake out crashes --------------------------------
@@ -175,6 +185,41 @@ console.log(
     `rings=${final.stats.ringsCleared} spokes=${final.stats.spokesCleared} over=${final.over}`,
 );
 await shot("05-late-game");
+
+// --- the large disc with the chunky pack -----------------------------------
+await page.locator('[data-action="quit"]').click();
+await page.waitForTimeout(200);
+if (await page.locator(".confirm").isVisible()) {
+  await page.locator(".confirm .big.warm").click();
+  await page.waitForTimeout(300);
+}
+await page.locator('[data-action="endless"]').click();
+await page.waitForTimeout(250);
+await page.locator('.choices [data-choice="large"]').click();
+await page.locator('.choices [data-choice="chunks"]').click();
+await page.locator('[data-action="start"]').click();
+await page.waitForTimeout(450);
+
+const big = await state();
+check("the large disc is 6 rings by 13 sectors", big?.spec.rings === 6 && big?.spec.sectors === 13,
+  `${big?.spec.rings}x${big?.spec.sectors}`);
+
+// Geometry differs on this board, so recompute the radius before dropping.
+const bigRadius = Math.min(VIEWPORT.width * 0.485, (trayTop - headerBottom) / 2 - 10);
+for (let turn = 0; turn < 16; turn++) {
+  const snapshot = await state();
+  if (!snapshot || snapshot.over) break;
+  const slot = snapshot.tray.findIndex((s) => s !== null);
+  if (slot < 0) break;
+  const frac = 0.5 + (turn % 4) * 0.13;
+  const a = ((turn * 53 - 90) * Math.PI) / 180;
+  await drag(slotCentre(slot), {
+    x: cx + bigRadius * frac * Math.cos(a),
+    y: cy + bigRadius * frac * Math.sin(a) + LIFT,
+  });
+}
+await shot("08-large-chunks");
+check("no errors across every disc size", problems.length === 0, problems.join(" | "));
 
 await browser.close();
 await server.close();

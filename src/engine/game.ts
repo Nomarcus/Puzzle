@@ -24,6 +24,7 @@ import {
   place,
 } from "./board.js";
 import { type Piece, drawPiece, pieceById } from "./pieces.js";
+import { type PackId, DEFAULT_PACK, bagFor } from "./variants.js";
 import { nextInt } from "./rng.js";
 import { type SpinDirection, spinRing } from "./rotate.js";
 import { clearScore, placementScore } from "./scoring.js";
@@ -62,6 +63,7 @@ export interface GameStats {
 export interface GameState {
   readonly mode: GameMode;
   readonly spec: BoardSpec;
+  readonly pack: PackId;
   readonly board: Board;
   readonly tray: readonly (TraySlot | null)[];
   readonly rngState: number;
@@ -107,11 +109,12 @@ function emptyStats(): GameStats {
 }
 
 /** Draws a full tray. Called at the start and whenever all three are used up. */
-function fillTray(rngState: number): [tray: TraySlot[], next: number] {
+function fillTray(rngState: number, spec: BoardSpec, pack: PackId): [tray: TraySlot[], next: number] {
+  const bag = bagFor(spec.rings, pack);
   const tray: TraySlot[] = [];
   let state = rngState;
   for (let i = 0; i < RULES.traySize; i++) {
-    const [piece, afterPiece] = drawPiece(state);
+    const [piece, afterPiece] = drawPiece(bag, state);
     const [colourIndex, afterColour] = nextInt(afterPiece, RULES.colours);
     tray.push({ pieceId: piece.id, colour: colourIndex + 1 });
     state = afterColour;
@@ -123,13 +126,16 @@ export function createGame(options: {
   seed: number;
   mode?: GameMode;
   spec?: BoardSpec;
+  pack?: PackId;
 }): GameState {
   const spec = options.spec ?? DEFAULT_SPEC;
-  const [tray, rngState] = fillTray(options.seed);
+  const pack = options.pack ?? DEFAULT_PACK;
+  const [tray, rngState] = fillTray(options.seed, spec, pack);
 
   return {
     mode: options.mode ?? "endless",
     spec,
+    pack,
     board: createBoard(spec),
     tray,
     rngState,
@@ -226,7 +232,7 @@ function applyPlace(
   let rngState = state.rngState;
   let nextTray: (TraySlot | null)[] = tray;
   if (trayRefilled) {
-    const [filled, afterFill] = fillTray(rngState);
+    const [filled, afterFill] = fillTray(rngState, state.spec, state.pack);
     nextTray = filled;
     rngState = afterFill;
   }
@@ -336,7 +342,7 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
 export function replay(
   seed: number,
   moves: readonly Move[],
-  options: { mode?: GameMode; spec?: BoardSpec } = {},
+  options: { mode?: GameMode; spec?: BoardSpec; pack?: PackId } = {},
 ): GameState | null {
   let state = createGame({ seed, ...options });
   for (const move of moves) {

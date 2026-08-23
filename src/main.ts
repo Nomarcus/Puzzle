@@ -8,10 +8,20 @@
 
 import { type GameState, createGame } from "./engine/game.js";
 import { dailyNumber, dailySeed, dateKey, hashSeed } from "./engine/rng.js";
+import {
+  type PackId,
+  type SizeId,
+  DEFAULT_PACK,
+  DEFAULT_SIZE,
+  PACKS,
+  SIZES,
+  dailyVariant,
+  sizeById,
+} from "./engine/variants.js";
 import { THEMES } from "./render/theme.js";
 import { GameScreen } from "./ui/game-screen.js";
 import { MenuScene } from "./ui/menu-scene.js";
-import { type Lang, lang, setLang, t } from "./ui/strings.js";
+import { type Lang, type StringKey, lang, setLang, t } from "./ui/strings.js";
 import { haptic } from "./platform/haptics.js";
 import {
   readJson,
@@ -45,6 +55,8 @@ const app = document.querySelector<HTMLDivElement>("#app")!;
 let theme = THEMES.find((option) => option.id === readString("theme")) ?? THEMES[0]!;
 let screen: GameScreen | null = null;
 let menu: MenuScene | null = null;
+/** What the round in progress is being played on, so restart can repeat it. */
+let lastVariant: { size: SizeId; pack: PackId } = { size: DEFAULT_SIZE, pack: DEFAULT_PACK };
 
 // ------------------------------------------------------------------ helpers
 
@@ -84,6 +96,21 @@ export function shareLine(result: DailyResult): string {
 
 function localeNumber(value: number): string {
   return value.toLocaleString(lang() === "sv" ? "sv-SE" : "en-GB");
+}
+
+/** Both ids double as string keys, so the labels come straight from the table. */
+function variantLabel(size: SizeId, pack: PackId): string {
+  return `${t(size as StringKey)} · ${t(pack as StringKey)}`;
+}
+
+function savedSize(): SizeId {
+  const stored = readString("size");
+  return SIZES.some((option) => option.id === stored) ? (stored as SizeId) : DEFAULT_SIZE;
+}
+
+function savedPack(): PackId {
+  const stored = readString("pack");
+  return PACKS.some((option) => option.id === stored) ? (stored as PackId) : DEFAULT_PACK;
 }
 
 function stopEverything(): void {
@@ -154,14 +181,14 @@ function gameHud(mode: "daily" | "endless"): void {
   restart.setAttribute("aria-label", t("restart"));
   restart.addEventListener("click", () => {
     const state = screen?.getState();
-    if (!state || state.score === 0) return startGame(mode);
+    if (!state || state.score === 0) return startGame(mode, lastVariant);
     confirmThen(t("restartAsk"), mode === "daily" ? t("usesAttempt") : t("loseScore"), () => {
       if (mode === "daily") {
         bankDaily(state);
         showMenu();
         return;
       }
-      startGame(mode);
+      startGame(mode, lastVariant);
     });
   });
 
@@ -204,9 +231,14 @@ function showMenu(): void {
   daily.addEventListener("click", () => startGame("daily"));
   node.append(daily);
 
+  // Today's disc is worth showing: the daily rotates size and pack, so the
+  // player can see at a glance that it is a different puzzle from yesterday.
+  const today = dailyVariant(dailySeed(new Date()));
+  node.append(el("div", "best", variantLabel(today.size, today.pack)));
+
   const endless = el("button", "big alt", t("endless"));
   endless.dataset.action = "endless";
-  endless.addEventListener("click", () => startGame("endless"));
+  endless.addEventListener("click", showSetup);
   node.append(endless);
 
   const best = readNumber("best", 0);
@@ -243,6 +275,69 @@ function showMenu(): void {
   node.append(langs);
 }
 
+/** Pick a disc and a piece pack before a free round. */
+function showSetup(): void {
+  let size = savedSize();
+  let pack = savedPack();
+
+  const node = overlay("confirm setup");
+  const card = el("div", "card");
+  card.append(el("div", "card-title", t("setupTitle")));
+
+  const group = <T extends string>(
+    labelKey: StringKey,
+    options: readonly T[],
+    selected: T,
+    onPick: (value: T) => void,
+  ) => {
+    card.append(el("div", "choice-label", t(labelKey)));
+    const row = el("div", "choices");
+    for (const option of options) {
+      const pill = el("button", "choice", t(option as StringKey));
+      pill.dataset.choice = option;
+      pill.setAttribute("aria-pressed", String(option === selected));
+      pill.addEventListener("click", () => {
+        onPick(option);
+        row.querySelectorAll(".choice").forEach((other) => {
+          other.setAttribute("aria-pressed", String((other as HTMLElement).dataset.choice === option));
+        });
+      });
+      row.append(pill);
+    }
+    card.append(row);
+  };
+
+  group(
+    "sizeLabel",
+    SIZES.map((option) => option.id),
+    size,
+    (value) => {
+      size = value;
+      writeString("size", value);
+    },
+  );
+  group(
+    "packLabel",
+    PACKS.map((option) => option.id),
+    pack,
+    (value) => {
+      pack = value;
+      writeString("pack", value);
+    },
+  );
+
+  const go = el("button", "big", t("start"));
+  go.dataset.action = "start";
+  go.addEventListener("click", () => startGame("endless", { size, pack }));
+  card.append(go);
+
+  const back = el("button", "big alt", t("menu"));
+  back.addEventListener("click", showMenu);
+  card.append(back);
+
+  node.append(card);
+}
+
 function showHowTo(): void {
   const node = overlay("result");
   node.append(el("div", "how-title", t("howTitle")));
@@ -264,13 +359,17 @@ function showHowTo(): void {
 
 // --------------------------------------------------------------------- game
 
-function startGame(mode: "daily" | "endless"): void {
+function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: PackId }): void {
   document.querySelectorAll(".overlay").forEach((node) => node.remove());
   stopEverything();
   applyThemeChrome();
 
   const seed = mode === "daily" ? dailySeed(new Date()) : hashSeed(`endless:${Date.now()}`);
-  screen = new GameScreen(canvas, createGame({ seed, mode }), {
+  const setup = mode === "daily" ? dailyVariant(seed) : (variant ?? { size: savedSize(), pack: savedPack() });
+  lastVariant = setup;
+
+  const game = createGame({ seed, mode, spec: sizeById(setup.size).spec, pack: setup.pack });
+  screen = new GameScreen(canvas, game, {
     theme,
     haptic,
     onGameOver: (final) => showGameOver(final, mode),
@@ -296,6 +395,7 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   const node = overlay("result");
   node.append(el("div", "how-title", mode === "daily" ? `#${result.puzzle}` : t("gameOver")));
   node.append(el("div", "score-big", localeNumber(state.score)));
+  node.append(el("div", "confirm-body", variantLabel(lastVariant.size, lastVariant.pack)));
 
   const stats = el("div", "stats");
   const entries: Array<[string, string]> = [
@@ -318,7 +418,7 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
     node.append(share);
   } else {
     const again = el("button", "big", t("again"));
-    again.addEventListener("click", () => startGame("endless"));
+    again.addEventListener("click", () => startGame("endless", lastVariant));
     node.append(again);
   }
 
