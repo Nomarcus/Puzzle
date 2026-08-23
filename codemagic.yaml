@@ -99,10 +99,17 @@ workflows:
           cd android
           ./gradlew bundleRelease
 
+      - name: Install screenshot browser
+        script: npx playwright install chromium
+
+      - name: Render App Store screenshots
+        script: node tools/store-shots.mjs
+
     artifacts:
       - android/app/build/outputs/**/*.aab
       - android/app/build/outputs/**/*.apk
       - android/app/build/reports/**
+      - tools/out/store/*.png
     publishing:
       email:
         recipients:
