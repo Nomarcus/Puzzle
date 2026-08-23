@@ -70,7 +70,7 @@ check("game started with a full tray", before && before.tray.every((s) => s !== 
 check("starts with one spin", before?.spins === 1, `spins=${before?.spins}`);
 
 // --- geometry, mirrored from ui/game-screen.ts measure() -------------------
-const headerBottom = 36 + 44;
+const headerBottom = 74 + 38;
 const trayTop = VIEWPORT.height - 168 - 14;
 const boardRadius = Math.min(VIEWPORT.width * 0.485, (trayTop - headerBottom) / 2 - 10);
 const cx = VIEWPORT.width / 2;
@@ -122,6 +122,41 @@ if (broke.spins === 0) {
   const stillBroke = await state();
   check("a spin with none left is refused", stillBroke.spins === 0);
 }
+
+// --- quit and restart ------------------------------------------------------
+const beforeButtons = await state();
+check("score is on the board before testing the buttons", beforeButtons.score > 0);
+
+// Restart mid-round asks first, and cancelling leaves the round untouched.
+await page.locator('[data-action="restart"]').click();
+await page.waitForTimeout(250);
+check("restart asks before throwing the round away", await page.locator(".confirm").isVisible());
+await shot("06-confirm");
+
+await page.locator(".confirm .big.alt").click();
+await page.waitForTimeout(250);
+const afterCancel = await state();
+check(
+  "cancelling keeps the round going",
+  afterCancel !== null && afterCancel.score === beforeButtons.score,
+  `score=${afterCancel?.score}`,
+);
+
+// Confirming a restart deals a fresh board.
+await page.locator('[data-action="restart"]').click();
+await page.waitForTimeout(200);
+await page.locator(".confirm .big.warm").click();
+await page.waitForTimeout(450);
+const afterRestart = await state();
+check("restart deals a fresh board", afterRestart?.score === 0, `score=${afterRestart?.score}`);
+
+// Quitting with nothing at stake goes straight back, no question asked.
+await page.locator('[data-action="quit"]').click();
+await page.waitForTimeout(400);
+check("quit returns to the menu", await page.locator(".title").isVisible());
+
+await page.locator('[data-action="endless"]').click();
+await page.waitForTimeout(400);
 
 // --- a longer session, to shake out crashes --------------------------------
 for (let turn = 0; turn < 24; turn++) {

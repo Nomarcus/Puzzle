@@ -31,6 +31,11 @@ interface DailyResult {
   readonly spinsLeft: number;
 }
 
+const ICON_QUIT =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+const ICON_RESTART =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M20.5 2.5v5.5H15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 /** One sweet per letter, matching the block palette. */
 const TITLE_COLOURS = ["#FF2D42", "#FF7A00", "#FFC400", "#4FD31A", "#00CFC9", "#0A7CFF", "#A03CF0"];
 
@@ -86,6 +91,82 @@ function stopEverything(): void {
   screen = null;
   menu?.stop();
   menu = null;
+  document.querySelector(".hud")?.remove();
+}
+
+/**
+ * Records a daily run as finished. Quitting or restarting counts as the
+ * attempt — otherwise the same seed could be replayed until it went well, and
+ * a leaderboard everyone can retry is not worth having.
+ */
+function bankDaily(state: GameState): void {
+  writeJson("daily", {
+    date: dateKey(new Date()),
+    puzzle: dailyNumber(new Date()),
+    score: state.score,
+    ringsCleared: state.stats.ringsCleared,
+    bestCombo: state.stats.bestCombo,
+    spinsLeft: state.spins,
+  } satisfies DailyResult);
+  if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
+}
+
+function confirmThen(title: string, body: string, onConfirm: () => void): void {
+  // A card over a dimmed board, not a full-screen wash — the question is small
+  // and the player should still see the round they are about to give up.
+  const node = overlay("confirm");
+  const card = el("div", "card");
+
+  card.append(el("div", "card-title", title));
+  card.append(el("p", "confirm-body", body));
+
+  const yes = el("button", "big warm", t("confirm"));
+  yes.addEventListener("click", onConfirm);
+  card.append(yes);
+
+  const no = el("button", "big alt", t("cancel"));
+  no.addEventListener("click", () => node.remove());
+  card.append(no);
+
+  node.append(card);
+}
+
+/** The quit and restart buttons that sit in the top corners while playing. */
+function gameHud(mode: "daily" | "endless"): void {
+  const hud = el("div", "hud");
+
+  const quit = el("button", "icon");
+  quit.innerHTML = ICON_QUIT;
+  quit.dataset.action = "quit";
+  quit.setAttribute("aria-label", t("quit"));
+  quit.addEventListener("click", () => {
+    const state = screen?.getState();
+    if (!state || state.score === 0) return showMenu();
+    confirmThen(t("quitAsk"), mode === "daily" ? t("usesAttempt") : t("loseScore"), () => {
+      if (mode === "daily") bankDaily(state);
+      showMenu();
+    });
+  });
+
+  const restart = el("button", "icon");
+  restart.innerHTML = ICON_RESTART;
+  restart.dataset.action = "restart";
+  restart.setAttribute("aria-label", t("restart"));
+  restart.addEventListener("click", () => {
+    const state = screen?.getState();
+    if (!state || state.score === 0) return startGame(mode);
+    confirmThen(t("restartAsk"), mode === "daily" ? t("usesAttempt") : t("loseScore"), () => {
+      if (mode === "daily") {
+        bankDaily(state);
+        showMenu();
+        return;
+      }
+      startGame(mode);
+    });
+  });
+
+  hud.append(quit, restart);
+  app.append(hud);
 }
 
 // --------------------------------------------------------------------- menu
@@ -195,9 +276,11 @@ function startGame(mode: "daily" | "endless"): void {
     onGameOver: (final) => showGameOver(final, mode),
   });
   screen.start();
+  gameHud(mode);
 }
 
 function showGameOver(state: GameState, mode: "daily" | "endless"): void {
+  document.querySelector(".hud")?.remove();
   if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
 
   const result: DailyResult = {

@@ -46,6 +46,18 @@ const TABLE = {
   },
   gotIt: { sv: "Kör!", en: "Got it!" },
   how: { sv: "Så spelar du", en: "How to play" },
+
+  quit: { sv: "Avsluta", en: "Quit" },
+  restart: { sv: "Börja om", en: "Restart" },
+  quitAsk: { sv: "Avsluta omgången?", en: "Quit this round?" },
+  restartAsk: { sv: "Börja om?", en: "Start over?" },
+  loseScore: { sv: "Din poäng försvinner.", en: "You will lose your score." },
+  usesAttempt: {
+    sv: "Dagens försök är förbrukat och räknas med poängen du har nu.",
+    en: "This uses up today’s attempt and keeps the score you have now.",
+  },
+  cancel: { sv: "Fortsätt spela", en: "Keep playing" },
+  confirm: { sv: "Ja", en: "Yes" },
 } as const;
 
 export type StringKey = keyof typeof TABLE;

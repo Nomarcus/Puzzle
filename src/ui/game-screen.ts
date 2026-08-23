@@ -159,8 +159,10 @@ export class GameScreen {
     const safeTop = readSafeInset("--safe-top");
     const safeBottom = readSafeInset("--safe-bottom");
 
-    const headerY = safeTop + 36;
-    const headerBottom = headerY + 44;
+    // Row one is the quit and restart buttons (DOM, in the corners); the
+    // score and spin meter sit on row two.
+    const headerY = safeTop + 74;
+    const headerBottom = headerY + 38;
     // A generous tray: these pieces are the thing you grab, so they get room
     // to be drawn fat rather than dainty.
     const trayHeight = 168;
