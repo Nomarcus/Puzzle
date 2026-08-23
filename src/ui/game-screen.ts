@@ -14,6 +14,7 @@ import {
   type Move,
   RULES,
   applyMove,
+  dealFreshTray,
   slotPiece,
 } from "../engine/game.js";
 import type { Piece } from "../engine/pieces.js";
@@ -158,6 +159,21 @@ export class GameScreen {
       return piece !== null && hasPlacement(this.state.board, piece);
     });
     this.stuck = !this.placeable.some(Boolean);
+
+    // The engine refills the tray whenever the last slot is spent, so an empty
+    // tray on a live board should be unreachable. It is also the one state a
+    // player cannot escape from, so it is worth refusing to display: deal a
+    // fresh tray, keeping the board and the score, rather than leaving somebody
+    // stuck with nothing to drag.
+    if (!this.state.over && this.state.tray.every((slot) => slot === null)) {
+      console.error("Shiftle: empty tray on a live board, dealing a fresh one");
+      this.state = dealFreshTray(this.state);
+      this.placeable = this.state.tray.map((slot) => {
+        const piece = slotPiece(slot);
+        return piece !== null && hasPlacement(this.state.board, piece);
+      });
+      this.stuck = !this.placeable.some(Boolean);
+    }
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -175,10 +191,31 @@ export class GameScreen {
         this.announced = true;
         this.options.onGameOver?.(this.state);
       }
-      this.render();
+
+      // The frame is scheduled whatever happens. Painting is cosmetic, and a
+      // throw in one effect must never be able to stop the loop and freeze a
+      // round the player is in the middle of.
+      try {
+        this.render();
+      } catch (error) {
+        this.reportPaintFailure(error);
+      }
       this.frame = requestAnimationFrame(tick);
     };
     this.frame = requestAnimationFrame(tick);
+  }
+
+  /** Logged once per screen; a repeating paint failure must not spam. */
+  private paintFailed = false;
+
+  private reportPaintFailure(error: unknown): void {
+    if (this.paintFailed) return;
+    this.paintFailed = true;
+    // Drop the transient state most likely to be the cause, so the next frame
+    // has a chance of painting a usable board.
+    this.particles = [];
+    this.effects = [];
+    console.error("Shiftle: paint failed, dropping effects", error);
   }
 
   stop(): void {
@@ -188,6 +225,21 @@ export class GameScreen {
 
   setTheme(theme: Theme): void {
     this.theme = theme;
+  }
+
+  /**
+   * Applies a move through the same path a gesture takes, effects and all.
+   * Used by the browser tests so long sessions exercise the real pipeline
+   * rather than quietly skipping it.
+   */
+  playMove(move: Move): boolean {
+    const before = this.state;
+    this.commit(move, null, null);
+    return this.state !== before;
+  }
+
+  isRunning(): boolean {
+    return this.frame !== 0;
   }
 
   getState(): GameState {
@@ -565,18 +617,28 @@ export class GameScreen {
 
     const board = this.liveBoardLayout();
     drawBoard(ctx, this.state.board, board, this.theme);
-    this.drawDropPops(ctx, board);
-    this.drawClearBursts(ctx, board);
 
-    if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
-
-    this.drawShockwaves(ctx);
-    drawParticles(ctx, this.particles, this.theme);
+    // Decoration, in its own pass. If any of it throws, the player still gets
+    // a board and a tray they can act on.
+    try {
+      this.drawDropPops(ctx, board);
+      this.drawClearBursts(ctx, board);
+      if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
+      this.drawShockwaves(ctx);
+      drawParticles(ctx, this.particles, this.theme);
+    } catch (error) {
+      this.reportPaintFailure(error);
+    }
 
     this.drawTray(ctx);
     this.drawStuckHint(ctx);
-    this.drawFloatingText(ctx);
-    this.drawDeathBeat(ctx);
+
+    try {
+      this.drawFloatingText(ctx);
+      this.drawDeathBeat(ctx);
+    } catch (error) {
+      this.reportPaintFailure(error);
+    }
 
     ctx.restore();
   }
@@ -817,7 +879,7 @@ export class GameScreen {
     const { slots, trayTop, trayHeight, width } = this.layout;
 
     ctx.save();
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = 0.55;
     roundRect(ctx, 12, trayTop - 6, width - 24, trayHeight + 8, 26);
     ctx.fillStyle = this.theme.plate;
     ctx.fill();
@@ -836,7 +898,8 @@ export class GameScreen {
         this.state.spec,
         { x: box.x + 6, y: box.y + 12, width: box.width - 12, height: box.height - 24 },
         this.layout.boardRadius,
-        this.placeable[i] ? 1 : 0.26,
+        this.placeable[i] ? 1 : 0.65,
+        !this.placeable[i],
       );
     });
   }

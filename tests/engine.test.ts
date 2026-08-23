@@ -16,7 +16,7 @@ import {
 } from "../src/engine/board.js";
 import { PIECES, pieceById } from "../src/engine/pieces.js";
 import { isBullseye } from "../src/engine/board.js";
-import { playOut } from "../src/engine/bot.js";
+import { chooseMove, playOut } from "../src/engine/bot.js";
 import { PACKS, SIZES, bagFor, dailyVariant } from "../src/engine/variants.js";
 import { pushSpoke, spinRing } from "../src/engine/rotate.js";
 import { lineColour, pureLines } from "../src/engine/board.js";
@@ -26,6 +26,7 @@ import {
   RULES,
   applyMove,
   createGame,
+  dealFreshTray,
   isGameOver,
   replay,
   slotPiece,
@@ -628,5 +629,42 @@ describe("single-colour clears", () => {
     const result = applyMove(state, { type: "place", slot: 0, r: 0, s: 0 })!;
     expect(result.events.pureClears).toBe(0);
     expect(result.state.pushes).toBe(0);
+  });
+});
+
+describe("the tray never strands a player", () => {
+  it("always leaves something to drag while the round is live", () => {
+    // The reported symptom was a live board with an empty tray and no way to
+    // act. Play every disc and pack out and assert it cannot happen.
+    for (const size of SIZES) {
+      for (const pack of PACKS) {
+        let state = createGame({
+          seed: hashSeed(`stranded:${size.id}:${pack.id}`),
+          spec: size.spec,
+          pack: pack.id,
+        });
+
+        for (let turn = 0; turn < 300 && !state.over; turn++) {
+          expect(state.tray.some((slot) => slot !== null)).toBe(true);
+          const move = chooseMove(state);
+          if (!move) break;
+          const result = applyMove(state, move);
+          if (!result) break;
+          state = result.state;
+        }
+      }
+    }
+  });
+
+  it("deals a fresh tray without touching the score or the board", () => {
+    let state = createGame({ seed: 77 });
+    const piece = slotPiece(state.tray[0] ?? null)!;
+    const spot = placements(state.board, piece)[0]!;
+    state = applyMove(state, { type: "place", slot: 0, r: spot.r, s: spot.s })!.state;
+
+    const rescued = dealFreshTray({ ...state, tray: [null, null, null] });
+    expect(rescued.tray.every((slot) => slot !== null)).toBe(true);
+    expect(rescued.score).toBe(state.score);
+    expect(Array.from(rescued.board.cells)).toEqual(Array.from(state.board.cells));
   });
 });

@@ -158,8 +158,9 @@ export function drawBlock(
   colourId: number,
   theme: Theme,
   alpha = 1,
+  muted = false,
 ): void {
-  const colour = blockColour(theme, colourId);
+  const colour = muted ? theme.muted : blockColour(theme, colourId);
   const ri = g.innerRadius + g.pad;
   const ro = g.outerRadius - g.pad;
   const width = ro - ri;

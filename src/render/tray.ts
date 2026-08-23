@@ -64,6 +64,7 @@ export function drawPiece(
   box: Box,
   boardOuterRadius: number,
   alpha = 1,
+  muted = false,
 ): number {
   const layout = computeLayout(spec, 0, 0, boardOuterRadius);
   const { r, s } = anchorFor(piece, spec);
@@ -81,7 +82,7 @@ export function drawPiece(
   ctx.translate(-(bounds.x + bounds.width / 2), -(bounds.y + bounds.height / 2));
 
   for (const [dr, ds] of piece.cells) {
-    drawBlock(ctx, cellGeometry(layout, r + dr, s + ds), colourId, theme);
+    drawBlock(ctx, cellGeometry(layout, r + dr, s + ds), colourId, theme, 1, muted);
   }
 
   ctx.restore();

@@ -258,6 +258,22 @@ export function createGame(options: {
   };
 }
 
+/**
+ * Deals a fresh tray onto a round already in progress, keeping the board and
+ * the score. A safety net rather than a normal path: the tray refills itself
+ * whenever the last slot is spent, so nothing should ever need this.
+ */
+export function dealFreshTray(state: GameState): GameState {
+  const [tray, rngState] = dealTray(
+    state.rngState,
+    state.spec,
+    state.pack,
+    state.board,
+    state.fairDeal,
+  );
+  return { ...state, tray, rngState };
+}
+
 export function slotPiece(slot: TraySlot | null): Piece | null {
   return slot ? pieceById(slot.pieceId) : null;
 }

@@ -31,6 +31,8 @@ export interface Theme {
   readonly blockOutline: string;
   readonly text: string;
   readonly textSoft: string;
+  /** Pieces with nowhere to go. Fading alone vanishes on the light themes. */
+  readonly muted: BlockColour;
   /** Index 0 is unused — colour ids start at 1 to keep 0 meaning "empty". */
   readonly blocks: readonly BlockColour[];
 }
@@ -65,6 +67,7 @@ export const SKY: Theme = {
   empty: "#C9DFEE",
   emptyEdge: "#AECEE2",
   blockOutline: "rgba(28, 52, 74, 0.20)",
+  muted: candy("#A9BCCB", "#C6D6E2", "#8CA0B0"),
   text: "#12384F",
   textSoft: "#5B8AA6",
   blocks: CANDY_BLOCKS,
@@ -80,6 +83,7 @@ export const CREAM: Theme = {
   empty: "#E5D2B0",
   emptyEdge: "#CDB58E",
   blockOutline: "rgba(90, 60, 20, 0.20)",
+  muted: candy("#C3B39B", "#D9CCB8", "#A3927A"),
   text: "#5A3B14",
   textSoft: "#A5824F",
   blocks: CANDY_BLOCKS,
@@ -95,6 +99,7 @@ export const MINT: Theme = {
   empty: "#C6E5D6",
   emptyEdge: "#A8D0BC",
   blockOutline: "rgba(20, 66, 48, 0.20)",
+  muted: candy("#A8C3B6", "#C4D9CF", "#8AA79A"),
   text: "#14513A",
   textSoft: "#579B7C",
   blocks: CANDY_BLOCKS,

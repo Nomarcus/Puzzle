@@ -7,6 +7,7 @@
  */
 
 import { type GameState, createGame, isGameOver } from "./engine/game.js";
+import { chooseMove } from "./engine/bot.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
 import {
@@ -541,6 +542,19 @@ if (import.meta.env.DEV) {
      * the tray, so the burst and the sweep can be captured without playing a
      * whole round to reach one.
      */
+    /** Plays one bot move against the live screen, animations and all. */
+    botMove: () => {
+      const current = screen?.getState();
+      if (!current || !screen) return false;
+      const move = chooseMove(current);
+      if (!move) return false;
+      // Through the screen, so effects, particles and sound all run.
+      return screen.playMove(move);
+    },
+
+    /** Is the animation loop still running? */
+    frameAlive: () => screen?.isRunning() ?? false,
+
     /** Hands the player pushes, for exercising the spoke gesture. */
     givePush: (n = 1) => {
       const current = screen?.getState();
