@@ -62,8 +62,8 @@ workflows:
                   }}
               }}
           '''
-          text = text.replace("    buildTypes {", signing + "    buildTypes {")
           text = text.replace("        release {", "        release {\n            signingConfig signingConfigs.release")
+          text = text.replace("    buildTypes {", signing + "    buildTypes {")
           gradle.write_text(text)
           PY
 
