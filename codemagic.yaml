@@ -77,13 +77,22 @@ workflows:
               --json | json_first_id
           )"
 
-          app-store-connect profiles create "$BUNDLE_RESOURCE_ID" \
-            --certificate-ids "$CERTIFICATE_RESOURCE_ID" \
-            --type IOS_APP_STORE \
-            --name "shiftle_appstore_profile" \
-            --save || \
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE
+          PROFILE_RESOURCE_ID="$(
+            app-store-connect bundle-ids profiles \
+              --bundle-ids "$BUNDLE_RESOURCE_ID" \
+              --type IOS_APP_STORE \
+              --state ACTIVE \
+              --json | json_first_id
+          )"
+          if [ -z "$PROFILE_RESOURCE_ID" ]; then
+            app-store-connect profiles create "$BUNDLE_RESOURCE_ID" \
+              --certificate-ids "$CERTIFICATE_RESOURCE_ID" \
+              --type IOS_APP_STORE \
+              --name "shiftle_appstore_profile" \
+              --save
+          else
+            app-store-connect profiles get "$PROFILE_RESOURCE_ID" --save
+          fi
 
           keychain add-certificates
           xcode-project use-profiles
