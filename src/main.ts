@@ -345,7 +345,14 @@ function showHowTo(): void {
   node.append(el("div", "how-title", t("howTitle")));
 
   const steps = el("div", "how");
-  ([["1", t("how1")], ["2", t("how2")], ["3", t("how3")]] as Array<[string, string]>).forEach(
+  (
+    [
+      ["1", t("how1")],
+      ["2", t("how2")],
+      ["3", t("how3")],
+      ["★", t("how4")],
+    ] as Array<[string, string]>
+  ).forEach(
     ([num, text]) => {
       const step = el("div", "step");
       step.append(el("b", undefined, num), el("p", undefined, text));
@@ -379,6 +386,9 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
     mode,
     spec: sizeById(setup.size).spec,
     pack: setup.pack,
+    // Free play has no ending; the daily is rationed so every attempt is the
+    // same length as well as the same puzzle.
+    rules: puzzle ? { pieceLimit: puzzle.pieceLimit } : undefined,
   });
   screen = new GameScreen(canvas, game, {
     theme,
@@ -415,7 +425,7 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   const stats = el("div", "stats");
   const entries: Array<[string, string]> = [
     [t("rings"), String(state.stats.ringsCleared)],
-    [t("pieces"), String(state.stats.piecesPlaced)],
+    [t("spokes"), String(state.stats.spokesCleared)],
     [t("bestCombo"), `x${state.stats.bestCombo}`],
   ];
   for (const [label, value] of entries) {

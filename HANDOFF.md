@@ -6,14 +6,19 @@ needs a Mac, Xcode and an Apple Developer account.
 ## What Shiftle is
 
 A block puzzle on a round board. You drag arcs, wedges and curved bricks onto a
-disc of rings and sectors; filling one whole ring makes it pop. The one special
-move is spinning a ring by a single sector, which needs no wrap-around rule to
-explain because a ring has no edge. Spins are earned by clearing and act as
-lives: the round only ends when nothing fits *and* no spins remain.
+disc of rings and sectors. A full ring pops, and so does a full spoke. Complete
+one of each with the same move and the entire disc is swept — the bullseye.
 
-Two modes. **Daily** derives its board, piece pack and sequence from the UTC
-date, so every player in the world gets the identical puzzle — one attempt per
-day. **Free play** lets you pick the disc and pack.
+The one special move is spinning a ring by a single sector, which needs no
+wrap-around rule to explain because a ring has no edge. Only rings pay for
+spins, and spins act as lives: the round ends when nothing fits *and* no spins
+remain.
+
+Two modes. **Free play** runs indefinitely — it is a high-score chase, not a
+puzzle with an ending. **Daily** derives its board, piece pack and sequence from
+the UTC date so every player in the world gets the identical puzzle, and it is
+rationed to 60 pieces so every attempt is the same length as well as the same
+puzzle. One attempt per day.
 
 ## State of the project
 

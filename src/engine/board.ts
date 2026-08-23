@@ -96,14 +96,13 @@ export function hasPlacement(board: Board, piece: Piece): boolean {
  * Rings and spokes are checked together and pop simultaneously, so a placement
  * that completes both cashes in as one big combined clear.
  *
- * Spoke clears are off by default, and that is a measured decision rather than
- * a simplification. A spoke is only as long as the disc has rings, so it was
- * far cheaper than a ring and cleared constantly — which drained the board
- * faster than it could fill, so rounds never ended, rings almost never
- * completed and the spin was never needed. The flag stays so tools/experiment
- * can re-check that call against any future board shape.
+ * Spokes clear as well as rings, and they are deliberately the cheaper of the
+ * two: a spoke is only as long as the disc has rings. That constant drain is
+ * what keeps a round alive indefinitely, which is the point — this is a
+ * high-score chase, not a puzzle with an ending. Rings are the rare prize, and
+ * completing one at the same time as a spoke takes the whole board.
  */
-export function findClears(board: Board, spokeClears = false): Clears {
+export function findClears(board: Board, spokeClears = true): Clears {
   const { rings: ringCount, sectors } = board.spec;
   const rings: number[] = [];
   const spokes: number[] = [];
@@ -140,6 +139,14 @@ export function hasClears(clears: Clears): boolean {
 }
 
 /**
+ * A ring and a spoke completed by the same move. They cross, and the whole
+ * disc goes with them — the biggest thing that can happen in a round.
+ */
+export function isBullseye(clears: Clears): boolean {
+  return clears.rings.length > 0 && clears.spokes.length > 0;
+}
+
+/**
  * Empties the given rings and spokes. Returns the cleared cells too, because
  * the renderer needs to know exactly which tiles to burst.
  */
@@ -157,6 +164,16 @@ export function applyClears(board: Board, clears: Clears): { board: Board; cells
     cells.push({ r, s });
     next.cells[index] = 0;
   };
+
+  if (isBullseye(clears)) {
+    // A ring and a spoke together sweep the disc, filled cells and all.
+    for (let r = 0; r < board.spec.rings; r++) {
+      for (let s = 0; s < board.spec.sectors; s++) {
+        if (board.cells[cellIndex(board.spec, r, s)] !== 0) take(r, s);
+      }
+    }
+    return { board: next, cells };
+  }
 
   for (const r of clears.rings) {
     for (let s = 0; s < board.spec.sectors; s++) take(r, s);

@@ -15,6 +15,8 @@ import {
   placements,
 } from "../src/engine/board.js";
 import { PIECES, pieceById } from "../src/engine/pieces.js";
+import { isBullseye } from "../src/engine/board.js";
+import { playOut } from "../src/engine/bot.js";
 import { PACKS, SIZES, bagFor, dailyVariant } from "../src/engine/variants.js";
 import { spinRing } from "../src/engine/rotate.js";
 import { clearScore, comboMultiplier, simultaneousMultiplier } from "../src/engine/scoring.js";
@@ -156,9 +158,7 @@ describe("clears", () => {
     for (let r = 0; r < spec.rings; r++) {
       board = place(board, pieceById("dot"), r, 7, 4);
     }
-    // Spokes only pop when the rule is switched on.
-    expect(findClears(board).spokes).toEqual([]);
-    const clears = findClears(board, true);
+    const clears = findClears(board);
     expect(clears.spokes).toEqual([7]);
     expect(clears.rings).toEqual([]);
   });
@@ -168,7 +168,7 @@ describe("clears", () => {
     const board = boardWithHoles([[2, 3]]);
     const full = place(board, pieceById("dot"), 2, 3, 5);
 
-    const clears = findClears(full, true);
+    const clears = findClears(full);
     expect(clears.rings.length).toBe(spec.rings);
     expect(clears.spokes.length).toBe(spec.sectors);
 
@@ -183,7 +183,7 @@ describe("clears", () => {
     for (let r = 0; r < spec.rings; r++) board = place(board, pieceById("dot"), r, 7, 4);
     board = place(board, pieceById("dot"), 0, 9, 6);
 
-    const { board: after } = applyClears(board, findClears(board, true));
+    const { board: after } = applyClears(board, findClears(board));
     expect(getCell(after, 0, 7)).toBe(0);
     expect(getCell(after, 0, 9)).toBe(6);
   });
@@ -226,9 +226,9 @@ describe("spinning a ring", () => {
     for (const r of [0, 1, 3, 4]) board = place(board, pieceById("dot"), r, 0, 1);
     board = place(board, pieceById("dot"), 2, 1, 1);
 
-    expect(findClears(board, true).spokes).toEqual([]);
+    expect(findClears(board).spokes).toEqual([]);
     const spun = spinRing(board, 2, -1);
-    expect(findClears(spun, true).spokes).toEqual([0]);
+    expect(findClears(spun).spokes).toEqual([0]);
   });
 });
 
@@ -430,14 +430,11 @@ describe("variants", () => {
     }
   });
 
-  it("clears rings only, unless spokes are asked for", () => {
-    expect(DEFAULT_RULES.spinSource).toBe("any");
-    let board = createBoard(spec);
-    for (let r = 0; r < spec.rings; r++) board = place(board, pieceById("dot"), r, 3, 1);
-    // A full spoke is inert by default — measurement showed spokes drained the
-    // disc faster than it filled, so rounds never ended.
-    expect(findClears(board).spokes).toEqual([]);
-    expect(findClears(board, true).spokes).toEqual([3]);
+  it("pays for spins with rings only", () => {
+    // Spokes are constant and cheap; paying for them would hand out unlimited
+    // escapes and nothing would ever be at stake.
+    expect(DEFAULT_RULES.spinSource).toBe("rings");
+    expect(DEFAULT_RULES.clearsPerSpin).toBe(1);
   });
 
   it("needs a full ring of the right length on each size", () => {
@@ -450,5 +447,52 @@ describe("variants", () => {
       board = place(board, pieceById("dot"), 0, size.spec.sectors - 1, 1);
       expect(findClears(board).rings).toEqual([0]);
     }
+  });
+});
+
+
+describe("the bullseye", () => {
+  it("only counts when a ring and a spoke go together", () => {
+    expect(isBullseye({ rings: [1], spokes: [] })).toBe(false);
+    expect(isBullseye({ rings: [], spokes: [2] })).toBe(false);
+    expect(isBullseye({ rings: [1], spokes: [2] })).toBe(true);
+  });
+
+  it("sweeps the whole disc, not just the two lines", () => {
+    // Ring 0 needs one more cell; spoke 4 needs the same one. Scatter some
+    // unrelated blocks that a plain clear would leave behind.
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) {
+      if (s !== 4) board = place(board, pieceById("dot"), 0, s, 1);
+    }
+    for (let r = 1; r < spec.rings; r++) board = place(board, pieceById("dot"), r, 4, 2);
+    board = place(board, pieceById("dot"), 3, 9, 5);
+    board = place(board, pieceById("dot"), 2, 7, 6);
+
+    const before = filledCount(board);
+    const full = place(board, pieceById("dot"), 0, 4, 3);
+    const clears = findClears(full);
+    expect(isBullseye(clears)).toBe(true);
+
+    const { board: after, cells } = applyClears(full, clears);
+    expect(filledCount(after)).toBe(0);
+    // Every filled cell is reported, so the burst animates the whole disc.
+    expect(cells.length).toBe(before + 1);
+  });
+
+  it("is worth far more than the two lines on their own", () => {
+    const apart = clearScore({ rings: [0], spokes: [] }, 0, false) +
+      clearScore({ rings: [], spokes: [4] }, 0, false);
+    const together = clearScore({ rings: [0], spokes: [4] }, 0, false);
+    expect(together).toBeGreaterThan(apart * 3);
+  });
+
+  it("lets competent play run indefinitely", () => {
+    // The point of endless mode. Measured with the bot rather than a naive
+    // first-legal-spot policy, because the claim is about competent play: a
+    // player who is trying should not be knocked out by the rules themselves.
+    const result = playOut(createGame({ seed: 4242, spec: { rings: 6, sectors: 10 } }), 400);
+    expect(result.state.stats.piecesPlaced).toBeGreaterThan(150);
+    expect(result.stalled).toBe(false);
   });
 });

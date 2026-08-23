@@ -23,6 +23,7 @@ const TABLE = {
   spins: { sv: "SNURR", en: "SPINS" },
   rings: { sv: "RINGAR", en: "RINGS" },
   pieces: { sv: "BITAR", en: "PIECES" },
+  spokes: { sv: "EKAR", en: "SPOKES" },
   bestCombo: { sv: "BÄSTA KOMBO", en: "BEST COMBO" },
   combo: { sv: "KOMBO", en: "COMBO" },
   share: { sv: "Dela resultat", en: "Share result" },
@@ -37,12 +38,16 @@ const TABLE = {
     en: "Drag a piece from the tray onto the disc.",
   },
   how2: {
-    sv: "Fyll en hel cirkel hela vägen runt — den poppar.",
-    en: "Fill one whole circle all the way round — it pops.",
+    sv: "Fyll en hel ring eller en hel eke — den poppar.",
+    en: "Fill a whole ring or a whole spoke — it pops.",
   },
   how3: {
-    sv: "Dra på skivan för att snurra en ring ett steg — så får du sista biten på plats.",
-    en: "Drag on the disc to spin a ring one step — that is how you line up the last gap.",
+    sv: "Dra runt på skivan för att snurra en ring ett steg. Varje ring du rensar ger ett snurr tillbaka.",
+    en: "Drag around on the disc to spin a ring one step. Every ring you clear buys back a spin.",
+  },
+  how4: {
+    sv: "Ring och eke i samma drag sopar hela brädet. Det är den stora.",
+    en: "A ring and a spoke in the same move sweeps the whole board. That is the big one.",
   },
   gotIt: { sv: "Kör!", en: "Got it!" },
   how: { sv: "Så spelar du", en: "How to play" },
@@ -61,6 +66,7 @@ const TABLE = {
 
   stuckHint: { sv: "Inget passar — snurra en ring", en: "Nothing fits — spin a ring" },
   stuckOver: { sv: "Inget passar längre", en: "Nothing fits any more" },
+  bullseye: { sv: "FULLTRÄFF!", en: "BULLSEYE!" },
 
   setupTitle: { sv: "Välj skiva", en: "Choose your disc" },
   sizeLabel: { sv: "SKIVA", en: "DISC" },

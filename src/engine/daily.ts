@@ -17,6 +17,14 @@ import { createGame } from "./game.js";
 import { dailyNumber, dailySeed, hashSeed } from "./rng.js";
 import { type PackId, type SizeId, dailyVariant, sizeById } from "./variants.js";
 
+/**
+ * Free play runs indefinitely by design, so the daily needs its own ending or
+ * one attempt could last hours and scores would measure stamina rather than
+ * skill. A fixed ration of pieces makes every player's day the same length as
+ * well as the same puzzle.
+ */
+export const DAILY_PIECES = 60;
+
 /** A day the bot cannot place this many pieces on is not worth playing. */
 const MIN_PLACEMENTS = 18;
 /** Give up after this many reseeds and take the best day we saw. */
@@ -27,6 +35,7 @@ export interface DailyPuzzle {
   readonly seed: number;
   readonly size: SizeId;
   readonly pack: PackId;
+  readonly pieceLimit: number;
   /** How far the bot got. Useful for tuning; not shown to the player. */
   readonly botPlacements: number;
 }
@@ -43,8 +52,14 @@ export function dailyPuzzle(date: Date): DailyPuzzle {
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const result = playOut(
-      createGame({ seed, mode: "daily", spec, pack: variant.pack }),
-      400,
+      createGame({
+        seed,
+        mode: "daily",
+        spec,
+        pack: variant.pack,
+        rules: { pieceLimit: DAILY_PIECES },
+      }),
+      DAILY_PIECES + 40,
     );
     const placements = result.state.stats.piecesPlaced;
 
@@ -59,6 +74,7 @@ export function dailyPuzzle(date: Date): DailyPuzzle {
     seed: best.seed,
     size: variant.size,
     pack: variant.pack,
+    pieceLimit: DAILY_PIECES,
     botPlacements: best.placements,
   };
 }

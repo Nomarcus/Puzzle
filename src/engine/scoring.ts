@@ -6,13 +6,17 @@
  * whether spins are too cheap.
  *
  * The shape of it matters more than the constants:
- *   - a spoke is 5 cells and common, so it is the bread and butter
- *   - a ring is 12 cells and rare, so it is the jackpot you build towards
+ *   - a spoke is as long as the disc has rings, so it is common and cheap:
+ *     the bread and butter that keeps the board breathing
+ *   - a ring is as long as it has sectors, so it is rare and pays far more —
+ *     and it is the only thing that buys back a spin
+ *   - a ring and a spoke completed by the same move sweep the entire disc,
+ *     which is the biggest thing that can happen in a round
  *   - clearing several lines at once, and clearing on consecutive turns,
  *     both multiply — that is where the ceiling for expert play lives
  */
 
-import type { Clears } from "./board.js";
+import { type Clears, isBullseye } from "./board.js";
 
 export const SCORING = {
   perCellPlaced: 2,
@@ -25,6 +29,9 @@ export const SCORING = {
   comboCap: 4,
   /** A clear triggered by spinning a ring is worth more — it was earned. */
   spinBonus: 1.5,
+  /** Flat prize for taking a ring and a spoke together, which sweeps the disc. */
+  bullseyeBonus: 2500,
+  bullseyeMultiplier: 2,
 } as const;
 
 export function placementScore(cellsPlaced: number): number {
@@ -45,9 +52,17 @@ export function clearScore(clears: Clears, combo: number, viaSpin: boolean): num
   const lineCount = clears.rings.length + clears.spokes.length;
   if (lineCount === 0) return 0;
 
-  const base = clears.rings.length * SCORING.perRing + clears.spokes.length * SCORING.perSpoke;
+  const bullseye = isBullseye(clears);
+  const base =
+    clears.rings.length * SCORING.perRing +
+    clears.spokes.length * SCORING.perSpoke +
+    (bullseye ? SCORING.bullseyeBonus : 0);
+
   const multiplier =
-    simultaneousMultiplier(lineCount) * comboMultiplier(combo) * (viaSpin ? SCORING.spinBonus : 1);
+    simultaneousMultiplier(lineCount) *
+    comboMultiplier(combo) *
+    (viaSpin ? SCORING.spinBonus : 1) *
+    (bullseye ? SCORING.bullseyeMultiplier : 1);
 
   return Math.round(base * multiplier);
 }

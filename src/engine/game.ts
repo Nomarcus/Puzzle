@@ -57,8 +57,10 @@ export interface RuleSet {
 export const DEFAULT_RULES: RuleSet = {
   startingSpins: 1,
   maxSpins: 3,
-  clearsPerSpin: 2,
-  spinSource: "any",
+  // One ring, one spin. Rings are rare and spokes are constant, so paying for
+  // spokes would hand out unlimited escapes and nothing would ever be at stake.
+  clearsPerSpin: 1,
+  spinSource: "rings",
   pieceLimit: 0,
 };
 
@@ -207,7 +209,7 @@ export function createGame(options: {
 }): GameState {
   const spec = options.spec ?? DEFAULT_SPEC;
   const pack = options.pack ?? DEFAULT_PACK;
-  const spokeClears = options.spokeClears ?? false;
+  const spokeClears = options.spokeClears ?? true;
   const rules: RuleSet = { ...DEFAULT_RULES, ...options.rules };
   const mode = options.mode ?? "endless";
   // The daily must deal the same pieces to everyone, so it never adapts.

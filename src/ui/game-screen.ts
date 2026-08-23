@@ -8,7 +8,7 @@
  */
 
 import { type Cell } from "../engine/geometry.js";
-import { getCell, hasPlacement } from "../engine/board.js";
+import { getCell, hasPlacement, isBullseye } from "../engine/board.js";
 import {
   type GameState,
   type Move,
@@ -412,16 +412,19 @@ export class GameScreen {
       this.effects.push(shake());
 
       const lines = events.clears.rings.length + events.clears.spokes.length;
-      const label = events.clears.rings.length > 0 ? `+${events.scoreDelta}` : `+${events.scoreDelta}`;
-      this.effects.push(
-        floatText(this.layout.board.cx, this.layout.board.cy, label, events.clears.rings.length > 0),
-      );
-      if (events.combo >= 2) {
-        this.effects.push(
-          floatText(this.layout.board.cx, this.layout.board.cy + 46, `${t("combo")} x${events.combo}`),
-        );
+      const bullseye = isBullseye(events.clears);
+      const { cx, cy } = this.layout.board;
+
+      if (bullseye) {
+        // The whole disc just went. It gets its own announcement.
+        this.effects.push(floatText(cx, cy - 40, t("bullseye"), true));
+        this.effects.push(shake());
       }
-      this.options.haptic?.(lines > 1 || events.clears.rings.length > 0 ? "heavy" : "medium");
+      this.effects.push(floatText(cx, cy, `+${events.scoreDelta}`, bullseye || events.clears.rings.length > 0));
+      if (events.combo >= 2) {
+        this.effects.push(floatText(cx, cy + 46, `${t("combo")} x${events.combo}`));
+      }
+      this.options.haptic?.(bullseye || lines > 1 || events.clears.rings.length > 0 ? "heavy" : "medium");
     } else if (move.type === "place") {
       this.options.haptic?.("light");
     }
@@ -584,6 +587,19 @@ export class GameScreen {
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = this.theme.textSoft;
     ctx.fillText(t("spins"), width - 24, headerY + 26);
+
+    // A rationed round has to show what is left of the ration.
+    const limit = this.state.rules.pieceLimit;
+    if (limit > 0) {
+      const left = Math.max(0, limit - this.state.stats.piecesPlaced);
+      ctx.textAlign = "center";
+      ctx.font = `800 22px ${FONT}`;
+      ctx.fillStyle = this.theme.text;
+      ctx.fillText(String(left), width / 2, headerY - 2);
+      ctx.font = `700 12px ${FONT}`;
+      ctx.fillStyle = this.theme.textSoft;
+      ctx.fillText(t("pieces"), width / 2, headerY + 26);
+    }
   }
 
   private drawDropPops(ctx: CanvasRenderingContext2D, board: BoardLayout): void {
