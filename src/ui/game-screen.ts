@@ -45,6 +45,7 @@ import {
 } from "../render/canvas.js";
 import { drawSpinMeter } from "../render/icons.js";
 import { type Theme, blockColour } from "../render/theme.js";
+import { t } from "./strings.js";
 import { type Box, drawPiece } from "../render/tray.js";
 import {
   angleAt,
@@ -376,7 +377,7 @@ export class GameScreen {
       );
       if (events.combo >= 2) {
         this.effects.push(
-          floatText(this.layout.board.cx, this.layout.board.cy + 46, `KOMBO x${events.combo}`),
+          floatText(this.layout.board.cx, this.layout.board.cy + 46, `${t("combo")} x${events.combo}`),
         );
       }
       this.options.haptic?.(lines > 1 || events.clears.rings.length > 0 ? "heavy" : "medium");
@@ -447,7 +448,7 @@ export class GameScreen {
 
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = this.theme.textSoft;
-    ctx.fillText("POÄNG", 25, headerY + 26);
+    ctx.fillText(t("score"), 25, headerY + 26);
 
     // The spin meter flinches when a spin is attempted with none left.
     let nudge = 0;
@@ -465,7 +466,7 @@ export class GameScreen {
     ctx.textAlign = "right";
     ctx.font = `700 12px ${FONT}`;
     ctx.fillStyle = this.theme.textSoft;
-    ctx.fillText("SNURR", width - 24, headerY + 26);
+    ctx.fillText(t("spins"), width - 24, headerY + 26);
   }
 
   private drawDropPops(ctx: CanvasRenderingContext2D, board: BoardLayout): void {

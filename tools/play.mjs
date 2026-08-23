@@ -60,7 +60,8 @@ await shot("01-menu");
 check("menu renders", await page.locator(".title").isVisible());
 
 // --- start a free game -----------------------------------------------------
-await page.getByText("Spela fritt").click();
+// Selected by data-action, not by label — the UI ships in two languages.
+await page.locator('[data-action="endless"]').click();
 await page.waitForTimeout(500);
 await shot("02-fresh-board");
 
@@ -69,13 +70,13 @@ check("game started with a full tray", before && before.tray.every((s) => s !== 
 check("starts with one spin", before?.spins === 1, `spins=${before?.spins}`);
 
 // --- geometry, mirrored from ui/game-screen.ts measure() -------------------
-const headerBottom = 34 + 52;
-const trayTop = VIEWPORT.height - 132 - 12;
-const boardRadius = Math.min(VIEWPORT.width * 0.46, (trayTop - headerBottom) / 2 - 6);
+const headerBottom = 36 + 44;
+const trayTop = VIEWPORT.height - 168 - 14;
+const boardRadius = Math.min(VIEWPORT.width * 0.485, (trayTop - headerBottom) / 2 - 10);
 const cx = VIEWPORT.width / 2;
 const cy = headerBottom + (trayTop - headerBottom) / 2;
 const slotWidth = (VIEWPORT.width - 32) / 3;
-const slotCentre = (i) => ({ x: 16 + slotWidth * (i + 0.5), y: trayTop + 66 });
+const slotCentre = (i) => ({ x: 16 + slotWidth * (i + 0.5), y: trayTop + 84 });
 
 /** A point on the disc, then pushed down by LIFT so the drag lands there. */
 const onDisc = (ringFraction, angleDeg) => {

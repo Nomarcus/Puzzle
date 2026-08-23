@@ -41,7 +41,13 @@
 
       #app {
         position: fixed;
-        inset: 0;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100%;
+        max-width: 440px;
+        overflow: hidden;
       }
 
       #board {
@@ -51,17 +57,27 @@
       }
 
       .overlay {
-        position: fixed;
+        position: absolute;
         inset: 0;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         gap: 14px;
-        padding: calc(var(--safe-top) + 24px) 28px calc(var(--safe-bottom) + 24px);
-        background: rgba(255, 255, 255, 0.82);
-        backdrop-filter: blur(2px);
+        padding: calc(var(--safe-top) + 24px) 26px calc(var(--safe-bottom) + 28px);
         text-align: center;
+      }
+
+      /* The menu sits under the spinning disc, which the canvas draws behind it. */
+      .overlay.menu {
+        justify-content: flex-end;
+        gap: 12px;
+        background: none;
+      }
+
+      /* Game over still needs to lift off the board behind it. */
+      .overlay.result {
+        background: rgba(255, 255, 255, 0.86);
       }
 
       .overlay[hidden] {
@@ -69,76 +85,119 @@
       }
 
       .title {
-        font-size: 54px;
+        font-size: 60px;
         font-weight: 900;
-        letter-spacing: -1.5px;
-        color: #12384f;
+        letter-spacing: -2px;
+        line-height: 1;
+        display: flex;
+        filter: drop-shadow(0 5px 0 rgba(0, 0, 0, 0.16));
+      }
+
+      /* Each letter is its own sweet, painted stroke-first so the white
+         outline sits outside the colour instead of eating into it. */
+      .title span {
+        color: var(--c);
+        -webkit-text-stroke: 7px #fff;
+        paint-order: stroke fill;
+        animation: bob 2.4s ease-in-out infinite;
+        animation-delay: var(--d);
+      }
+
+      @keyframes bob {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-7px); }
       }
 
       .tagline {
         font-size: 16px;
-        font-weight: 600;
-        color: #5b8aa6;
-        margin-top: -8px;
-        margin-bottom: 12px;
-        line-height: 1.45;
-        max-width: 300px;
+        font-weight: 800;
+        color: #fff;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+        margin-bottom: 10px;
+        line-height: 1.4;
+        max-width: 290px;
       }
 
       button {
         font-family: var(--font);
-        font-weight: 800;
+        font-weight: 900;
         border: none;
         cursor: pointer;
         color: #fff;
       }
 
       .big {
+        position: relative;
         width: 100%;
-        max-width: 300px;
-        padding: 18px 24px;
-        font-size: 21px;
-        border-radius: 22px;
+        max-width: 310px;
+        padding: 19px 24px;
+        font-size: 22px;
+        letter-spacing: 0.3px;
+        border-radius: 26px;
         background: #0a7cff;
-        box-shadow: 0 5px 0 #005fd6;
+        box-shadow: 0 6px 0 #005fd6, 0 10px 18px rgba(0, 0, 0, 0.18);
+        text-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+        overflow: hidden;
         transition: transform 0.08s, box-shadow 0.08s;
+      }
+
+      /* A gloss band across the top, the same trick the blocks use. */
+      .big::after {
+        content: "";
+        position: absolute;
+        inset: 4px 8px auto;
+        height: 34%;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.26);
+        pointer-events: none;
       }
 
       .big.alt {
         background: #4fd31a;
-        box-shadow: 0 5px 0 #35a408;
+        box-shadow: 0 6px 0 #35a408, 0 10px 18px rgba(0, 0, 0, 0.18);
+      }
+
+      .big.warm {
+        background: #ff7a00;
+        box-shadow: 0 6px 0 #d65a00, 0 10px 18px rgba(0, 0, 0, 0.18);
       }
 
       .big:active {
-        transform: translateY(4px);
+        transform: translateY(5px);
         box-shadow: 0 1px 0 #005fd6;
       }
 
-      .big.alt:active {
-        box-shadow: 0 1px 0 #35a408;
+      .big.alt:active { box-shadow: 0 1px 0 #35a408; }
+      .big.warm:active { box-shadow: 0 1px 0 #d65a00; }
+
+      .big:disabled {
+        background: #9fb6c4;
+        box-shadow: 0 6px 0 #7e94a1;
       }
 
       .swatches {
         display: flex;
-        gap: 12px;
-        margin-top: 16px;
+        gap: 14px;
+        margin-top: 10px;
       }
 
       .swatch {
-        width: 46px;
-        height: 46px;
+        width: 42px;
+        height: 42px;
         border-radius: 50%;
-        border: 4px solid rgba(0, 0, 0, 0.12);
+        border: 4px solid rgba(255, 255, 255, 0.65);
+        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.16);
       }
 
       .swatch[aria-pressed="true"] {
-        border-color: #12384f;
+        border-color: #fff;
+        transform: scale(1.16);
       }
 
       .stats {
         display: flex;
         gap: 26px;
-        margin: 4px 0 10px;
+        margin: 2px 0 8px;
       }
 
       .stat b {
@@ -149,9 +208,80 @@
 
       .stat span {
         font-size: 11px;
-        font-weight: 700;
+        font-weight: 800;
         letter-spacing: 0.6px;
         color: #5b8aa6;
+      }
+
+      .best {
+        font-size: 14px;
+        font-weight: 800;
+        color: #fff;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      }
+
+      .langs {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .pill {
+        padding: 9px 15px;
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.28);
+        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.14);
+      }
+
+      .pill[aria-pressed="true"] {
+        background: #fff;
+        color: #12384f;
+      }
+
+      .pill.wide { background: rgba(255, 255, 255, 0.28); }
+
+      .how-title {
+        font-size: 34px;
+        font-weight: 900;
+        color: #12384f;
+        letter-spacing: -0.5px;
+      }
+
+      .how {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        max-width: 320px;
+        margin: 6px 0 14px;
+      }
+
+      .step {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        text-align: left;
+      }
+
+      .step b {
+        flex: none;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: #0a7cff;
+        color: #fff;
+        font-size: 17px;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 3px 0 #005fd6;
+      }
+
+      .step p {
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.35;
+        color: #12384f;
       }
 
       .score-big {
