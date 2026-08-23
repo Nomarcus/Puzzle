@@ -547,7 +547,9 @@ export class GameScreen {
 
   /** Holds the dead board on screen for a beat, so the ending has a cause. */
   private drawDeathBeat(ctx: CanvasRenderingContext2D): void {
-    if (!this.diedAt) return;
+    // Once the result card is up it owns the screen; leaving the beat drawn
+    // underneath bleeds through the card's translucent backing.
+    if (!this.diedAt || this.announced) return;
 
     const t0 = Math.min((performance.now() - this.diedAt) / 420, 1);
     const { width, height } = this.layout;

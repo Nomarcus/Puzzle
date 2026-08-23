@@ -25,6 +25,7 @@ import { type Lang, type StringKey, lang, setLang, t } from "./ui/strings.js";
 import { haptic } from "./platform/haptics.js";
 import { isMuted, setMuted, unlock as unlockAudio } from "./platform/audio.js";
 import { shareResult } from "./platform/share.js";
+import { type ShareCard, renderShareDataUrl, renderShareImage } from "./render/share-card.js";
 import { LEADERBOARDS, signIn, submitScore } from "./platform/gamecenter.js";
 import {
   readJson,
@@ -410,6 +411,19 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   gameHud(mode);
 }
 
+/** What the shareable picture says. The disc itself carries the rest. */
+function shareCardFor(state: GameState, mode: "daily" | "endless", puzzle: number): ShareCard {
+  return {
+    title: mode === "daily" ? `Shiftle #${puzzle}` : "Shiftle",
+    score: localeNumber(state.score),
+    stats: [
+      [t("rings"), String(state.stats.ringsCleared)],
+      [t("spokes"), String(state.stats.spokesCleared)],
+      [t("bestCombo"), `x${state.stats.bestCombo}`],
+    ],
+  };
+}
+
 function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   document.querySelector(".hud")?.remove();
   if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
@@ -429,31 +443,35 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   if (mode === "daily") writeJson("daily", result);
 
   const node = overlay("result");
-  node.append(el("div", "how-title", mode === "daily" ? `#${result.puzzle}` : t("gameOver")));
-  node.append(el("div", "score-big", localeNumber(state.score)));
+  const card = shareCardFor(state, mode, result.puzzle);
+
+  // Show the picture itself rather than a summary of it, so the player can see
+  // exactly what they are about to post.
+  const preview = renderShareDataUrl(state.board, theme, card);
+  if (preview) {
+    const image = el("img", "card-preview");
+    image.src = preview;
+    image.alt = `${card.title} — ${card.score}`;
+    node.append(image);
+  } else {
+    // Canvas encoding refused; fall back to plain text rather than nothing.
+    node.append(el("div", "how-title", card.title));
+    node.append(el("div", "score-big", card.score));
+  }
   node.append(el("div", "confirm-body", variantLabel(lastVariant.size, lastVariant.pack)));
 
-  const stats = el("div", "stats");
-  const entries: Array<[string, string]> = [
-    [t("rings"), String(state.stats.ringsCleared)],
-    [t("spokes"), String(state.stats.spokesCleared)],
-    [t("bestCombo"), `x${state.stats.bestCombo}`],
-  ];
-  for (const [label, value] of entries) {
-    const stat = el("div", "stat");
-    stat.append(el("b", undefined, value), el("span", undefined, label));
-    stats.append(stat);
-  }
-  node.append(stats);
+  const share = el("button", "big", t("share"));
+  share.dataset.action = "share";
+  share.addEventListener("click", () => {
+    void renderShareImage(state.board, theme, card).then((image) =>
+      shareResult(shareLine(result), image),
+    );
+  });
+  node.append(share);
 
-  if (mode === "daily") {
-    const share = el("button", "big", t("share"));
-    share.addEventListener("click", () => {
-      void shareResult(shareLine(result));
-    });
-    node.append(share);
-  } else {
-    const again = el("button", "big", t("again"));
+  if (mode === "endless") {
+    const again = el("button", "big warm", t("again"));
+    again.dataset.action = "again";
     again.addEventListener("click", () => startGame("endless", lastVariant));
     node.append(again);
   }
@@ -522,6 +540,13 @@ if (import.meta.env.DEV) {
      * the tray, so the burst and the sweep can be captured without playing a
      * whole round to reach one.
      */
+    /** Renders the share card for whatever is on the board right now. */
+    shareCard: () => {
+      const current = screen?.getState();
+      if (!current) return null;
+      return renderShareDataUrl(current.board, theme, shareCardFor(current, "daily", 142));
+    },
+
     primeBullseye: () => {
       const current = screen?.getState();
       if (!current || !screen) return null;

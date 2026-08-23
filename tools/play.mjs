@@ -257,6 +257,11 @@ check("the dead board is held on screen before the card", !(await page.locator("
 
 await page.waitForTimeout(1400);
 check("the result card arrives after the beat", await page.locator(".overlay").isVisible());
+check(
+  "the result previews the picture that gets shared",
+  (await page.locator(".card-preview").count()) === 1,
+);
+check("there is a share button", (await page.locator('[data-action="share"]').count()) === 1);
 await shot("11-game-over");
 
 await browser.close();

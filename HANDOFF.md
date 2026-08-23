@@ -30,7 +30,7 @@ puzzle. One attempt per day.
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
 | Particles and sound | Done. Sound is synthesised, no audio files. |
-| Share image | Not done yet — the result shares as a text line. |
+| Share image | Done. The final disc renders to a 1080px card. |
 
 ## Key facts
 
@@ -66,6 +66,14 @@ In Xcode, on the **App** target:
 2. Set **Marketing Version** and **Build** (currently `1.0` / `1`).
 3. Select **Any iOS Device (arm64)** → **Product ▸ Archive** → **Distribute App**
    → **App Store Connect** → **Upload**.
+
+## Sharing
+
+The result screen previews a 1080x1080 card built from the player's final
+disc, and the share button hands that PNG to the system share sheet through the
+Web Share API. WKWebView has supported sharing files that way since iOS 15, so
+no Filesystem plugin is needed. If the sheet refuses the image the code falls
+back to sharing text, then to the clipboard.
 
 ## One native detail worth knowing: the silent switch
 
