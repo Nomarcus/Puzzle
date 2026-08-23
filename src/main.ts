@@ -8,6 +8,7 @@
 
 import { type GameState, createGame, isGameOver } from "./engine/game.js";
 import { chooseMove } from "./engine/bot.js";
+import { applyMove } from "./engine/game.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
 import {
@@ -420,7 +421,7 @@ function shareCardFor(state: GameState, mode: "daily" | "endless", puzzle: numbe
     score: localeNumber(state.score),
     stats: [
       [t("rings"), String(state.stats.ringsCleared)],
-      [t("pureClears"), String(state.stats.pureClears)],
+      [t("stripes"), String(state.stats.stripesFired)],
       [t("bestCombo"), `x${state.stats.bestCombo}`],
     ],
   };
@@ -555,6 +556,14 @@ if (import.meta.env.DEV) {
     /** Applies an explicit move through the screen, effects and all. */
     play: (move: unknown) => screen?.playMove(move as never) ?? false,
 
+    /** The events from applying a move against the current state, unrendered. */
+    peek: (move: unknown) => {
+      const current = screen?.getState();
+      if (!current) return null;
+      const result = applyMove(current, move as never);
+      return result ? result.events : null;
+    },
+
     /** Is the animation loop still running? */
     frameAlive: () => screen?.isRunning() ?? false,
 
@@ -580,6 +589,30 @@ if (import.meta.env.DEV) {
         ...current,
         board: { spec: current.spec, cells },
         tray: [{ pieceId: "dot", colour: 3 }, { pieceId: "arc2", colour: 5 }, { pieceId: "brick", colour: 7 }],
+      };
+      screen.replaceState(primed);
+      return { sector: s };
+    },
+
+    /** Puts a striped block in the tray so the detonation can be captured. */
+    primeStripe: (sector = 2) => {
+      const current = screen?.getState();
+      if (!current || !screen) return null;
+      const { rings, sectors } = current.spec;
+      const s = ((sector % sectors) + sectors) % sectors;
+
+      const cells = new Uint8Array(current.board.cells.length);
+      // A ring one cell short, plus blocks off it that only a stripe reaches.
+      for (let c = 0; c < sectors; c++) if (c !== s) cells[c] = 6;
+      for (let r = 2; r < rings; r++) cells[r * sectors + s] = 8;
+      for (const [r, c] of [[3, (s + 4) % sectors], [4, (s + 6) % sectors]] as Array<[number, number]>) {
+        if (r < rings) cells[r * sectors + c] = 2;
+      }
+
+      const primed: GameState = {
+        ...current,
+        board: { spec: current.spec, cells },
+        tray: [{ pieceId: "dot", colour: 6, striped: 0 }, { pieceId: "arc2", colour: 4 }, { pieceId: "brick", colour: 1 }],
       };
       screen.replaceState(primed);
       return { sector: s };

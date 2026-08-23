@@ -8,7 +8,7 @@
  */
 
 import { type Cell } from "../engine/geometry.js";
-import { getCell, hasPlacement, isBullseye } from "../engine/board.js";
+import { colourOf, getCell, hasPlacement } from "../engine/board.js";
 import {
   type GameState,
   type Move,
@@ -569,14 +569,13 @@ export class GameScreen {
       // The colours have already been wiped from the board, so recover them
       // from the pre-move board — falling back to the colour just placed.
       const cells = events.clearedCells.map((cell) => {
-        const previous = getCell(before.board, cell.r, cell.s);
+        const previous = colourOf(getCell(before.board, cell.r, cell.s));
         return { ...cell, colour: previous === 0 ? events.colour : previous };
       });
       this.effects.push(clearBurst(cells));
       this.effects.push(shake());
 
       const lines = events.clears.rings.length + events.clears.spokes.length;
-      const bullseye = isBullseye(events.clears);
       const { cx, cy } = this.layout.board;
 
       // Debris flies outwards from the hub, so a ring throws its blocks off
@@ -585,18 +584,24 @@ export class GameScreen {
       for (const cell of cells) {
         const at = cellCentre(board, cell.r, cell.s);
         burst(this.particles, at.x, at.y, cell.colour, {
-          count: bullseye ? 5 : 7,
-          speed: bullseye ? 300 : 220,
+          count: events.sweep ? 5 : 7,
+          speed: events.sweep ? 300 : 220,
           awayFrom: { x: board.cx, y: board.cy },
         });
       }
 
-      if (bullseye) {
-        // The whole disc just went. It gets its own announcement.
-        this.effects.push(floatText(cx, cy - 40, t("bullseye"), true));
+      if (events.sweep) {
+        // The whole disc just went. It gets its own announcement, and which
+        // one depends on how it was earned.
+        const label = events.bullseye ? t("bullseye") : t("doubleStripe");
+        this.effects.push(floatText(cx, cy - 40, label, true));
         this.effects.push(shake());
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius));
         playSound("bullseye");
+      } else if (events.stripesFired > 0) {
+        this.effects.push(floatText(cx, cy - 40, t("stripe"), true));
+        this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
+        playSound("pure");
       } else if (events.pureClears > 0) {
         this.effects.push(floatText(cx, cy - 40, t("pure"), true));
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
@@ -604,11 +609,15 @@ export class GameScreen {
       } else {
         playSound(events.clears.rings.length > 0 ? "ring" : "spoke", events.combo);
       }
-      this.effects.push(floatText(cx, cy, `+${events.scoreDelta}`, bullseye || events.clears.rings.length > 0));
+      this.effects.push(
+        floatText(cx, cy, `+${events.scoreDelta}`, events.sweep || events.clears.rings.length > 0),
+      );
       if (events.combo >= 2) {
         this.effects.push(floatText(cx, cy + 46, `${t("combo")} x${events.combo}`));
       }
-      this.options.haptic?.(bullseye || lines > 1 || events.clears.rings.length > 0 ? "heavy" : "medium");
+      this.options.haptic?.(
+        events.sweep || lines > 1 || events.clears.rings.length > 0 ? "heavy" : "medium",
+      );
     } else if (move.type === "place") {
       this.options.haptic?.("light");
       playSound("place");
@@ -904,6 +913,8 @@ export class GameScreen {
       { x: x - 90, y: y - DRAG_LIFT - 60, width: 180, height: 120 },
       this.layout.boardRadius,
       0.9,
+      false,
+      this.state.tray[slot]?.striped,
     );
   }
 
@@ -932,6 +943,7 @@ export class GameScreen {
         this.layout.boardRadius,
         this.placeable[i] ? 1 : 0.65,
         !this.placeable[i],
+        slot.striped,
       );
     });
   }

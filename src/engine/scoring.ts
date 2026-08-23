@@ -52,16 +52,23 @@ export function comboMultiplier(combo: number): number {
   return Math.min(1 + SCORING.comboStep * combo, SCORING.comboCap);
 }
 
+/**
+ * `sweep` is passed in rather than read back out of `clears`, because by the
+ * time scoring runs a striped block may have widened the clear to cover both
+ * axes. Deriving it here would pay the jackpot for a bullseye the player never
+ * set up.
+ */
 export function clearScore(
   clears: Clears,
   combo: number,
   viaSpin: boolean,
   pureLines = 0,
+  sweep = isBullseye(clears),
 ): number {
   const lineCount = clears.rings.length + clears.spokes.length;
   if (lineCount === 0) return 0;
 
-  const bullseye = isBullseye(clears);
+  const bullseye = sweep;
   const base =
     clears.rings.length * SCORING.perRing +
     clears.spokes.length * SCORING.perSpoke +

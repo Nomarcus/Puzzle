@@ -9,7 +9,7 @@
  */
 
 import type { BoardSpec } from "../engine/geometry.js";
-import { type Board, getCell } from "../engine/board.js";
+import { type Board, colourOf, getCell, isStripedValue } from "../engine/board.js";
 import type { Piece } from "../engine/pieces.js";
 import { type SectorGeometry, annularSectorPath, ringRadii } from "./annulus.js";
 import { type Theme, blockColour } from "./theme.js";
@@ -159,6 +159,7 @@ export function drawBlock(
   theme: Theme,
   alpha = 1,
   muted = false,
+  striped = false,
 ): void {
   const colour = muted ? theme.muted : blockColour(theme, colourId);
   const ri = g.innerRadius + g.pad;
@@ -201,6 +202,26 @@ export function drawBlock(
   ctx.beginPath();
   ctx.arc(g.cx, g.cy, ro - bandOut * 0.72, g.startAngle - 0.2, g.endAngle + 0.2);
   ctx.stroke();
+
+  if (striped) {
+    // A cross of bright bands: one around the ring, one across it. The mark
+    // shows the two lines the block will take when it goes off.
+    const mid = (ri + ro) / 2;
+    const midAngle = (g.startAngle + g.endAngle) / 2;
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+    ctx.lineWidth = width * 0.2;
+    ctx.lineCap = "butt";
+
+    ctx.beginPath();
+    ctx.arc(g.cx, g.cy, mid, g.startAngle - 0.3, g.endAngle + 0.3);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(g.cx + (ri - width) * Math.cos(midAngle), g.cy + (ri - width) * Math.sin(midAngle));
+    ctx.lineTo(g.cx + (ro + width) * Math.cos(midAngle), g.cy + (ro + width) * Math.sin(midAngle));
+    ctx.stroke();
+  }
 
   ctx.restore();
 
@@ -257,9 +278,9 @@ export function drawBoard(
   for (let r = 0; r < board.spec.rings; r++) {
     for (let s = 0; s < board.spec.sectors; s++) {
       const g = cellGeometry(layout, r, s);
-      const colour = getCell(board, r, s);
-      if (colour === 0) drawEmptyCell(ctx, g, theme);
-      else drawBlock(ctx, g, colour, theme);
+      const value = getCell(board, r, s);
+      if (value === 0) drawEmptyCell(ctx, g, theme);
+      else drawBlock(ctx, g, colourOf(value), theme, 1, false, isStripedValue(value));
     }
   }
 

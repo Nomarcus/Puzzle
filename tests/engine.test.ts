@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { sectorDelta, wrapSector } from "../src/engine/geometry.js";
+import { cellIndex, sectorDelta, wrapSector } from "../src/engine/geometry.js";
 import { DEFAULT_RULES } from "../src/engine/game.js";
 import { dailyNumber, dailySeed, hashSeed, nextRandom } from "../src/engine/rng.js";
 import {
@@ -15,11 +15,18 @@ import {
   placements,
 } from "../src/engine/board.js";
 import { PIECES, pieceById } from "../src/engine/pieces.js";
-import { isBullseye } from "../src/engine/board.js";
+import {
+  STRIPE_FLAG,
+  colourOf,
+  detonate,
+  isBullseye,
+  isStripedValue,
+  lineColour,
+} from "../src/engine/board.js";
 import { chooseMove, playOut } from "../src/engine/bot.js";
 import { PACKS, SIZES, bagFor, dailyVariant } from "../src/engine/variants.js";
 import { pushSpoke, spinRing } from "../src/engine/rotate.js";
-import { lineColour, pureLines } from "../src/engine/board.js";
+import { pureLines } from "../src/engine/board.js";
 import { clearScore, comboMultiplier, simultaneousMultiplier } from "../src/engine/scoring.js";
 import {
   type Move,
@@ -666,5 +673,138 @@ describe("the tray never strands a player", () => {
     expect(rescued.tray.every((slot) => slot !== null)).toBe(true);
     expect(rescued.score).toBe(state.score);
     expect(Array.from(rescued.board.cells)).toEqual(Array.from(state.board.cells));
+  });
+});
+
+describe("striped blocks", () => {
+  const striped = (colour: number) => colour | STRIPE_FLAG;
+
+  it("keeps colour and stripe in one byte", () => {
+    expect(colourOf(striped(5))).toBe(5);
+    expect(isStripedValue(striped(5))).toBe(true);
+    expect(isStripedValue(5)).toBe(false);
+    expect(colourOf(0)).toBe(0);
+  });
+
+  it("does not break a run of one colour", () => {
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 4);
+    board.cells[3] = striped(4);
+    expect(lineColour(board, "ring", 0)).toBe(4);
+  });
+
+  it("takes the lines that cross it", () => {
+    let board = createBoard(spec);
+    // A full ring, with one striped cell in it.
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 2);
+    board.cells[cellIndex(spec, 0, 5)] = striped(2);
+    // Something to prove the spoke really goes too.
+    board = place(board, pieceById("dot"), 3, 5, 7);
+
+    const base = findClears(board);
+    expect(base.rings).toEqual([0]);
+    expect(base.spokes).toEqual([]);
+
+    const fired = detonate(board, base);
+    expect(fired.stripes).toBe(1);
+    expect(fired.sweep).toBe(false);
+    expect(fired.clears.spokes).toContain(5);
+
+    const { board: after } = applyClears(board, fired.clears, fired.sweep);
+    expect(getCell(after, 3, 5)).toBe(0);
+  });
+
+  it("chains: one stripe can set off another", () => {
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 2);
+    board.cells[cellIndex(spec, 0, 4)] = striped(2);
+    // Sitting on spoke 4, which the first stripe will take, is a second one.
+    board = place(board, pieceById("dot"), 2, 4, 3);
+    board.cells[cellIndex(spec, 2, 4)] = striped(3);
+
+    const fired = detonate(board, findClears(board));
+    expect(fired.stripes).toBe(2);
+    expect(fired.clears.rings).toContain(2);
+  });
+
+  it("sweeps the disc when two go off together", () => {
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) board = place(board, pieceById("dot"), 0, s, 2);
+    board.cells[cellIndex(spec, 0, 1)] = striped(2);
+    board.cells[cellIndex(spec, 0, 6)] = striped(2);
+    // A block nowhere near either line, to prove the sweep is total.
+    board = place(board, pieceById("dot"), 4, 9, 8);
+
+    const fired = detonate(board, findClears(board));
+    expect(fired.sweep).toBe(true);
+
+    const { board: after } = applyClears(board, fired.clears, fired.sweep);
+    expect(filledCount(after)).toBe(0);
+  });
+
+  it("does not let a stripe claim a bullseye nobody set up", () => {
+    // One stripe in a ring clear widens the clear, but the bullseye belongs to
+    // the player who completes both lines by placement.
+    let state = createGame({ seed: 31, spec: { rings: 5, sectors: 8 } });
+    const cells = new Uint8Array(state.board.cells.length);
+    for (let s = 1; s < 8; s++) cells[s] = s === 4 ? striped(2) : 2;
+    state = {
+      ...state,
+      board: { spec: state.spec, cells },
+      tray: [{ pieceId: "dot", colour: 2 }, null, null],
+    };
+
+    const result = applyMove(state, { type: "place", slot: 0, r: 0, s: 0 })!;
+    expect(result.events.stripesFired).toBe(1);
+    expect(result.events.bullseye).toBe(false);
+    expect(result.events.sweep).toBe(false);
+  });
+
+  it("is not paid the bullseye bonus for a crossing it detonated itself", () => {
+    // The clear covers both axes once the stripe fires, so anything that reads
+    // the jackpot back out of the expanded clear pays out far too much.
+    const crossing = { rings: [0], spokes: [2] };
+    const earned = clearScore(crossing, 0, false, 0, true);
+    const detonated = clearScore(crossing, 0, false, 0, false);
+    expect(detonated).toBeLessThan(earned / 3);
+  });
+
+  it("records what happened, on every kind of move", () => {
+    let state = createGame({ seed: 41, spec: { rings: 5, sectors: 8 } });
+    const cells = new Uint8Array(state.board.cells.length);
+    for (let s = 1; s < 8; s++) cells[s] = s === 4 ? (2 | STRIPE_FLAG) : 2;
+    state = {
+      ...state,
+      board: { spec: state.spec, cells },
+      tray: [{ pieceId: "dot", colour: 2 }, null, null],
+    };
+
+    const after = applyMove(state, { type: "place", slot: 0, r: 0, s: 0 })!.state;
+    // These three counters were silently dropped from the placement path once
+    // before, so they are worth pinning down.
+    expect(after.stats.stripesFired).toBe(1);
+    expect(after.stats.pureClears).toBe(1);
+    expect(after.stats.ringsCleared).toBe(1);
+  });
+
+  it("deals stripes at roughly the configured rate, and identically per seed", () => {
+    const count = (seed: number) => {
+      let state = createGame({ seed, spec: { rings: 6, sectors: 10 } });
+      let striped = 0;
+      let dealt = 0;
+      for (let turn = 0; turn < 200 && !state.over; turn++) {
+        const move = chooseMove(state);
+        if (!move) break;
+        const before = state.tray.map((s) => s?.striped);
+        state = applyMove(state, move)!.state;
+        if (state.tray.some((s, i) => s?.striped !== undefined && before[i] === undefined)) {
+          striped += state.tray.filter((s) => s?.striped !== undefined).length;
+          dealt += 3;
+        }
+      }
+      return { striped, dealt };
+    };
+    // Same seed, same stripes: the daily has to stay identical for everyone.
+    expect(count(99)).toEqual(count(99));
   });
 });

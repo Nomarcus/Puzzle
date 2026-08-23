@@ -65,6 +65,7 @@ export function drawPiece(
   boardOuterRadius: number,
   alpha = 1,
   muted = false,
+  stripedCell?: number,
 ): number {
   const layout = computeLayout(spec, 0, 0, boardOuterRadius);
   const { r, s } = anchorFor(piece, spec);
@@ -81,9 +82,17 @@ export function drawPiece(
   ctx.scale(scale, scale);
   ctx.translate(-(bounds.x + bounds.width / 2), -(bounds.y + bounds.height / 2));
 
-  for (const [dr, ds] of piece.cells) {
-    drawBlock(ctx, cellGeometry(layout, r + dr, s + ds), colourId, theme, 1, muted);
-  }
+  piece.cells.forEach(([dr, ds], i) => {
+    drawBlock(
+      ctx,
+      cellGeometry(layout, r + dr, s + ds),
+      colourId,
+      theme,
+      1,
+      muted,
+      i === stripedCell,
+    );
+  });
 
   ctx.restore();
   return scale;

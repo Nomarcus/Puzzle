@@ -17,6 +17,7 @@ import {
   applyClears,
   canPlace,
   createBoard,
+  detonate,
   findClears,
   hasClears,
   hasPlacement,
@@ -27,7 +28,7 @@ import {
 } from "./board.js";
 import { type Piece, drawPiece, pieceById } from "./pieces.js";
 import { type PackId, DEFAULT_PACK, bagFor } from "./variants.js";
-import { nextInt } from "./rng.js";
+import { nextInt, nextRandom } from "./rng.js";
 import { type SpinDirection, pushSpoke, spinRing } from "./rotate.js";
 import { clearScore, placementScore } from "./scoring.js";
 
@@ -52,6 +53,8 @@ export interface RuleSet {
    * source of lives, which is what stops spins from becoming unlimited.
    */
   readonly spinSource: "any" | "rings";
+  /** Chance that a dealt piece carries a striped block. */
+  readonly stripeChance: number;
   /**
    * Pushes shift a spoke instead of a ring. They are the rare power: only a
    * line cleared in a single colour, or a bullseye, pays for one.
@@ -68,6 +71,9 @@ export const DEFAULT_RULES: RuleSet = {
   // spokes would hand out unlimited escapes and nothing would ever be at stake.
   clearsPerSpin: 1,
   spinSource: "rings",
+  // Roughly one striped block every four trays: often enough to plan around,
+  // rare enough that landing one still feels like an event.
+  stripeChance: 0.07,
   maxPushes: 2,
   pieceLimit: 0,
 };
@@ -77,6 +83,11 @@ export type GameMode = "daily" | "endless";
 export interface TraySlot {
   readonly pieceId: string;
   readonly colour: number;
+  /**
+   * Index into the piece's cells: that one goes down striped. Undefined for
+   * an ordinary piece, which is nearly all of them.
+   */
+  readonly striped?: number;
 }
 
 export type Move =
@@ -91,6 +102,7 @@ export interface GameStats {
   spokesCleared: number;
   spinsUsed: number;
   pushesUsed: number;
+  stripesFired: number;
   pureClears: number;
   bullseyes: number;
   bestCombo: number;
@@ -131,6 +143,9 @@ export interface MoveEvents {
   readonly combo: number;
   readonly spinsGained: number;
   readonly pushesGained: number;
+  /** Striped blocks that went off, and whether they took the whole disc. */
+  readonly stripesFired: number;
+  readonly sweep: boolean;
   /** Cleared lines that were a single colour. Worth shouting about. */
   readonly pureClears: number;
   readonly bullseye: boolean;
@@ -151,6 +166,7 @@ function emptyStats(): GameStats {
     spokesCleared: 0,
     spinsUsed: 0,
     pushesUsed: 0,
+    stripesFired: 0,
     pureClears: 0,
     bullseyes: 0,
     bestCombo: 0,
@@ -159,16 +175,32 @@ function emptyStats(): GameStats {
 }
 
 /** Draws three pieces blind. */
-function drawTray(rngState: number, spec: BoardSpec, pack: PackId): [tray: TraySlot[], next: number] {
+function drawTray(
+  rngState: number,
+  spec: BoardSpec,
+  pack: PackId,
+  stripeChance: number,
+): [tray: TraySlot[], next: number] {
   const bag = bagFor(spec.rings, pack);
   const tray: TraySlot[] = [];
   let state = rngState;
+
   for (let i = 0; i < RULES.traySize; i++) {
     const [piece, afterPiece] = drawPiece(bag, state);
     const [colourIndex, afterColour] = nextInt(afterPiece, RULES.colours);
-    tray.push({ pieceId: piece.id, colour: colourIndex + 1 });
-    state = afterColour;
+    // Drawn from the same stream whether or not it lands, so the sequence
+    // stays identical for every player on a given seed.
+    const [roll, afterRoll] = nextRandom(afterColour);
+    const [where, afterWhere] = nextInt(afterRoll, piece.size);
+
+    tray.push(
+      roll < stripeChance
+        ? { pieceId: piece.id, colour: colourIndex + 1, striped: where }
+        : { pieceId: piece.id, colour: colourIndex + 1 },
+    );
+    state = afterWhere;
   }
+
   return [tray, state];
 }
 
@@ -190,8 +222,9 @@ function dealTray(
   pack: PackId,
   board: Board,
   fairDeal: boolean,
+  stripeChance: number,
 ): [tray: TraySlot[], next: number] {
-  if (!fairDeal) return drawTray(rngState, spec, pack);
+  if (!fairDeal) return drawTray(rngState, spec, pack, stripeChance);
 
   let state = rngState;
   let bestTray: TraySlot[] | null = null;
@@ -199,7 +232,7 @@ function dealTray(
   let bestLive = -1;
 
   for (let attempt = 0; attempt < 10; attempt++) {
-    const [tray, next] = drawTray(state, spec, pack);
+    const [tray, next] = drawTray(state, spec, pack, stripeChance);
     let live = 0;
     for (const slot of tray) {
       if (hasPlacement(board, pieceById(slot.pieceId))) live++;
@@ -235,7 +268,7 @@ export function createGame(options: {
   // The daily must deal the same pieces to everyone, so it never adapts.
   const fairDeal = options.fairDeal ?? mode !== "daily";
   const board = createBoard(spec);
-  const [tray, rngState] = dealTray(options.seed, spec, pack, board, fairDeal);
+  const [tray, rngState] = dealTray(options.seed, spec, pack, board, fairDeal, rules.stripeChance);
 
   return {
     mode,
@@ -270,6 +303,7 @@ export function dealFreshTray(state: GameState): GameState {
     state.pack,
     state.board,
     state.fairDeal,
+    state.rules.stripeChance,
   );
   return { ...state, tray, rngState };
 }
@@ -344,6 +378,44 @@ function grantPushes(rules: RuleSet, current: number, pure: number, bullseye: bo
   return [pushes, pushes - current];
 }
 
+interface Resolution {
+  readonly board: Board;
+  readonly clears: Clears;
+  readonly clearedCells: Cell[];
+  readonly pure: number;
+  readonly bullseye: boolean;
+  readonly stripes: number;
+  readonly sweep: boolean;
+}
+
+/**
+ * Settles a board after a move: finds the lines, fires any striped blocks
+ * caught in them, and sweeps the disc if the move earned it.
+ *
+ * Purity and the bullseye are read from the lines the player actually
+ * completed, before stripes widen them. A stripe should pay for what it
+ * detonates, not quietly claim credit for a bullseye nobody set up.
+ */
+function resolve(board: Board, spokeClears: boolean): Resolution {
+  const base = findClears(board, spokeClears);
+  const pure = pureLines(board, base);
+  const bullseye = isBullseye(base);
+
+  const fired = detonate(board, base);
+  const sweep = bullseye || fired.sweep;
+  const cleared = applyClears(board, fired.clears, sweep);
+
+  return {
+    board: cleared.board,
+    clears: fired.clears,
+    clearedCells: cleared.cells,
+    pure,
+    bullseye,
+    stripes: fired.stripes,
+    sweep,
+  };
+}
+
 export function applyMove(state: GameState, move: Move): MoveResult | null {
   if (state.over) return null;
   if (move.type === "place") return applyPlace(state, move);
@@ -361,23 +433,20 @@ function applyPlace(
   if (!canPlace(state.board, piece, move.r, move.s)) return null;
 
   const placedCells = pieceCells(state.board, piece, move.r, move.s);
-  let board = place(state.board, piece, move.r, move.s, slot.colour);
+  let board = place(state.board, piece, move.r, move.s, slot.colour, slot.striped);
 
-  const clears = findClears(board, state.spokeClears);
-  // Asked before the clear, while the colours are still on the board.
-  const pure = pureLines(board, clears);
-  const bullseye = isBullseye(clears);
-  const cleared = applyClears(board, clears);
-  board = cleared.board;
+  const settled = resolve(board, state.spokeClears);
+  const { clears, pure, bullseye, stripes, sweep } = settled;
+  board = settled.board;
 
   const didClear = hasClears(clears);
-  const gained = clearScore(clears, state.combo, false, pure);
+  const gained = clearScore(clears, state.combo, false, pure, sweep);
   const scoreDelta = placementScore(piece.size) + gained;
   const combo = didClear ? state.combo + 1 : 0;
   const [spins, clearsTowardSpin, spinsGained] = didClear
     ? grantSpins(state.rules, state.spins, state.clearsTowardSpin, clears)
     : [state.spins, state.clearsTowardSpin, 0];
-  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, bullseye);
+  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, sweep);
 
   // The tray only refills once all three slots are spent — that is what makes
   // the third piece a genuine planning problem rather than an afterthought.
@@ -387,7 +456,7 @@ function applyPlace(
   let rngState = state.rngState;
   let nextTray: (TraySlot | null)[] = tray;
   if (trayRefilled) {
-    const [filled, afterFill] = dealTray(rngState, state.spec, state.pack, board, state.fairDeal);
+    const [filled, afterFill] = dealTray(rngState, state.spec, state.pack, board, state.fairDeal, state.rules.stripeChance);
     nextTray = filled;
     rngState = afterFill;
   }
@@ -402,6 +471,9 @@ function applyPlace(
     cellsPlaced: state.stats.cellsPlaced + piece.size,
     ringsCleared: state.stats.ringsCleared + clears.rings.length,
     spokesCleared: state.stats.spokesCleared + clears.spokes.length,
+    pureClears: state.stats.pureClears + pure,
+    bullseyes: state.stats.bullseyes + (bullseye ? 1 : 0),
+    stripesFired: state.stats.stripesFired + stripes,
     bestCombo: Math.max(state.stats.bestCombo, combo),
     bestClear: Math.max(state.stats.bestClear, gained),
   };
@@ -428,13 +500,15 @@ function applyPlace(
       colour: slot.colour,
       spin: null,
       clears,
-      clearedCells: cleared.cells,
+      clearedCells: settled.clearedCells,
       scoreDelta,
       combo,
       spinsGained,
       pushesGained,
       pureClears: pure,
       bullseye,
+      stripesFired: stripes,
+      sweep,
       trayRefilled,
       gameOver: over,
     },
@@ -447,21 +521,19 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
 
   let board = spinRing(state.board, move.ring, move.dir);
 
-  const clears = findClears(board, state.spokeClears);
-  const pure = pureLines(board, clears);
-  const bullseye = isBullseye(clears);
-  const cleared = applyClears(board, clears);
-  board = cleared.board;
+  const settled = resolve(board, state.spokeClears);
+  const { clears, pure, bullseye, stripes, sweep } = settled;
+  board = settled.board;
 
   const didClear = hasClears(clears);
-  const gained = clearScore(clears, state.combo, true, pure);
+  const gained = clearScore(clears, state.combo, true, pure, sweep);
   const combo = didClear ? state.combo + 1 : state.combo;
 
   const spentSpins = state.spins - 1;
   const [spins, clearsTowardSpin, spinsGained] = didClear
     ? grantSpins(state.rules, spentSpins, state.clearsTowardSpin, clears)
     : [spentSpins, state.clearsTowardSpin, 0];
-  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, bullseye);
+  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, sweep);
 
   const stats: GameStats = {
     ...state.stats,
@@ -469,6 +541,7 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
     spokesCleared: state.stats.spokesCleared + clears.spokes.length,
     pureClears: state.stats.pureClears + pure,
     bullseyes: state.stats.bullseyes + (bullseye ? 1 : 0),
+    stripesFired: state.stats.stripesFired + stripes,
     spinsUsed: state.stats.spinsUsed + 1,
     bestCombo: Math.max(state.stats.bestCombo, combo),
     bestClear: Math.max(state.stats.bestClear, gained),
@@ -495,13 +568,15 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
       colour: 0,
       spin: { ring: move.ring, dir: move.dir },
       clears,
-      clearedCells: cleared.cells,
+      clearedCells: settled.clearedCells,
       scoreDelta: gained,
       combo,
       spinsGained,
       pushesGained,
       pureClears: pure,
       bullseye,
+      stripesFired: stripes,
+      sweep,
       trayRefilled: false,
       gameOver: over,
     },
@@ -518,20 +593,18 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
 
   let board = pushSpoke(state.board, move.sector, move.dir);
 
-  const clears = findClears(board, state.spokeClears);
-  const pure = pureLines(board, clears);
-  const bullseye = isBullseye(clears);
-  const cleared = applyClears(board, clears);
-  board = cleared.board;
+  const settled = resolve(board, state.spokeClears);
+  const { clears, pure, bullseye, stripes, sweep } = settled;
+  board = settled.board;
 
   const didClear = hasClears(clears);
-  const gained = clearScore(clears, state.combo, true, pure);
+  const gained = clearScore(clears, state.combo, true, pure, sweep);
   const combo = didClear ? state.combo + 1 : state.combo;
 
   const [spins, clearsTowardSpin, spinsGained] = didClear
     ? grantSpins(state.rules, state.spins, state.clearsTowardSpin, clears)
     : [state.spins, state.clearsTowardSpin, 0];
-  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes - 1, pure, bullseye);
+  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes - 1, pure, sweep);
 
   const stats: GameStats = {
     ...state.stats,
@@ -539,6 +612,7 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
     spokesCleared: state.stats.spokesCleared + clears.spokes.length,
     pureClears: state.stats.pureClears + pure,
     bullseyes: state.stats.bullseyes + (bullseye ? 1 : 0),
+    stripesFired: state.stats.stripesFired + stripes,
     pushesUsed: state.stats.pushesUsed + 1,
     bestCombo: Math.max(state.stats.bestCombo, combo),
     bestClear: Math.max(state.stats.bestClear, gained),
@@ -565,13 +639,15 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
       colour: 0,
       spin: null,
       clears,
-      clearedCells: cleared.cells,
+      clearedCells: settled.clearedCells,
       scoreDelta: gained,
       combo,
       spinsGained,
       pushesGained,
       pureClears: pure,
       bullseye,
+      stripesFired: stripes,
+      sweep,
       trayRefilled: false,
       gameOver: over,
     },

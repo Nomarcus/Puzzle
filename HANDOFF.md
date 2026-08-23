@@ -15,6 +15,10 @@ spoke one ring. Both wrap, which makes the board a torus and means neither
 needs a wrap-around rule explained — a ring has no edge, and a push simply
 carries a block off the rim and back in at the hub.
 
+Some pieces carry a **striped block**, marked with a white cross. When a
+striped block is caught in a clear it detonates, taking the lines that cross
+it, and detonations chain. Two going off in the same move sweep the whole disc.
+
 Spins are common: every ring cleared buys one back. Pushes are the prize, and
 the only thing that pays for one is clearing a line in a **single colour**, or
 a bullseye. That is what gives the palette a job. Both act as lives: the round

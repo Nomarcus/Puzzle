@@ -16,6 +16,22 @@ import {
 } from "./geometry.js";
 import type { Piece } from "./pieces.js";
 
+/**
+ * Cells are packed into a byte: the low bits carry the colour (1..8, with 0
+ * meaning empty) and one high bit marks a striped block. Keeping it in a
+ * Uint8Array rather than an object array is what lets a board be cloned dozens
+ * of times a frame without the allocator noticing.
+ */
+export const STRIPE_FLAG = 16;
+
+export function colourOf(value: number): number {
+  return value & (STRIPE_FLAG - 1);
+}
+
+export function isStripedValue(value: number): boolean {
+  return value >= STRIPE_FLAG;
+}
+
 export interface Board {
   readonly spec: BoardSpec;
   readonly cells: Uint8Array;
@@ -62,11 +78,23 @@ export function canPlace(board: Board, piece: Piece, r: number, s: number): bool
   return true;
 }
 
-export function place(board: Board, piece: Piece, r: number, s: number, colour: number): Board {
+/**
+ * `stripedCell` is an index into piece.cells: that one cell is laid down as a
+ * striped block. Undefined lays the piece down plain.
+ */
+export function place(
+  board: Board,
+  piece: Piece,
+  r: number,
+  s: number,
+  colour: number,
+  stripedCell?: number,
+): Board {
   const next = cloneBoard(board);
-  for (const [dr, ds] of piece.cells) {
-    next.cells[cellIndex(board.spec, r + dr, s + ds)] = colour;
-  }
+  piece.cells.forEach(([dr, ds], i) => {
+    const value = i === stripedCell ? colour | STRIPE_FLAG : colour;
+    next.cells[cellIndex(board.spec, r + dr, s + ds)] = value;
+  });
   return next;
 }
 
@@ -150,7 +178,59 @@ export function isBullseye(clears: Clears): boolean {
  * Empties the given rings and spokes. Returns the cleared cells too, because
  * the renderer needs to know exactly which tiles to burst.
  */
-export function applyClears(board: Board, clears: Clears): { board: Board; cells: Cell[] } {
+/**
+ * Expands a clear by firing any striped blocks caught in it.
+ *
+ * A stripe takes the lines that cross it, and the expansion repeats, so one
+ * stripe can set off another. Two or more firing in a single move sweep the
+ * whole disc — the combination worth engineering, and the reason a stripe is
+ * worth planting somewhere specific rather than anywhere.
+ */
+export interface Detonation {
+  readonly clears: Clears;
+  readonly stripes: number;
+  readonly sweep: boolean;
+}
+
+export function detonate(board: Board, base: Clears): Detonation {
+  const { rings: ringCount, sectors } = board.spec;
+  const rings = new Set(base.rings);
+  const spokes = new Set(base.spokes);
+  const fired = new Set<number>();
+
+  const consider = (r: number, s: number) => {
+    const index = cellIndex(board.spec, r, s);
+    if (fired.has(index)) return false;
+    if (!isStripedValue(board.cells[index]!)) return false;
+    fired.add(index);
+    rings.add(r);
+    spokes.add(s);
+    return true;
+  };
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const r of [...rings]) {
+      for (let s = 0; s < sectors; s++) if (consider(r, s)) changed = true;
+    }
+    for (const s of [...spokes]) {
+      for (let r = 0; r < ringCount; r++) if (consider(r, s)) changed = true;
+    }
+  }
+
+  return {
+    clears: { rings: [...rings].sort((a, b) => a - b), spokes: [...spokes].sort((a, b) => a - b) },
+    stripes: fired.size,
+    sweep: fired.size >= 2,
+  };
+}
+
+export function applyClears(
+  board: Board,
+  clears: Clears,
+  sweep = isBullseye(clears),
+): { board: Board; cells: Cell[] } {
   if (!hasClears(clears)) return { board, cells: [] };
 
   const next = cloneBoard(board);
@@ -165,7 +245,7 @@ export function applyClears(board: Board, clears: Clears): { board: Board; cells
     next.cells[index] = 0;
   };
 
-  if (isBullseye(clears)) {
+  if (sweep) {
     // A ring and a spoke together sweep the disc, filled cells and all.
     for (let r = 0; r < board.spec.rings; r++) {
       for (let s = 0; s < board.spec.sectors; s++) {
@@ -200,10 +280,12 @@ export function lineColour(board: Board, kind: "ring" | "spoke", index: number):
   let colour = 0;
 
   for (let i = 0; i < length; i++) {
-    const value =
+    const raw =
       kind === "ring"
         ? board.cells[cellIndex(board.spec, index, i)]!
         : board.cells[cellIndex(board.spec, i, index)]!;
+    // A stripe does not break a run of one colour; it is still that colour.
+    const value = colourOf(raw);
     if (value === 0) return 0;
     if (colour === 0) colour = value;
     else if (colour !== value) return 0;
