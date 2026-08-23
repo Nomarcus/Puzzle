@@ -23,6 +23,8 @@ import { GameScreen } from "./ui/game-screen.js";
 import { MenuScene } from "./ui/menu-scene.js";
 import { type Lang, type StringKey, lang, setLang, t } from "./ui/strings.js";
 import { haptic } from "./platform/haptics.js";
+import { shareResult } from "./platform/share.js";
+import { LEADERBOARDS, signIn, submitScore } from "./platform/gamecenter.js";
 import {
   readJson,
   readNumber,
@@ -391,6 +393,10 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   document.querySelector(".hud")?.remove();
   if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
 
+  // No-ops unless a Game Center plugin is actually present, so the web build
+  // behaves exactly the same.
+  void submitScore(mode === "daily" ? LEADERBOARDS.daily : LEADERBOARDS.endless, state.score);
+
   const result: DailyResult = {
     date: dateKey(new Date()),
     puzzle: dailyPuzzle(new Date()).number,
@@ -422,7 +428,7 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   if (mode === "daily") {
     const share = el("button", "big", t("share"));
     share.addEventListener("click", () => {
-      void navigator.share?.({ text: shareLine(result) }).catch(() => {});
+      void shareResult(shareLine(result));
     });
     node.append(share);
   } else {
@@ -488,5 +494,8 @@ if (import.meta.env.DEV) {
     },
   };
 }
+
+// Safe on every launch: the system only ever prompts once.
+void signIn();
 
 showMenu();

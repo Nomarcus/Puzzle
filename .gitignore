@@ -6,7 +6,6 @@ dist/
 # Capacitor / iOS build output (the ios/ project itself IS committed)
 ios/App/Pods/
 ios/App/build/
-ios/App/App/public/
 DerivedData/
 *.xcuserstate
 xcuserdata/
