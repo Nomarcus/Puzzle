@@ -552,8 +552,38 @@ if (import.meta.env.DEV) {
       return screen.playMove(move);
     },
 
+    /** Applies an explicit move through the screen, effects and all. */
+    play: (move: unknown) => screen?.playMove(move as never) ?? false,
+
     /** Is the animation loop still running? */
     frameAlive: () => screen?.isRunning() ?? false,
+
+    /**
+     * Sets one spoke a single cell short, with a matching piece in the tray,
+     * so a spoke clear can be triggered on demand and repeatedly.
+     */
+    primeSpoke: (sector = 2) => {
+      const current = screen?.getState();
+      if (!current || !screen) return null;
+      const { rings, sectors } = current.spec;
+      const s = ((sector % sectors) + sectors) % sectors;
+
+      const cells = new Uint8Array(current.board.cells.length);
+      // Everything but the innermost cell of this spoke, plus a little
+      // unrelated clutter so the board is not suspiciously clean.
+      for (let r = 1; r < rings; r++) cells[r * sectors + s] = 3;
+      for (const [r, c] of [[2, (s + 3) % sectors], [4, (s + 5) % sectors]] as Array<[number, number]>) {
+        if (r < rings) cells[r * sectors + c] = 6;
+      }
+
+      const primed: GameState = {
+        ...current,
+        board: { spec: current.spec, cells },
+        tray: [{ pieceId: "dot", colour: 3 }, { pieceId: "arc2", colour: 5 }, { pieceId: "brick", colour: 7 }],
+      };
+      screen.replaceState(primed);
+      return { sector: s };
+    },
 
     /** Hands the player pushes, for exercising the spoke gesture. */
     givePush: (n = 1) => {

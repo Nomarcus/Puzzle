@@ -341,6 +341,27 @@ export class GameScreen {
     this.canvas.addEventListener("pointermove", this.onMove);
     this.canvas.addEventListener("pointerup", this.onUp);
     this.canvas.addEventListener("pointercancel", this.onCancel);
+    // A pointer that leaves the surface without an up event would otherwise
+    // leave a piece stuck to the cursor and its tray slot hidden.
+    this.canvas.addEventListener("pointerleave", this.onCancel);
+    this.canvas.addEventListener("lostpointercapture", this.onCancel);
+  }
+
+  /**
+   * Every handler runs behind this. A throw in input is the one failure that
+   * can leave the game looking alive but refusing to respond, so a bad event
+   * drops the gesture and lets the next touch start clean rather than wedging
+   * the screen.
+   */
+  private guard(handler: (event: PointerEvent) => void): (event: PointerEvent) => void {
+    return (event: PointerEvent) => {
+      try {
+        handler(event);
+      } catch (error) {
+        this.pointer = { kind: "none" };
+        console.error("Shiftle: input failed, gesture dropped", error);
+      }
+    };
   }
 
   destroy(): void {
@@ -349,6 +370,8 @@ export class GameScreen {
     this.canvas.removeEventListener("pointermove", this.onMove);
     this.canvas.removeEventListener("pointerup", this.onUp);
     this.canvas.removeEventListener("pointercancel", this.onCancel);
+    this.canvas.removeEventListener("pointerleave", this.onCancel);
+    this.canvas.removeEventListener("lostpointercapture", this.onCancel);
   }
 
   private pointAt(event: PointerEvent): { x: number; y: number } {
@@ -356,11 +379,20 @@ export class GameScreen {
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }
 
-  private onDown = (event: PointerEvent): void => {
+  private onDown = this.guard((event: PointerEvent): void => {
     unlockAudio();
+    // Whatever the last gesture left behind, this touch starts fresh.
+    this.pointer = { kind: "none" };
     if (this.state.over) return;
+
     const { x, y } = this.pointAt(event);
-    this.canvas.setPointerCapture(event.pointerId);
+    // Capture can be refused for a pointer the browser no longer considers
+    // active. Losing it costs precision, not the gesture.
+    try {
+      this.canvas.setPointerCapture(event.pointerId);
+    } catch {
+      /* carry on without capture */
+    }
 
     // A drag that starts in the tray is a placement...
     const slot = this.slotAt(x, y);
@@ -401,9 +433,9 @@ export class GameScreen {
         delta: 0,
       };
     }
-  };
+  });
 
-  private onMove = (event: PointerEvent): void => {
+  private onMove = this.guard((event: PointerEvent): void => {
     if (this.pointer.kind === "none") return;
     const { x, y } = this.pointAt(event);
 
@@ -434,9 +466,9 @@ export class GameScreen {
       this.pointer.axis === "spin"
         ? clampSpinPreview(angle, board.sectorAngle)
         : clampPushPreview(radial, width);
-  };
+  });
 
-  private onUp = (event: PointerEvent): void => {
+  private onUp = this.guard((event: PointerEvent): void => {
     const pointer = this.pointer;
     this.pointer = { kind: "none" };
     if (pointer.kind === "none") return;
@@ -482,7 +514,7 @@ export class GameScreen {
     playSound("spin");
     this.commit({ type: "spin", ring: pointer.ring, dir: dir as SpinDirection }, null, null);
     void event;
-  };
+  });
 
   private onCancel = (): void => {
     if (this.pointer.kind === "disc" && this.pointer.axis === "spin") {

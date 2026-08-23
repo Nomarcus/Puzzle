@@ -231,6 +231,42 @@ for (let turn = 0; turn < 16; turn++) {
 await shot("08-large-chunks");
 check("no errors across every disc size", problems.length === 0, problems.join(" | "));
 
+// --- clearing a column, then carrying on -----------------------------------
+// The reported trigger. Clear a spoke with a real drag, then place another
+// piece with another real drag and check the round is still playable.
+const primed = await page.evaluate(() => window.__shiftle.primeSpoke(2));
+await page.waitForTimeout(250);
+
+const specNow = (await state()).spec;
+const holeFrac = 0.34 + (1 - 0.34) * (0.5 / specNow.rings);
+const holeAngle = (-Math.PI / 2) + (primed.sector + 0.5) * ((Math.PI * 2) / specNow.sectors);
+await drag(slotCentre(0), {
+  x: cx + bigRadius * holeFrac * Math.cos(holeAngle),
+  y: cy + bigRadius * holeFrac * Math.sin(holeAngle) + LIFT,
+});
+await page.waitForTimeout(400);
+
+const cleared = await state();
+check("a real drag clears a column", cleared.stats.spokesCleared > 0, `spokes=${cleared.stats.spokesCleared}`);
+check("the tray still holds pieces after a column clears", cleared.tray.some((s) => s !== null));
+
+// And the very next placement must still work.
+const nextSlot = cleared.tray.findIndex((s) => s !== null);
+const nextAngle = (-Math.PI / 2) + 3 * ((Math.PI * 2) / specNow.sectors);
+await drag(slotCentre(nextSlot), {
+  x: cx + bigRadius * 0.8 * Math.cos(nextAngle),
+  y: cy + bigRadius * 0.8 * Math.sin(nextAngle) + LIFT,
+});
+await page.waitForTimeout(300);
+
+const afterClear = await state();
+check(
+  "the round is still playable after a column clear",
+  afterClear.stats.piecesPlaced > cleared.stats.piecesPlaced,
+  `placed ${cleared.stats.piecesPlaced} -> ${afterClear.stats.piecesPlaced}`,
+);
+await shot("23-after-column");
+
 // --- the push: the other axis ----------------------------------------------
 await page.evaluate(() => window.__shiftle.givePush(2));
 await page.waitForTimeout(200);
