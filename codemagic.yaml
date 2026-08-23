@@ -7,6 +7,8 @@ workflows:
       app_store_connect: "Codemagic"
     environment:
       ios_signing:
+        provisioning_profiles:
+          - foraldrahjalpen_appstore_profile_apple
         certificates:
           - foraldrahjalpen_distribution
       vars:
