@@ -6,7 +6,7 @@
  * hand-draw those.
  */
 
-import { type GameState, createGame } from "./engine/game.js";
+import { type GameState, createGame, isGameOver } from "./engine/game.js";
 import { dailyNumber, dailySeed, dateKey, hashSeed } from "./engine/rng.js";
 import {
   type PackId,
@@ -443,6 +443,40 @@ if (import.meta.env.DEV) {
     state: () => screen?.getState() ?? null,
     start: startGame,
     menu: showMenu,
+
+    /**
+     * Jams the disc so nothing in the tray fits, for testing the stuck and
+     * game-over states without playing a whole round to get there.
+     *
+     * One hole per sector, each in a different ring, so no two holes touch and
+     * no ring or spoke is complete. Only a single-cell piece could fit, and the
+     * tray is dealt three larger ones.
+     */
+    jam: (spins = 1) => {
+      const current = screen?.getState();
+      if (!current || !screen) return null;
+
+      const cells = new Uint8Array(current.board.cells.length).fill(3);
+      for (let s = 0; s < current.spec.sectors; s++) {
+        cells[(s % current.spec.rings) * current.spec.sectors + s] = 0;
+      }
+
+      const board = { spec: current.spec, cells };
+      const tray = [
+        { pieceId: "brick33", colour: 1 },
+        { pieceId: "arc4", colour: 2 },
+        { pieceId: "rosette", colour: 4 },
+      ];
+      const jammed: GameState = {
+        ...current,
+        board,
+        tray,
+        spins,
+        over: isGameOver(board, tray, spins),
+      };
+      screen.replaceState(jammed);
+      return jammed;
+    },
   };
 }
 

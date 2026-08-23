@@ -75,7 +75,7 @@ export function drawPiece(
   const cy = box.y + box.height / 2;
 
   ctx.save();
-  ctx.globalAlpha = alpha;
+  ctx.globalAlpha *= alpha;
   ctx.translate(cx, cy);
   ctx.scale(scale, scale);
   ctx.translate(-(bounds.x + bounds.width / 2), -(bounds.y + bounds.height / 2));

@@ -8,7 +8,7 @@
  */
 
 import { type Cell } from "../engine/geometry.js";
-import { getCell } from "../engine/board.js";
+import { getCell, hasPlacement } from "../engine/board.js";
 import {
   type GameState,
   type Move,
@@ -61,6 +61,9 @@ const FONT = '"SF Pro Rounded", ui-rounded, -apple-system, system-ui, sans-serif
 /** How far above the fingertip a dragged piece floats, so the thumb never hides it. */
 const DRAG_LIFT = 76;
 
+/** How long the dead board is left on screen before the result card. */
+const DEATH_BEAT = 1250;
+
 export type HapticKind = "light" | "medium" | "heavy" | "success";
 
 export interface GameScreenOptions {
@@ -99,6 +102,15 @@ export class GameScreen {
   private frame = 0;
   private lastTime = 0;
   private displayScore = 0;
+  /** Which tray slots still have somewhere to go. Recomputed after every move. */
+  private placeable: boolean[] = [];
+  private stuck = false;
+  /**
+   * When the board died. The result card is held back for a beat so the player
+   * sees the disc that killed them instead of a card appearing from nowhere.
+   */
+  private diedAt = 0;
+  private announced = false;
 
   constructor(canvas: HTMLCanvasElement, state: GameState, options: GameScreenOptions) {
     this.canvas = canvas;
@@ -108,7 +120,20 @@ export class GameScreen {
     this.theme = options.theme;
 
     this.measure();
+    this.refreshPlaceable();
     this.bindPointer();
+  }
+
+  /**
+   * A piece with nowhere to go is greyed out in the tray, so the disc visibly
+   * closes in one slot at a time rather than ending without warning.
+   */
+  private refreshPlaceable(): void {
+    this.placeable = this.state.tray.map((slot) => {
+      const piece = slotPiece(slot);
+      return piece !== null && hasPlacement(this.state.board, piece);
+    });
+    this.stuck = !this.placeable.some(Boolean);
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -121,6 +146,10 @@ export class GameScreen {
       this.lastTime = now;
       this.effects = stepEffects(this.effects, dt);
       this.animateScore(dt);
+      if (this.diedAt && !this.announced && now - this.diedAt > DEATH_BEAT) {
+        this.announced = true;
+        this.options.onGameOver?.(this.state);
+      }
       this.render();
       this.frame = requestAnimationFrame(tick);
     };
@@ -145,6 +174,10 @@ export class GameScreen {
     this.displayScore = state.score;
     this.effects = [];
     this.pointer = { kind: "none" };
+    // A state handed in already dead still earns its beat before the card.
+    this.diedAt = state.over ? performance.now() : 0;
+    this.announced = false;
+    this.refreshPlaceable();
   }
 
   resize(): void {
@@ -245,6 +278,12 @@ export class GameScreen {
     const slot = this.slotAt(x, y);
     if (slot !== null) {
       const piece = slotPiece(this.state.tray[slot] ?? null);
+      if (piece && !this.placeable[slot]) {
+        // Silence here reads as a broken game, so say no out loud.
+        this.effects.push(shake());
+        this.options.haptic?.("medium");
+        return;
+      }
       if (piece) {
         this.pointer = { kind: "drag", slot, piece, x, y, target: null };
         this.updateDragTarget();
@@ -389,8 +428,9 @@ export class GameScreen {
 
     if (events.spinsGained > 0) this.options.haptic?.("success");
 
+    this.refreshPlaceable();
     this.options.onChange?.(this.state);
-    if (events.gameOver) this.options.onGameOver?.(this.state);
+    if (events.gameOver && !this.diedAt) this.diedAt = performance.now();
   }
 
   // ------------------------------------------------------------------ paint
@@ -424,8 +464,76 @@ export class GameScreen {
     if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
 
     this.drawTray(ctx);
+    this.drawStuckHint(ctx);
     this.drawFloatingText(ctx);
+    this.drawDeathBeat(ctx);
 
+    ctx.restore();
+  }
+
+  /**
+   * The rescue prompt. Nothing fits but spins remain — this is the moment the
+   * whole game is built around, so it gets said plainly rather than left for
+   * the player to work out from pieces that refuse to move.
+   */
+  private drawStuckHint(ctx: CanvasRenderingContext2D): void {
+    if (!this.stuck || this.diedAt || this.state.spins <= 0) return;
+
+    const text = t("stuckHint");
+    const y = this.layout.trayTop - 26;
+    const pulse = 1 + Math.sin(performance.now() / 260) * 0.03;
+
+    ctx.save();
+    ctx.font = `800 15px ${FONT}`;
+    const width = ctx.measureText(text).width + 34;
+    const height = 38;
+    const x = this.layout.width / 2;
+
+    ctx.translate(x, y);
+    ctx.scale(pulse, pulse);
+
+    const warm = blockColour(this.theme, 2);
+    roundRect(ctx, -width / 2, -height / 2, width, height, height / 2);
+    ctx.fillStyle = warm.base;
+    ctx.shadowColor = "rgba(0,0,0,0.22)";
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 3;
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+
+    ctx.fillStyle = "#FFFFFF";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 0, 1);
+    ctx.restore();
+  }
+
+  /** Holds the dead board on screen for a beat, so the ending has a cause. */
+  private drawDeathBeat(ctx: CanvasRenderingContext2D): void {
+    if (!this.diedAt) return;
+
+    const t0 = Math.min((performance.now() - this.diedAt) / 420, 1);
+    const { width, height } = this.layout;
+
+    // A neutral shade rather than the theme colour: tinting the board with its
+    // own backdrop shifts every block's hue and the disc goes muddy.
+    ctx.save();
+    ctx.globalAlpha = t0 * 0.45;
+    ctx.fillStyle = "#0C283A";
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = t0;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `900 27px ${FONT}`;
+    ctx.lineWidth = 7;
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(12, 40, 58, 0.85)";
+    ctx.strokeText(t("stuckOver"), width / 2, this.layout.board.cy);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillText(t("stuckOver"), width / 2, this.layout.board.cy);
     ctx.restore();
   }
 
@@ -462,6 +570,13 @@ export class GameScreen {
 
     ctx.save();
     ctx.translate(nudge, 0);
+    // While nothing fits, the meter breathes: it is the only way out.
+    if (this.stuck && this.state.spins > 0 && !this.diedAt) {
+      const beat = 1 + Math.sin(performance.now() / 260) * 0.12;
+      ctx.translate(width - 24, headerY - 2);
+      ctx.scale(beat, beat);
+      ctx.translate(-(width - 24), -(headerY - 2));
+    }
     drawSpinMeter(ctx, width - 24, headerY - 2, this.state.spins, RULES.maxSpins, this.theme);
     ctx.restore();
 
@@ -569,6 +684,7 @@ export class GameScreen {
         this.state.spec,
         { x: box.x + 6, y: box.y + 12, width: box.width - 12, height: box.height - 24 },
         this.layout.boardRadius,
+        this.placeable[i] ? 1 : 0.26,
       );
     });
   }

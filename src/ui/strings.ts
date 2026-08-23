@@ -59,6 +59,9 @@ const TABLE = {
   cancel: { sv: "Fortsätt spela", en: "Keep playing" },
   confirm: { sv: "Ja", en: "Yes" },
 
+  stuckHint: { sv: "Inget passar — snurra en ring", en: "Nothing fits — spin a ring" },
+  stuckOver: { sv: "Inget passar längre", en: "Nothing fits any more" },
+
   setupTitle: { sv: "Välj skiva", en: "Choose your disc" },
   sizeLabel: { sv: "SKIVA", en: "DISC" },
   packLabel: { sv: "BITAR", en: "PIECES" },

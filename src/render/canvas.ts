@@ -138,7 +138,9 @@ export function drawBlock(
   if (width <= 0) return;
 
   ctx.save();
-  ctx.globalAlpha = alpha;
+  // Compose with whatever the caller already set — globalAlpha is absolute, so
+  // assigning here would wipe out a fade applied further up the stack.
+  ctx.globalAlpha *= alpha;
 
   annularSectorPath(ctx, g);
   ctx.save();

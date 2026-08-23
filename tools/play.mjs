@@ -221,6 +221,34 @@ for (let turn = 0; turn < 16; turn++) {
 await shot("08-large-chunks");
 check("no errors across every disc size", problems.length === 0, problems.join(" | "));
 
+// --- being stuck, and dying ------------------------------------------------
+// Jam the disc with a spin still in hand: the round must stay alive and say so.
+const jammed = await page.evaluate(() => window.__shiftle.jam(1));
+await page.waitForTimeout(400);
+check("a jammed disc with a spin left is not game over", jammed?.over === false);
+check("no result card while a spin remains", !(await page.locator(".overlay").isVisible()));
+
+// Grabbing a dead piece must be refused, not silently ignored.
+const beforeDead = await state();
+await drag(slotCentre(0), { x: cx, y: cy - bigRadius * 0.8 + LIFT });
+const afterDead = await state();
+check(
+  "a piece with nowhere to go cannot be placed",
+  afterDead.score === beforeDead.score,
+  `score=${afterDead.score}`,
+);
+await shot("09-stuck");
+
+// Now with no spins left: the board is dead and the card follows after a beat.
+await page.evaluate(() => window.__shiftle.jam(0));
+await page.waitForTimeout(300);
+await shot("10-death-beat");
+check("the dead board is held on screen before the card", !(await page.locator(".overlay").isVisible()));
+
+await page.waitForTimeout(1400);
+check("the result card arrives after the beat", await page.locator(".overlay").isVisible());
+await shot("11-game-over");
+
 await browser.close();
 await server.close();
 
