@@ -129,37 +129,66 @@ try? AVAudioSession.sharedInstance().setActive(true)
 a judgement call, not a bug — leave it out and the silent switch silences the
 game, which many people prefer. There is a sound toggle in the menu either way.
 
-## One bug worth knowing about, because it was invisible
+## Two bugs worth knowing about, because both were invisible
 
-Nothing in `src/` imported `@capacitor/core`, and every platform module reached
-for `window.Capacitor.Plugins.X` directly, treating `undefined` as "we must be
-in a browser".
+Game Center did not work in build 12, and not only the buttons: **nothing**
+worked, including the automatic sign-in and the score submission. Both failed
+without an error, a warning or a log line. Two separate causes, both now fixed.
 
-That is wrong on a device. The bridge iOS injects fills
-`Capacitor.PluginHeaders` — a list of what is available natively — but it never
-fills `Capacitor.Plugins`. Only a JS-side `registerPlugin()` call does that, and
-with the core runtime never imported, that call never happened. So on iOS every
-plugin looked absent and every native path failed silently: **haptics never
-fired at all**, the Share plugin fallback was dead (the Web Share API path
-carried it, which is why sharing still worked), and the Game Center buttons
-could never appear.
+**1. Nothing imported `@capacitor/core`.** Every platform module reached for
+`window.Capacitor.Plugins.X` directly and read `undefined` as "we must be in a
+browser". That is wrong on a device: the bridge iOS injects fills
+`Capacitor.PluginHeaders`, listing what is available natively, and never fills
+`Capacitor.Plugins` — only a JS-side `registerPlugin()` call does that, and with
+the core runtime never imported, that call never happened. So on iOS every
+plugin looked absent. Haptics never fired once, on any build. Sharing survived
+only because it tries the Web Share API before the plugin. Storage was fine; it
+uses `localStorage` directly.
 
 `src/platform/native.ts` now owns the core import and registers plugins
-properly; `haptics.ts`, `share.ts` and `gamecenter.ts` go through it. There is a
-browser check pinning it, because the failure mode leaves no trace.
+properly.
+
+**2. Capacitor never registered `GameConnectPlugin`.** It was written on the
+assumption that Capacitor finds plugins by scanning the Objective-C runtime. It
+does not. `CapacitorBridge.registerPlugins()` registers exactly what
+`capacitor.config.json` lists in `packageClassList`, and `cap sync` generates
+that list from the npm packages in `package.json`. A plugin living in the app
+target is in no package, so it appeared nowhere and was never loaded — no
+plugin header injected, and the JS side correctly reported Game Center as
+unavailable.
+
+The fix is the documented one for app-local plugins:
+`ios/App/App/MainViewController.swift` subclasses `CAPBridgeViewController`,
+overrides `capacitorDidLoad()` and calls
+`bridge?.registerPluginInstance(GameConnectPlugin())`. `Main.storyboard` points
+at that class instead of `CAPBridgeViewController`.
+
+**Both are now checked.** `npm run ios:sync` ends with `tools/verify-ios.mjs`,
+which reads the Xcode project, the storyboard and the generated config and
+fails the build if an app-local plugin is not registered by anything, if the
+storyboard does not load the class that registers it, if a Swift file is not in
+the Sources phase, or if the entitlements are not wired to both configurations.
+None of it needs Xcode. `npm run play` separately pins that the Capacitor
+runtime is loaded at all.
+
+Neither bug could be caught by playing the game in a browser, which is why they
+survived two builds.
 
 ## Game Center
 
 Everything on this side is done and committed. There is **no plugin to install**
 — the native half is written into the app itself at
 `ios/App/App/GameConnect.swift`, about a hundred lines of GameKit exposed to
-the web layer as a Capacitor plugin. Capacitor discovers it through the
-Objective-C runtime, so there is no registration step either.
+the web layer as a Capacitor plugin. It is registered with the bridge by
+`MainViewController.capacitorDidLoad()`, which is the step Capacitor needs for
+a plugin that does not come from an npm package.
 
 What is already in the repository:
 
 - `ios/App/App/GameConnect.swift` — sign-in, score submission and the Game
   Center overlay.
+- `ios/App/App/MainViewController.swift` — registers the plugin with the
+  bridge. Without it Capacitor never loads the plugin at all; see above.
 - `ios/App/App/App.entitlements` — the `com.apple.developer.game-center`
   entitlement, with `CODE_SIGN_ENTITLEMENTS` already set on both the Debug and
   Release configurations of the App target.
