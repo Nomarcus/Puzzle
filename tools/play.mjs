@@ -323,6 +323,64 @@ check(
 check("there is a share button", (await page.locator('[data-action="share"]').count()) === 1);
 await shot("11-game-over");
 
+// --- levels ----------------------------------------------------------------
+// The level flow is where a mode-switching bug would hide: a goal that never
+// completes, a lock that never opens, a strip left on screen afterwards.
+await page.evaluate(() => window.__shiftle.clearLevels());
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(300);
+await page.locator('[data-action="levels"]').click();
+await page.waitForTimeout(300);
+
+check("the level grid opens", (await page.locator(".level-tile").count()) === 20);
+check(
+  "only the first level is open to begin with",
+  (await page.locator(".level-tile:not(.locked)").count()) === 1,
+);
+await shot("15-levels");
+
+// Level 1 asks for spokes, which the bot can do. Play it out through the real
+// screen so the goal, the strip and the unlock all go through the live path.
+await page.evaluate(() => window.__shiftle.level(1));
+await page.waitForTimeout(500);
+check("the goal is on screen while playing", await page.locator(".goal-strip").isVisible());
+
+const startProgress = await page.evaluate(() => window.__shiftle.levelProgress());
+check(
+  "the goal starts at nothing",
+  startProgress?.level === 1 && startProgress.done === 0 && !startProgress.met,
+  JSON.stringify(startProgress),
+);
+
+for (let i = 0; i < 40; i++) {
+  const done = await page.evaluate(() => !document.querySelector(".goal-strip"));
+  if (done) break;
+  await page.evaluate(() => window.__shiftle.botMove());
+  await page.waitForTimeout(45);
+}
+await page.waitForTimeout(1400);
+
+check(
+  "finishing the goal ends the level and banks it",
+  (await page.evaluate(() => window.__shiftle.levelsDone())).includes(1),
+  JSON.stringify(await page.evaluate(() => window.__shiftle.levelsDone())),
+);
+check("the win screen offers the next level", (await page.locator('[data-action="next-level"]').count()) === 1);
+check("the goal strip is gone once the level is over", (await page.locator(".goal-strip").count()) === 0);
+await shot("16-level-won");
+
+await page.locator('[data-action="level-select"]').click();
+await page.waitForTimeout(300);
+check(
+  "clearing a level unlocks the next one",
+  (await page.locator(".level-tile:not(.locked)").count()) === 2,
+);
+check("the cleared level is marked", (await page.locator(".level-tile.done").count()) === 1);
+
+await page.evaluate(() => window.__shiftle.clearLevels());
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
 // --- safe-area insets ------------------------------------------------------
 // Nothing here has a notch, so this drives the insets by hand. The layout used
 // to parse the custom property directly, and whether env() is substituted at

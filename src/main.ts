@@ -12,6 +12,14 @@ import { applyMove } from "./engine/game.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
 import {
+  LEVELS,
+  type Level,
+  goalProgress,
+  levelBoard,
+  levelByNumber,
+  levelSeed,
+} from "./engine/levels.js";
+import {
   type PackId,
   type SizeId,
   DEFAULT_PACK,
@@ -131,7 +139,45 @@ function savedPack(): PackId {
   return PACKS.some((option) => option.id === stored) ? (stored as PackId) : DEFAULT_PACK;
 }
 
+/**
+ * Which levels are done. Stored as a list rather than a high-water mark: a
+ * player who skips ahead by beating a hard one should keep that, and a list
+ * survives levels being reordered or inserted later.
+ */
+function levelsDone(): number[] {
+  const stored = readJson<number[]>("levels", []);
+  return Array.isArray(stored) ? stored.filter((n) => typeof n === "number") : [];
+}
+
+function markLevelDone(number: number): void {
+  const done = levelsDone();
+  if (done.includes(number)) return;
+  writeJson("levels", [...done, number].sort((a, b) => a - b));
+}
+
+/** The first level is always open; the rest wait for the one before them. */
+function levelUnlocked(number: number): boolean {
+  return number === 1 || levelsDone().includes(number - 1);
+}
+
+/** What a level asks for, in words. */
+function goalText(level: Level): string {
+  const key = (
+    {
+      score: "goalScore",
+      rings: "goalRings",
+      spokes: "goalSpokes",
+      pure: "goalPure",
+      stripes: "goalStripes",
+      bullseye: "goalBullseye",
+      combo: "goalCombo",
+    } as const
+  )[level.goal.kind];
+  return t(key).replace("%n", localeNumber(level.goal.target));
+}
+
 function stopEverything(): void {
+  document.querySelector(".goal-strip")?.remove();
   screen?.destroy();
   screen = null;
   menu?.stop();
@@ -269,6 +315,14 @@ function showMenu(): void {
   const today = dailyPuzzle(new Date());
   node.append(el("div", "best", `#${today.number} · ${variantLabel(today.size, today.pack)}`));
 
+  const levels = el("button", "big warm", t("levels"));
+  levels.dataset.action = "levels";
+  levels.addEventListener("click", showLevels);
+  node.append(levels);
+
+  const cleared = levelsDone().length;
+  if (cleared > 0) node.append(el("div", "best", `${cleared} / ${LEVELS.length}`));
+
   const endless = el("button", "big alt", t("endless"));
   endless.dataset.action = "endless";
   endless.addEventListener("click", showSetup);
@@ -339,6 +393,45 @@ function showMenu(): void {
     hud.append(boards);
     node.append(hud);
   }
+}
+
+/**
+ * The level grid.
+ *
+ * Twenty tiles, and the state of each one is the whole screen: done, open, or
+ * still locked. No stars, no percentages — a level is a question with a yes or
+ * no answer, and dressing that up would only obscure which one to play next.
+ */
+function showLevels(): void {
+  const done = levelsDone();
+  const node = overlay("result levels");
+  node.append(el("div", "how-title", t("levels")));
+
+  const grid = el("div", "level-grid");
+  for (const level of LEVELS) {
+    const complete = done.includes(level.number);
+    const open = levelUnlocked(level.number);
+
+    const tile = el("button", `level-tile${complete ? " done" : ""}${open ? "" : " locked"}`);
+    tile.dataset.level = String(level.number);
+    tile.disabled = !open;
+    tile.setAttribute(
+      "aria-label",
+      `${t("levelN")} ${level.number}${open ? ` — ${goalText(level)}` : ` — ${t("locked")}`}`,
+    );
+    tile.append(el("b", undefined, String(level.number)));
+    tile.append(el("span", undefined, open ? goalText(level) : t("locked")));
+    if (open) tile.addEventListener("click", () => startLevel(level));
+    grid.append(tile);
+  }
+  node.append(grid);
+
+  if (done.length === LEVELS.length) node.append(el("div", "confirm-body", t("allLevelsDone")));
+
+  const back = el("button", "big alt", t("menu"));
+  back.dataset.action = "menu";
+  back.addEventListener("click", showMenu);
+  node.append(back);
 }
 
 /** Pick a disc and a piece pack before a free round. */
@@ -465,6 +558,135 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   });
   screen.start();
   gameHud(mode);
+}
+
+// --------------------------------------------------------------------- levels
+
+/** The quit/restart corners plus the goal strip, for a level. */
+function levelHud(level: Level): { refresh: (state: GameState) => void } {
+  const hud = el("div", "hud");
+
+  const quit = el("button", "icon");
+  quit.innerHTML = ICON_QUIT;
+  quit.dataset.action = "quit";
+  quit.setAttribute("aria-label", t("quit"));
+  quit.addEventListener("click", showLevels);
+
+  const restart = el("button", "icon");
+  restart.innerHTML = ICON_RESTART;
+  restart.dataset.action = "restart";
+  restart.setAttribute("aria-label", t("restart"));
+  restart.addEventListener("click", () => startLevel(level));
+
+  hud.append(quit, restart);
+  app.append(hud);
+
+  // The goal, always on screen. A level whose objective you have to remember
+  // is a level you are playing blind.
+  const strip = el("div", "goal-strip");
+  strip.append(el("b", undefined, `${t("levelN")} ${level.number}`));
+  const text = el("span", "goal-text", goalText(level));
+  const count = el("span", "goal-count");
+  strip.append(text, count);
+  app.append(strip);
+
+  return {
+    refresh(state: GameState) {
+      const progress = goalProgress(level.goal, state);
+      count.textContent =
+        level.goal.kind === "score"
+          ? `${localeNumber(progress.done)} / ${localeNumber(progress.target)}`
+          : `${progress.done} / ${progress.target}`;
+      strip.classList.toggle("met", progress.met);
+    },
+  };
+}
+
+/** How long the winning move is left on screen before the card. */
+const WIN_BEAT = 900;
+
+function startLevel(level: Level): void {
+  playSound("start", 0, 2);
+  document.querySelectorAll(".overlay").forEach((node) => node.remove());
+  document.querySelector(".goal-strip")?.remove();
+  stopEverything();
+  applyThemeChrome();
+
+  const game = createGame({
+    seed: levelSeed(level),
+    mode: "level",
+    spec: sizeById(level.size).spec,
+    pack: level.pack,
+    board: levelBoard(level),
+    rules: { ...level.rules, pieceLimit: level.budget },
+  });
+
+  let settled = false;
+  const finish = (won: boolean, state: GameState) => {
+    if (settled) return;
+    settled = true;
+    if (won) markLevelDone(level.number);
+    window.setTimeout(() => {
+      document.querySelector(".goal-strip")?.remove();
+      showLevelResult(level, state, won);
+    }, won ? WIN_BEAT : 0);
+  };
+
+  const hud = levelHud(level);
+
+  screen = new GameScreen(canvas, game, {
+    theme,
+    haptic,
+    onChange: (state) => {
+      hud.refresh(state);
+      // Won the moment the goal is met, rather than at the end of the budget.
+      // Playing on after the objective is done is busywork.
+      if (goalProgress(level.goal, state).met) finish(true, state);
+    },
+    // The engine ends the round when the budget runs out or nothing fits. If
+    // the goal is not met by then, that is the loss.
+    onGameOver: (state) => finish(goalProgress(level.goal, state).met, state),
+  });
+  screen.start();
+  hud.refresh(game);
+}
+
+function showLevelResult(level: Level, state: GameState, won: boolean): void {
+  document.querySelector(".hud")?.remove();
+  playSound(won ? "bonus" : "gameOver", won ? 2 : 0, 4);
+
+  const node = overlay("result");
+  node.append(el("div", "how-title", won ? t("levelDone") : t("levelFailed")));
+  node.append(el("div", "score-big", localeNumber(state.score)));
+
+  const progress = goalProgress(level.goal, state);
+  node.append(
+    el(
+      "div",
+      "confirm-body",
+      `${goalText(level)} — ${
+        level.goal.kind === "score" ? localeNumber(progress.done) : progress.done
+      } / ${level.goal.kind === "score" ? localeNumber(progress.target) : progress.target}`,
+    ),
+  );
+
+  const next = won ? levelByNumber(level.number + 1) : null;
+  if (next) {
+    const go = el("button", "big", t("nextLevel"));
+    go.dataset.action = "next-level";
+    go.addEventListener("click", () => startLevel(next));
+    node.append(go);
+  }
+
+  const again = el("button", won ? "big alt" : "big warm", t("retry"));
+  again.dataset.action = "retry";
+  again.addEventListener("click", () => startLevel(level));
+  node.append(again);
+
+  const back = el("button", "big alt", t("levels"));
+  back.dataset.action = "level-select";
+  back.addEventListener("click", showLevels);
+  node.append(back);
 }
 
 /** What the shareable picture says. The disc itself carries the rest. */
@@ -601,6 +823,24 @@ if (import.meta.env.DEV) {
     state: () => screen?.getState() ?? null,
     start: startGame,
     menu: showMenu,
+
+    /** The level flow, for the browser tests. */
+    levels: showLevels,
+    level: (number: number) => {
+      const level = levelByNumber(number);
+      if (!level) return false;
+      startLevel(level);
+      return true;
+    },
+    levelProgress: () => {
+      const state = screen?.getState();
+      const number = Number(document.querySelector(".goal-strip b")?.textContent?.match(/\d+/)?.[0]);
+      const level = Number.isFinite(number) ? levelByNumber(number) : null;
+      if (!state || !level) return null;
+      return { level: level.number, ...goalProgress(level.goal, state) };
+    },
+    levelsDone,
+    clearLevels: () => writeJson("levels", []),
 
     /**
      * Stands in for the native Game Center plugin so the leaderboard buttons

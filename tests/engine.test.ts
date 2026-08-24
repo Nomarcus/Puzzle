@@ -24,7 +24,8 @@ import {
   lineColour,
 } from "../src/engine/board.js";
 import { chooseMove, playOut } from "../src/engine/bot.js";
-import { PACKS, SIZES, bagFor, dailyVariant } from "../src/engine/variants.js";
+import { LEVELS, goalProgress, levelBoard, levelSeed } from "../src/engine/levels.js";
+import { PACKS, SIZES, bagFor, dailyVariant, sizeById } from "../src/engine/variants.js";
 import { pushSpoke, spinRing } from "../src/engine/rotate.js";
 import { pureLines } from "../src/engine/board.js";
 import { clearScore, comboMultiplier, simultaneousMultiplier } from "../src/engine/scoring.js";
@@ -896,6 +897,107 @@ describe("cleared cells carry their own colour", () => {
         }
         state = result.state;
       }
+    }
+  });
+});
+
+/**
+ * Levels.
+ *
+ * The targets themselves are set by measurement — `npm run levels` plays each
+ * one a few hundred times with the bot — and that is far too slow to live in a
+ * unit test. What is pinned here is everything the measurement assumes: that
+ * the twenty levels are well formed, that their opening patterns leave a game
+ * to play, and that a goal counts what it says it counts.
+ */
+describe("levels", () => {
+  it("are numbered 1..20, in order, with no gaps", () => {
+    expect(LEVELS.map((level) => level.number)).toEqual(
+      Array.from({ length: 20 }, (_, i) => i + 1),
+    );
+  });
+
+  it("all have a budget and a target worth reaching", () => {
+    for (const level of LEVELS) {
+      expect(level.budget, `level ${level.number} budget`).toBeGreaterThan(0);
+      expect(level.goal.target, `level ${level.number} target`).toBeGreaterThan(0);
+    }
+  });
+
+  it("open on a board with room left to play", () => {
+    // A pattern that filled the disc, or left only holes nothing fits in,
+    // would be a level nobody could start. Half the cells free is a floor, not
+    // a target — the tightest pattern here is nowhere near it.
+    for (const level of LEVELS) {
+      const board = levelBoard(level);
+      const cells = board.spec.rings * board.spec.sectors;
+      const free = cells - filledCount(board);
+      expect(free / cells, `level ${level.number} (${level.pattern})`).toBeGreaterThan(0.5);
+      expect(hasPlacement(board, pieceById("dot")), `level ${level.number}`).toBe(true);
+    }
+  });
+
+  it("build the same opening board every time", () => {
+    // A level is the same puzzle for everybody, so its pattern has to be a
+    // pure function of the spec — no clock, no Math.random.
+    for (const level of LEVELS) {
+      expect(levelBoard(level).cells).toEqual(levelBoard(level).cells);
+    }
+    expect(levelSeed(LEVELS[0]!)).toBe(levelSeed(LEVELS[0]!));
+  });
+
+  it("deal the same pieces every attempt", () => {
+    // Levels do not use the adaptive deal, for the daily's reason: a deal that
+    // depends on the board would hand two players different pieces.
+    const level = LEVELS[5]!;
+    const make = () =>
+      createGame({
+        seed: levelSeed(level),
+        mode: "level",
+        spec: sizeById(level.size).spec,
+        pack: level.pack,
+        board: levelBoard(level),
+        rules: { ...level.rules, pieceLimit: level.budget },
+      });
+    expect(make().tray).toEqual(make().tray);
+    expect(make().fairDeal).toBe(false);
+  });
+
+  it("count the thing the goal names", () => {
+    const state = {
+      score: 4200,
+      stats: { ringsCleared: 3, spokesCleared: 9, pureClears: 2, stripesFired: 5, bullseyes: 1, bestCombo: 4 },
+    };
+    expect(goalProgress({ kind: "score", target: 4000 }, state).met).toBe(true);
+    expect(goalProgress({ kind: "score", target: 5000 }, state).met).toBe(false);
+    expect(goalProgress({ kind: "rings", target: 3 }, state)).toMatchObject({ done: 3, met: true });
+    expect(goalProgress({ kind: "spokes", target: 10 }, state).met).toBe(false);
+    expect(goalProgress({ kind: "pure", target: 2 }, state).met).toBe(true);
+    expect(goalProgress({ kind: "stripes", target: 6 }, state).met).toBe(false);
+    expect(goalProgress({ kind: "bullseye", target: 1 }, state).met).toBe(true);
+    expect(goalProgress({ kind: "combo", target: 4 }, state).met).toBe(true);
+  });
+
+  it("every level is playable to the end of its budget", () => {
+    // Not "winnable" — that is what the measurement tool is for, and some
+    // goals need planning the bot does not do. This is the weaker claim that
+    // matters: the bot never runs out of moves early, so no pattern strangles
+    // the board it opens on.
+    for (const level of LEVELS) {
+      const state = createGame({
+        seed: levelSeed(level),
+        mode: "level",
+        spec: sizeById(level.size).spec,
+        pack: level.pack,
+        board: levelBoard(level),
+        rules: { ...level.rules, pieceLimit: level.budget },
+      });
+      const result = playOut(state, level.budget * 4);
+      expect(result.stalled, `level ${level.number} stalled`).toBe(false);
+      expect(
+        result.state.stats.piecesPlaced,
+        `level ${level.number} only placed ${result.state.stats.piecesPlaced}/${level.budget}`,
+      ).toBeGreaterThan(level.budget * 0.5);
     }
   });
 });

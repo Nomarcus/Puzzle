@@ -79,7 +79,7 @@ export const DEFAULT_RULES: RuleSet = {
   pieceLimit: 0,
 };
 
-export type GameMode = "daily" | "endless";
+export type GameMode = "daily" | "endless" | "level";
 
 export interface TraySlot {
   readonly pieceId: string;
@@ -261,6 +261,12 @@ export function createGame(options: {
   spokeClears?: boolean;
   rules?: Partial<RuleSet>;
   fairDeal?: boolean;
+  /**
+   * A board to start from rather than an empty disc. Levels use it: arriving
+   * mid-thought is most of what makes one a puzzle instead of free play with a
+   * target on it.
+   */
+  board?: Board;
 }): GameState {
   const spec = options.spec ?? DEFAULT_SPEC;
   const pack = options.pack ?? DEFAULT_PACK;
@@ -268,8 +274,11 @@ export function createGame(options: {
   const rules: RuleSet = { ...DEFAULT_RULES, ...options.rules };
   const mode = options.mode ?? "endless";
   // The daily must deal the same pieces to everyone, so it never adapts.
-  const fairDeal = options.fairDeal ?? mode !== "daily";
-  const board = createBoard(spec);
+  // A level deals from a fixed sequence for the same reason the daily does:
+  // it is the same puzzle for everybody, so the deal must not adapt to how
+  // somebody happens to be playing it.
+  const fairDeal = options.fairDeal ?? (mode === "endless");
+  const board = options.board ?? createBoard(spec);
   const [tray, rngState] = dealTray(options.seed, spec, pack, board, fairDeal, rules.stripeChance);
 
   return {

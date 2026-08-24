@@ -24,11 +24,12 @@ the only thing that pays for one is clearing a line in a **single colour**, or
 a bullseye. That is what gives the palette a job. Both act as lives: the round
 ends only when nothing fits *and* neither power remains.
 
-Two modes. **Free play** runs indefinitely — it is a high-score chase, not a
-puzzle with an ending. **Daily** derives its board, piece pack and sequence from
-the UTC date so every player in the world gets the identical puzzle, and it is
-rationed to 60 pieces so every attempt is the same length as well as the same
-puzzle. One attempt per day.
+Three modes. **Levels** is twenty hand-built puzzles, each a fixed board, a
+fixed goal and a fixed number of pieces — see below. **Free play** runs
+indefinitely — a high-score chase, not a puzzle with an ending. **Daily**
+derives its board, piece pack and sequence from the UTC date so every player in
+the world gets the identical puzzle, and it is rationed to 60 pieces so every
+attempt is the same length as well as the same puzzle. One attempt per day.
 
 ### One thing worth deciding before the endless leaderboard goes live
 
@@ -49,11 +50,91 @@ the usual fix is a difficulty ramp — the deal gets meaner the longer a round
 lasts, so every run ends eventually without an arbitrary cap. That is a rules
 change and has not been made; it is Marcus's call.
 
+## The twenty levels
+
+Free play and the daily are both the same game with the difficulty left to
+chance. Levels are the opposite: a fixed board, a fixed goal and a fixed number
+of pieces, the same for everybody, retryable until you get it. That is where a
+new player learns what the pieces do, and it is the only part of the game that
+can teach one idea at a time.
+
+A level is four things, and every one of them is a lever:
+
+- **the disc** — small (5×8), standard (6×10) or large (7×12);
+- **the pack** — curves, chunks or mixed, which decides what you are given;
+- **a starting pattern** — blocks already on the board when it opens;
+- **a goal and a budget** — what to achieve, and how many pieces you get.
+
+`src/engine/levels.ts` holds all of it. Nothing about it is a special case in
+the engine: a level is `createGame()` with a pre-filled board, a seed derived
+from the level number, and a piece limit — so levels are as deterministic and as
+testable as everything else, and a level plays exactly like free play does.
+
+**Seven goal types**, chosen so they pull in different directions:
+
+| Goal | What it asks for | What it teaches |
+|---|---|---|
+| `spokes` | Clear *n* spokes | The basic move |
+| `rings` | Clear *n* rings | Committing to the long line |
+| `score` | Reach *n* points | Efficiency — chains, not singles |
+| `stripes` | Set off *n* striped blocks | Aiming a detonation |
+| `pure` | *n* single-colour clears | Sorting by colour, and the push economy |
+| `combo` | Reach a combo of *n* | Setting up before cashing in |
+| `bullseye` | Ring and spoke in one move | The whole game at once |
+
+**Eleven starting patterns**, all generated procedurally from the board's
+dimensions rather than stored as grids — `rim`, `hub`, `ringShort` (a ring one
+cell short), `quarter`, `spokes`, `speckle`, `checker`, `cross`, `chorus`,
+`spiral` and `empty`. That means the same pattern works on any disc size, and a
+level is four lines of description rather than a map.
+
+### The curve, and how the targets were set
+
+The targets are not guesses. `npm run levels` plays every level with the bot a
+few hundred times and reports the distribution; each target was then set from a
+measured percentile. Roughly: **levels 1–4 at the bot's p10** (nearly free —
+these teach), **5–12 at its p50** (a real attempt), **13–20 at its p75** (you
+will retry).
+
+Bot win rates at 200 runs each:
+
+```
+L1–4     97 96 89 95 %        teaching
+L5–12    50 60 62  2 63 57 53 55 %    the middle
+L13–20    8 30 27  2 38 41  1 25 %    the stretch
+```
+
+The three levels sitting at 1–2% are 8, 16 and 19 — the pure-clear and bullseye
+goals. They are not broken: the bot's **best** result on each is exactly the
+target, so they are reachable, but reaching them takes planning a move or two
+ahead and the bot only ever looks one move deep. Those are the levels that
+reward a person over a machine, which is the point of having them. `npm run
+levels` labels them separately rather than flagging them as too hard.
+
+The tool also watches for the other failure: a run that ends **stuck**, out of
+room rather than out of pieces. That is the one loss that teaches nothing, and
+it is what re-shaped two levels — the `checker` pattern was originally on every
+other sector and strangled half of all runs, and level 20 opens with three spins
+in hand for the same reason.
+
+### In the app
+
+The menu's **Levels** button opens a grid of twenty tiles; cleared ones are
+marked, and the next one unlocks when the one before it is done. Progress is
+stored under `levels.done` and mirrored into Preferences like the high scores.
+A goal strip sits above the board while a level is being played and ticks over
+when the goal is met. Finishing pops a result screen with **Next level**; a run
+that ends short offers **Try again**.
+
+Levels do not touch the leaderboards — they are single-player practice, and the
+Game Center boards stay for the daily and free play.
+
 ## State of the project
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 68 unit tests. |
+| Game engine | Done. Pure, deterministic, 75 unit tests. |
+| Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance`. Free play does not reliably end — see below. |
