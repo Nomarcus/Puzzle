@@ -1,21 +1,26 @@
 /**
  * Haptics.
  *
- * Does nothing in a browser. On iOS the Capacitor Haptics plugin is picked up
- * off the global at runtime, so the web build carries no native dependency and
- * stays testable here.
+ * Does nothing in a browser. On iOS the Capacitor Haptics plugin is registered
+ * through the core runtime — reading `window.Capacitor.Plugins.Haptics`
+ * directly, as this used to, found nothing even on a device, because only
+ * `registerPlugin()` ever puts anything there. Every buzz in the game was
+ * silently dropped.
  */
 
 import type { HapticKind } from "../ui/game-screen.js";
+import { hasPlugin, isNative, registerPlugin } from "./native.js";
 
 interface CapacitorHaptics {
   impact(options: { style: string }): Promise<void>;
   notification(options: { type: string }): Promise<void>;
 }
 
+const NAME = "Haptics";
+const native = registerPlugin<CapacitorHaptics>(NAME);
+
 function plugin(): CapacitorHaptics | null {
-  const global = window as unknown as { Capacitor?: { Plugins?: { Haptics?: CapacitorHaptics } } };
-  return global.Capacitor?.Plugins?.Haptics ?? null;
+  return isNative() && hasPlugin(NAME) ? native : null;
 }
 
 const IMPACT: Record<string, string> = {

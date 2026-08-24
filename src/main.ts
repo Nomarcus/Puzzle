@@ -35,6 +35,7 @@ import {
   showLeaderboard,
   signIn,
   submitScore,
+  useTestDouble as useGameCenterTestDouble,
 } from "./platform/gamecenter.js";
 import {
   readJson,
@@ -56,6 +57,9 @@ interface DailyResult {
 
 const ICON_QUIT =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+/** Three podium bars. A trophy or a star reads as mud at 21 pixels; this does not. */
+const ICON_LEADERBOARD =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V13h5v8M9.5 21V4h5v17M15 21v-6h5v6M2.5 21h19" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const ICON_RESTART =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M20.5 2.5v5.5H15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -149,6 +153,21 @@ function bankDaily(state: GameState): void {
     spinsLeft: state.spins,
   } satisfies DailyResult);
   if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
+}
+
+/** A card with one way out. For telling the player something, not asking. */
+function notice(title: string, body: string): void {
+  const node = overlay("confirm");
+  const card = el("div", "card");
+  card.append(el("div", "card-title", title));
+  card.append(el("p", "confirm-body", body));
+
+  const ok = el("button", "big", t("ok"));
+  ok.dataset.action = "notice-ok";
+  ok.addEventListener("click", () => node.remove());
+  card.append(ok);
+
+  node.append(card);
 }
 
 function confirmThen(title: string, body: string, onConfirm: () => void): void {
@@ -299,11 +318,25 @@ function showMenu(): void {
 
   // Only when there is a native side to open. A button that does nothing is
   // worse than no button, so the browser build simply never shows one.
+  //
+  // In the corner rather than down among the language pills: this is the way
+  // in to the leaderboards, not a setting, and it has to be findable without
+  // reading the whole menu.
   if (gameCenterAvailable()) {
-    const boards = el("button", "pill wide", t("leaderboard"));
+    const hud = el("div", "hud menu-hud");
+    const boards = el("button", "icon");
+    boards.innerHTML = ICON_LEADERBOARD;
     boards.dataset.action = "leaderboard";
-    boards.addEventListener("click", () => void showLeaderboard());
-    langs.append(boards);
+    boards.setAttribute("aria-label", t("leaderboard"));
+    // Game Center refuses to show anything to a signed-out player, and a tap
+    // that does nothing at all is the thing this button was supposed to avoid.
+    boards.addEventListener("click", () => {
+      void showLeaderboard().then((shown) => {
+        if (!shown) notice(t("gameCenter"), t("gameCenterSignedOut"));
+      });
+    });
+    hud.append(boards);
+    node.append(hud);
   }
 }
 
@@ -501,7 +534,11 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
     const board = mode === "daily" ? LEADERBOARDS.daily : LEADERBOARDS.endless;
     const boards = el("button", "big alt", t(mode === "daily" ? "leaderboardDaily" : "leaderboardEndless"));
     boards.dataset.action = "leaderboard";
-    boards.addEventListener("click", () => void showLeaderboard(board));
+    boards.addEventListener("click", () => {
+      void showLeaderboard(board).then((shown) => {
+        if (!shown) notice(t("gameCenter"), t("gameCenterSignedOut"));
+      });
+    });
     node.append(boards);
   }
 
@@ -553,13 +590,7 @@ if (import.meta.env.DEV) {
      */
     fakeGameCenter: () => {
       const calls: Array<{ method: string; options?: unknown }> = [];
-      const global = window as unknown as {
-        Capacitor?: { Plugins?: Record<string, unknown> };
-        __gameCenterCalls?: unknown;
-      };
-      global.Capacitor = global.Capacitor ?? {};
-      global.Capacitor.Plugins = global.Capacitor.Plugins ?? {};
-      global.Capacitor.Plugins.GameConnect = {
+      useGameCenterTestDouble({
         signIn: async () => {
           calls.push({ method: "signIn" });
           return { authenticated: true };
@@ -573,8 +604,8 @@ if (import.meta.env.DEV) {
           calls.push({ method: "showLeaderboard", options });
           return { shown: true };
         },
-      };
-      global.__gameCenterCalls = calls;
+      } as never);
+      (window as unknown as { __gameCenterCalls?: unknown }).__gameCenterCalls = calls;
       return true;
     },
 

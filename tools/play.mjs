@@ -327,6 +327,14 @@ await shot("11-game-over");
 // There is no native plugin in a browser, so nothing here would ever be
 // exercised until it broke on a device. __shiftle.fakeGameCenter() installs a
 // stand-in that records what it was asked to do.
+// The bug this pins: nothing imported @capacitor/core, so `Capacitor.Plugins`
+// was never populated — not just in a browser but on a device too, where the
+// injected bridge lists plugins in `PluginHeaders` and fills `Plugins` never.
+// Every native integration looked absent on iOS and failed silently.
+check(
+  "the Capacitor runtime is loaded, so plugins can register at all",
+  await page.evaluate(() => typeof window.Capacitor?.registerPlugin === "function"),
+);
 check(
   "no leaderboard button without a native plugin",
   (await page.locator('[data-action="leaderboard"]').count()) === 0,
@@ -339,6 +347,7 @@ check(
   "the menu offers the leaderboard once Game Center is there",
   (await page.locator('[data-action="leaderboard"]').count()) === 1,
 );
+await shot("13-menu-leaderboard");
 
 await page.locator('[data-action="leaderboard"]').click();
 await page.waitForTimeout(300);

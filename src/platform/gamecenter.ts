@@ -2,13 +2,15 @@
  * Game Center.
  *
  * The native half lives in the app itself, at ios/App/App/GameConnect.swift,
- * rather than coming from a plugin on npm. This side resolves it off the global
- * at runtime rather than importing anything, so the web build carries no native
- * dependency and every call is a no-op when the plugin is absent — which is
- * what keeps the whole game testable in a browser.
+ * rather than coming from a plugin on npm. This side registers it through
+ * Capacitor and asks whether the native implementation is really there, so
+ * every call is a no-op in a browser — which is what keeps the whole game
+ * testable here.
  *
  * The leaderboard ids must match what is created in App Store Connect.
  */
+
+import { hasPlugin, isNative, registerPlugin } from "./native.js";
 
 export const LEADERBOARDS = {
   daily: "com.nomarcus.shiftle.daily",
@@ -27,11 +29,22 @@ interface GameConnectPlugin {
   showLeaderboard(options: { leaderboardID?: string }): Promise<{ shown?: boolean }>;
 }
 
+const NAME = "GameConnect";
+const native = registerPlugin<GameConnectPlugin>(NAME);
+
+/**
+ * A stand-in, so the leaderboard flow can be driven in a browser. Set only by
+ * the dev harness in main.ts; there is no way to reach it from a real build.
+ */
+let double: GameConnectPlugin | null = null;
+
+export function useTestDouble(implementation: GameConnectPlugin | null): void {
+  double = implementation;
+}
+
 function plugin(): GameConnectPlugin | null {
-  const global = window as unknown as {
-    Capacitor?: { Plugins?: { GameConnect?: GameConnectPlugin } };
-  };
-  return global.Capacitor?.Plugins?.GameConnect ?? null;
+  if (double) return double;
+  return isNative() && hasPlugin(NAME) ? native : null;
 }
 
 /** Whether there is a native side at all. False in every browser. */

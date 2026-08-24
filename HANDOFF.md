@@ -129,6 +129,25 @@ try? AVAudioSession.sharedInstance().setActive(true)
 a judgement call, not a bug — leave it out and the silent switch silences the
 game, which many people prefer. There is a sound toggle in the menu either way.
 
+## One bug worth knowing about, because it was invisible
+
+Nothing in `src/` imported `@capacitor/core`, and every platform module reached
+for `window.Capacitor.Plugins.X` directly, treating `undefined` as "we must be
+in a browser".
+
+That is wrong on a device. The bridge iOS injects fills
+`Capacitor.PluginHeaders` — a list of what is available natively — but it never
+fills `Capacitor.Plugins`. Only a JS-side `registerPlugin()` call does that, and
+with the core runtime never imported, that call never happened. So on iOS every
+plugin looked absent and every native path failed silently: **haptics never
+fired at all**, the Share plugin fallback was dead (the Web Share API path
+carried it, which is why sharing still worked), and the Game Center buttons
+could never appear.
+
+`src/platform/native.ts` now owns the core import and registers plugins
+properly; `haptics.ts`, `share.ts` and `gamecenter.ts` go through it. There is a
+browser check pinning it, because the failure mode leaves no trace.
+
 ## Game Center
 
 Everything on this side is done and committed. There is **no plugin to install**
@@ -147,9 +166,13 @@ What is already in the repository:
 - `src/platform/gamecenter.ts` — the web side. Resolves the plugin off the
   global at runtime and no-ops when it is absent, which is why the browser
   build still runs.
-- Leaderboard buttons in the menu and on the result screen. They only appear
-  when the native plugin is actually present, so nothing on the web shows a
-  button that cannot work.
+- A leaderboard icon in the top-right corner of the menu, and a full button on
+  the result screen pointing at the board that round's score went to. Both only
+  appear when the native plugin is really present, so nothing on the web shows
+  a button that cannot work — which also means **you will not see them in the
+  browser test page, only on a device.**
+- A signed-out player who taps either one gets told to sign in under
+  Settings ▸ Game Center, rather than a tap that does nothing.
 
 **What still needs a human, in App Store Connect:**
 

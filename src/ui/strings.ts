@@ -33,6 +33,12 @@ const TABLE = {
   leaderboard: { sv: "Topplista", en: "Leaderboard" },
   leaderboardDaily: { sv: "Dagens topplista", en: "Today’s leaderboard" },
   leaderboardEndless: { sv: "Topplista fritt spel", en: "Free play leaderboard" },
+  gameCenter: { sv: "Game Center", en: "Game Center" },
+  gameCenterSignedOut: {
+    sv: "Du är inte inloggad i Game Center. Logga in under Inställningar ▸ Game Center, så dyker topplistan upp här.",
+    en: "You are not signed in to Game Center. Sign in under Settings ▸ Game Center and the leaderboard will open here.",
+  },
+  ok: { sv: "Okej", en: "OK" },
   gameOver: { sv: "Slut", en: "Game over" },
   left: { sv: "kvar", en: "left" },
   points: { sv: "p", en: "pts" },

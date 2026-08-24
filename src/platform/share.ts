@@ -11,13 +11,17 @@
  * avoids pulling in the Filesystem plugin just to hand over one PNG.
  */
 
+import { hasPlugin, isNative, registerPlugin } from "./native.js";
+
 interface SharePlugin {
   share(options: { title?: string; text?: string; dialogTitle?: string }): Promise<unknown>;
 }
 
+const NAME = "Share";
+const native = registerPlugin<SharePlugin>(NAME);
+
 function plugin(): SharePlugin | null {
-  const global = window as unknown as { Capacitor?: { Plugins?: { Share?: SharePlugin } } };
-  return global.Capacitor?.Plugins?.Share ?? null;
+  return isNative() && hasPlugin(NAME) ? native : null;
 }
 
 async function shareImage(text: string, image: Blob): Promise<boolean> {
