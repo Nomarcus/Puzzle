@@ -59,7 +59,7 @@ change and has not been made; it is Marcus's call.
 | Balance | Measured with `npm run balance`. Free play does not reliably end — see below. |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
-| Particles and sound | Done. Sound is one synthesised instrument, tuned to a D major pentatonic; pitch follows the disc. `npm run audio` renders every voice to WAV. |
+| Particles and sound | Done. 8-bit chip synthesis — pulse, triangle and LFSR noise — tuned to a D major pentatonic, with pitch following the disc. `npm run audio` renders every voice to WAV. |
 | Game Center | Native plugin written and committed. Needs two leaderboards created in App Store Connect. |
 | Share image | Done. The final disc renders to a 1080px card. |
 
@@ -111,29 +111,28 @@ back to sharing text, then to the clipboard.
 
 ## The sound, and what the music has to fit
 
-The whole palette is one made-up instrument — somewhere between a kalimba, a
-handpan and a glass bowl — built from struck partials rather than oscillators,
-so it reads as something being hit rather than switched on. There are no audio
-files; it is all synthesis, and `npm run audio` renders every voice to WAV in
-`tools/out/audio/` so it can be judged without a build.
+Everything is synthesised as if by a 1985 console: two pulse channels, a
+triangle for the bass, and a noise channel. No audio files. `npm run audio`
+renders every voice to WAV in `tools/out/audio/` so it can be judged without a
+build.
 
-The bonus moments — a stripe, a single-colour clear, the bullseye — all get the
-same **signature sound**, sized to how big the moment was. It is the one thing
-in the game designed to be recognised in a second through a phone speaker:
-a swell running *backwards* into the hit, a sub that *rises* instead of falling,
-and the whole scale struck at once as a bloom. Almost every impact sound
-anywhere falls in pitch and brightness, because that is what struck objects do;
-running it the other way turns a hit into an arrival.
+Square waves alone do not make something sound 8-bit. Four things do, and the
+chip in `src/platform/audio.ts` does all four:
 
-It is roughly 7 dB above anything else the game plays, which is deliberate.
+- **Stepped volume.** Sixteen levels, changed once a frame, never gliding. Any
+  exponential fade reads as modern immediately.
+- **Duty cycles.** The pulses are built as PeriodicWaves from the Fourier
+  series of a pulse train, so 12.5% and 25% are available — WebAudio's built-in
+  "square" is only the 50% one, which is the least characteristic of the four.
+- **Arpeggios, not chords.** Two pulse channels cannot play a triad, so the
+  voices flicker between the notes at 60 Hz and let the ear fuse them. That
+  flutter is the genre's signature more than any waveform.
+- **LFSR noise.** A 15-bit shift register, as the NES does it, including the
+  short mode where it closes after 93 steps and comes out metallic and nearly
+  pitched. That is where the lasers come from.
 
-Pressing play has its own sound: a flick of the ratchet, then a phrase climbing
-the scale and settling on a note left ringing under the first board. The exact
-opposite of game over, which walks down the scale and stops.
-
-(An earlier attempt put a synthesised formant voice here, reading the banner
-text aloud. It worked technically — measurably vowel-shaped — and sounded
-wrong, so it is gone.)
+There is no reverb, because a chip had none. What it had was an echo faked in
+the tracker, so the send bus is a short feedback delay instead.
 
 Two things matter for writing music against it:
 
@@ -146,6 +145,14 @@ Two things matter for writing music against it:
   degree per sector. A combo walks up the scale, so a run of clears is a
   melody. This is why the game sounds like itself: the disc is the keyboard,
   and a square-grid game cannot do it.
+
+The bonus moments — a stripe, a single-colour clear, the bullseye — all get the
+same **signature**: the power-up. A pulse climbing the whole scale in
+frame-length steps, then the chord arpeggiating over a bass that bends upward.
+It is sized by how big the moment was, and sits about 8 dB above anything else
+the game plays, which is deliberate.
+
+Pressing play has its own fanfare, and game over walks back down the scale.
 
 ## One native detail worth knowing: the silent switch
 

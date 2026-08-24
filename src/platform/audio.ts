@@ -1,42 +1,45 @@
 /**
- * Shiftle's instrument.
+ * Shiftle's sound chip.
  *
- * Still synthesised — no audio files, nothing to license, the bundle stays
- * tiny. But this is not a set of game beeps with reverb on them any more. The
- * whole palette is one made-up instrument, somewhere between a kalimba, a
- * handpan and a glass bowl, and it exists so the game sounds like itself
- * rather than like every other block puzzle.
+ * Everything the game says is synthesised as if by a 1985 console: two pulse
+ * channels, a triangle for the bass, and a noise channel. No samples, nothing
+ * to license, and the bundle stays tiny.
  *
- * Three ideas hold it together.
+ * Square waves alone do not make something sound 8-bit. Four things do, and
+ * they are all here:
  *
- * **Struck, not blown.** Every voice is a stack of partials with
- * frequency-dependent decays — high partials die first, exactly as they do on
- * a real struck object — over a scrap of filtered noise for the strike itself.
- * That is why it reads as something being hit rather than as an oscillator
- * being switched on. (Karplus-Strong would be the textbook route, but a
- * feedback delay loop in WebAudio is clamped to one render quantum, which caps
- * the pitch around 375 Hz and puts half the keyboard out of tune. Additive
- * partials cost more nodes and behave the same on every engine.)
+ * **Stepped volume.** A real chip has sixteen volume levels and changes them
+ * once a frame. Nothing glides. An exponential fade — however short — reads as
+ * modern immediately, so every envelope here is a staircase of
+ * setValueAtTime at 60 Hz, quantised to 4 bits.
  *
- * **The board is the keyboard.** Pitch is not decoration: it comes from where
- * on the disc something happened. The inner ring is the smallest circle, so it
- * rings highest; the outer ring is the lowest. Spokes are laid out around the
- * dial like a clock face, one scale degree per sector. Fill the disc and it
- * plays itself — and no square-grid game can copy that.
+ * **Duty cycles.** WebAudio's "square" is a 50% pulse, which is the least
+ * characteristic of the four a chip can make. The thin, nasal 12.5% lead is the
+ * sound people actually remember, so the pulses are built as PeriodicWaves from
+ * the Fourier series of a pulse train and the duty is a parameter.
  *
- * **One scale, so nothing can clash.** Everything is quantised to a D major
- * pentatonic. A pentatonic contains no semitone, so any two notes that happen
- * to land together are consonant no matter what the player does — and it gives
- * the music something to be written against.
+ * **Arpeggios, not chords.** With two pulse channels you cannot play a triad,
+ * so chiptunes flicker between the notes at about 60 Hz and let the ear fuse
+ * them. That flutter is the genre's signature more than any waveform is.
+ *
+ * **LFSR noise.** The percussion is a 15-bit shift register, exactly as the NES
+ * does it, including the short mode where the register is 93 steps long and the
+ * "noise" comes out metallic and pitched. That is where the zaps come from.
+ *
+ * No reverb: a chip had none. What it often had was an echo faked in the
+ * tracker, so the send bus is a feedback delay instead.
+ *
+ * Two things survive from the acoustic version because they are design, not
+ * timbre. Pitch comes from **where on the disc** something happened — inner
+ * ring highest, spokes around the dial — so the board still plays itself. And
+ * everything is quantised to a **D major pentatonic**, which has no semitone in
+ * it, so nothing a player does can clash and the music has a key to live in.
  *
  *   D  E  F#  A  B      (D4 = 293.66 Hz)
  *
  * `schedule()` works on any BaseAudioContext, so tools/audio-preview.mjs
- * renders these exact voices offline. The WAVs are not an impression of the
- * game's sound; they are the game's sound.
- *
- * iOS will not let a page make noise until the user has touched it, so the
- * context is created lazily and unlocked from the first pointer event.
+ * renders these exact voices offline. The WAVs are the game's sound, not an
+ * impression of it.
  */
 
 import { readString, writeString } from "./storage.js";
@@ -55,14 +58,13 @@ export type Sound =
 
 // -------------------------------------------------------------------- scale
 
-/** Semitone offsets of a major pentatonic, and the root they sit on. */
 const PENTATONIC = [0, 2, 4, 7, 9];
 const ROOT = 293.66; // D4
 
 /**
- * The nth note of the scale, counting up from the root and wrapping into
- * higher octaves. Negative indices go below it. Nothing can produce a wrong
- * note, which is why callers can hand it a raw ring or sector index.
+ * The nth note of the scale, wrapping into higher octaves. Negative indices go
+ * below the root. Nothing can produce a wrong note, which is why callers hand
+ * it a raw ring or sector index.
  */
 export function note(index: number): number {
   const length = PENTATONIC.length;
@@ -71,63 +73,76 @@ export function note(index: number): number {
   return ROOT * Math.pow(2, octave + PENTATONIC[degree]! / 12);
 }
 
-// ------------------------------------------------------------------- the bus
+// --------------------------------------------------------------- the chip
+
+/** Frames a second. A real chip updates its envelopes on the video frame. */
+const FRAME = 1 / 60;
+/** Volume is four bits. Sixteen levels, and no values in between. */
+const LEVELS = 15;
 
 export interface Bus {
   readonly ctx: BaseAudioContext;
-  /** Voices connect here. */
   readonly dry: GainNode;
-  /** ...and, as much of themselves as they want reverb on, here. */
+  /** The tracker echo. Voices send as much of themselves here as they want. */
   readonly send: GainNode;
-  /** One buffer of white noise, shared by every strike. */
-  readonly noise: AudioBuffer;
+  /** Long-mode LFSR: hiss. Short-mode: metallic and almost pitched. */
+  readonly noiseLong: AudioBuffer;
+  readonly noiseShort: AudioBuffer;
+  /** One PeriodicWave per duty cycle, made once. */
+  readonly pulses: Map<number, PeriodicWave>;
 }
 
-/** A fixed sequence, so the game sounds identical every launch. */
-function fill(data: Float32Array, seed: number, shape?: (i: number, n: number) => number): void {
-  let state = seed;
-  for (let i = 0; i < data.length; i++) {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    const value = (state / 0x7fffffff) % 1;
-    data[i] = shape ? value * shape(i, data.length) : value;
+/**
+ * The NES noise channel: a 15-bit shift register, fed back from bit 0 XOR
+ * bit 1. Flip the tap to bit 6 and the sequence closes after 93 steps, which
+ * stops being noise and starts being a rough metallic tone — the sound every
+ * laser and every explosion of the era is built from.
+ *
+ * Each step is held for a few samples so the buffer covers a useful range once
+ * playbackRate shifts it.
+ */
+function makeLfsr(ctx: BaseAudioContext, short: boolean): AudioBuffer {
+  const hold = 8;
+  const steps = Math.floor((ctx.sampleRate * 1.5) / hold);
+  const buffer = ctx.createBuffer(1, steps * hold, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  let reg = 1;
+  for (let i = 0; i < steps; i++) {
+    const bit = (reg & 1) ^ ((reg >> (short ? 6 : 1)) & 1);
+    reg = (reg >> 1) | (bit << 14);
+    // The channel outputs the inverse of bit 0, as a square: full or nothing.
+    const value = (reg & 1) === 0 ? 1 : -1;
+    for (let j = 0; j < hold; j++) data[i * hold + j] = value;
   }
-}
-
-function makeNoise(ctx: BaseAudioContext): AudioBuffer {
-  const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 2), ctx.sampleRate);
-  fill(buffer.getChannelData(0), 0x2f6e2b1);
   return buffer;
 }
 
 /**
- * The room, as decaying noise.
- *
- * Longer and softer than a game normally gets away with — 1.8 seconds — because
- * this instrument is meant to ring. The two channels use different seeds, which
- * is what makes it feel wide rather than like one echo.
+ * A pulse wave of the given duty, from the Fourier series of a pulse train:
+ * the nth sine coefficient is (2 / nπ) · sin(nπd). At d = 0.5 the even terms
+ * vanish and this is the familiar square.
  */
-function makeRoom(ctx: BaseAudioContext): AudioBuffer {
-  const length = Math.floor(ctx.sampleRate * 1.8);
-  const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
-  const curve = (i: number, n: number) => Math.pow(1 - i / n, 2.2);
-  fill(buffer.getChannelData(0), 0x1a3f77d, curve);
-  fill(buffer.getChannelData(1), 0x5c81b3f, curve);
-  return buffer;
+function makePulse(ctx: BaseAudioContext, duty: number): PeriodicWave {
+  const harmonics = 40;
+  const real = new Float32Array(harmonics);
+  const imag = new Float32Array(harmonics);
+  for (let n = 1; n < harmonics; n++) {
+    imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * duty);
+  }
+  return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
 }
 
 export function createBus(ctx: BaseAudioContext, destination: AudioNode): Bus {
   const master = ctx.createGain();
-  master.gain.value = 0.62;
+  master.gain.value = 0.5;
 
-  // Glue, and a ceiling. Six clears landing together would otherwise tear.
   const limiter = ctx.createDynamicsCompressor();
-  limiter.threshold.value = -14;
-  limiter.knee.value = 8;
+  limiter.threshold.value = -12;
+  limiter.knee.value = 6;
   limiter.ratio.value = 8;
   limiter.attack.value = 0.003;
-  limiter.release.value = 0.18;
+  limiter.release.value = 0.15;
 
   master.connect(limiter);
   limiter.connect(destination);
@@ -135,20 +150,46 @@ export function createBus(ctx: BaseAudioContext, destination: AudioNode): Bus {
   const dry = ctx.createGain();
   dry.connect(master);
 
-  const reverb = ctx.createConvolver();
-  reverb.buffer = makeRoom(ctx);
-  const wet = ctx.createGain();
-  wet.gain.value = 0.55;
-  reverb.connect(wet);
-  wet.connect(master);
+  // A tracker echo, not a room: one short delay fed back on itself, darkened a
+  // little each pass so it does not fizz.
+  const delay = ctx.createDelay(0.5);
+  delay.delayTime.value = 0.115;
+  const feedback = ctx.createGain();
+  feedback.gain.value = 0.32;
+  const damp = ctx.createBiquadFilter();
+  damp.type = "lowpass";
+  damp.frequency.value = 3200;
+  const echo = ctx.createGain();
+  echo.gain.value = 0.42;
+
+  delay.connect(damp);
+  damp.connect(feedback);
+  feedback.connect(delay);
+  damp.connect(echo);
+  echo.connect(master);
 
   const send = ctx.createGain();
-  send.connect(reverb);
+  send.connect(delay);
 
-  return { ctx, dry, send, noise: makeNoise(ctx) };
+  const pulses = new Map<number, PeriodicWave>();
+  for (const duty of [0.125, 0.25, 0.5]) pulses.set(duty, makePulse(ctx, duty));
+
+  return {
+    ctx,
+    dry,
+    send,
+    noiseLong: makeLfsr(ctx, false),
+    noiseShort: makeLfsr(ctx, true),
+    pulses,
+  };
 }
 
-// ------------------------------------------------------------------- voices
+// -------------------------------------------------------------- envelopes
+
+/** Nothing may be scheduled before the context started. */
+function safe(when: number): number {
+  return Math.max(0, when);
+}
 
 function route(bus: Bus, node: AudioNode, send: number): void {
   node.connect(bus.dry);
@@ -161,139 +202,77 @@ function route(bus: Bus, node: AudioNode, send: number): void {
 }
 
 /**
- * Attack and decay, both exponential.
+ * A staircase, not a fade.
  *
- * Exponential ramps cannot touch zero, hence the near-silent floor. The tiny
- * attack matters more than it looks: a gain that jumps straight to full clicks,
- * and on a phone speaker that click is louder than the note underneath it.
+ * The whole 8-bit envelope: hold a level for a frame, drop to the next of
+ * sixteen, hold again. `curve` bends where the loudness goes — 1 is a straight
+ * line down, higher numbers drop fast and hang on quietly, which is what a
+ * percussive chip envelope does.
  */
-/**
- * Nothing may be scheduled before the context started. The swell is placed so
- * it *lands* on its hit, which means it starts earlier — and a bonus fired
- * moments after unlock, while currentTime is still near zero, would otherwise
- * ask for a negative time and throw. The sound would then be swallowed by the
- * caller's catch and simply never play.
- */
-function safe(when: number): number {
-  return Math.max(0, when);
+function stair(
+  gain: GainNode,
+  when: number,
+  peak: number,
+  decay: number,
+  curve = 1.6,
+): number {
+  const frames = Math.max(2, Math.min(200, Math.round(decay / FRAME)));
+  for (let i = 0; i < frames; i++) {
+    const t = i / frames;
+    const level = Math.round(peak * Math.pow(1 - t, curve) * LEVELS) / LEVELS;
+    gain.gain.setValueAtTime(level, when + i * FRAME);
+  }
+  const end = when + frames * FRAME;
+  gain.gain.setValueAtTime(0, end);
+  return end + 0.01;
 }
 
-function shape(gain: GainNode, when: number, peak: number, attack: number, decay: number): number {
-  gain.gain.setValueAtTime(0.0001, when);
-  gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + attack);
-  gain.gain.exponentialRampToValueAtTime(0.0001, when + attack + decay);
-  return when + attack + decay + 0.02;
-}
+// ----------------------------------------------------------------- voices
 
-interface Partial {
-  /** Multiple of the fundamental. Deliberately not whole numbers. */
-  readonly ratio: number;
-  readonly gain: number;
-  /** Fraction of the voice's decay this partial gets. */
-  readonly decay: number;
-}
-
-interface StruckOptions {
+interface PulseOptions {
   readonly at?: number;
   readonly freq: number;
+  readonly duty?: number;
   readonly peak: number;
   readonly decay: number;
-  readonly attack?: number;
+  readonly curve?: number;
   readonly send?: number;
-  /** Detune in cents for a second, slightly-off copy. Makes it shimmer. */
-  readonly beat?: number;
-  readonly type?: OscillatorType;
+  /** Stepped pitch slide, in semitones, across the note. */
+  readonly bend?: number;
+  /** Notes to flicker between, as semitone offsets. The chiptune chord. */
+  readonly arp?: readonly number[];
+  /** Frames each arpeggio note is held for. Two or three is typical. */
+  readonly arpRate?: number;
+  /** Fast pitch wobble, in cents. */
+  readonly vibrato?: number;
 }
 
-/**
- * One struck note.
- *
- * The partial table is the instrument's character: the ratios decide whether it
- * reads as wood, metal or glass, and the per-partial decays decide how it
- * settles. A real struck object loses its high partials first, which is why
- * these get shorter decays the higher they go.
- */
-function struck(bus: Bus, when: number, partials: readonly Partial[], options: StruckOptions): void {
-  const start = safe(when + (options.at ?? 0));
-  const attack = options.attack ?? 0.003;
-
-  for (const partial of partials) {
-    // A detuned twin beats slowly against the original. That is the whole
-    // trick behind glass and singing bowls, and it costs one oscillator.
-    const voices = options.beat ? [-options.beat / 2, options.beat / 2] : [0];
-
-    for (const cents of voices) {
-      const osc = bus.ctx.createOscillator();
-      const gain = bus.ctx.createGain();
-      osc.type = options.type ?? "sine";
-      osc.frequency.value = options.freq * partial.ratio * Math.pow(2, cents / 1200);
-
-      const end = shape(
-        gain,
-        start,
-        (options.peak * partial.gain) / voices.length,
-        attack,
-        options.decay * partial.decay,
-      );
-      osc.connect(gain);
-      route(bus, gain, options.send ?? 0);
-      osc.start(start);
-      osc.stop(end);
-    }
-  }
-}
-
-interface NoiseOptions {
-  readonly at?: number;
-  readonly peak: number;
-  readonly decay: number;
-  readonly attack?: number;
-  readonly type?: BiquadFilterType;
-  readonly from: number;
-  readonly to?: number;
-  readonly q?: number;
-  readonly send?: number;
-}
-
-/** The strike itself. Short, filtered, and the reason a note sounds hit. */
-function noiseBurst(bus: Bus, when: number, options: NoiseOptions): void {
-  const start = safe(when + (options.at ?? 0));
-  const source = bus.ctx.createBufferSource();
-  source.buffer = bus.noise;
-  source.playbackRate.value = 0.9 + ((start * 7.3) % 1) * 0.3;
-
-  const filter = bus.ctx.createBiquadFilter();
-  filter.type = options.type ?? "lowpass";
-  filter.Q.value = options.q ?? 1;
-  filter.frequency.setValueAtTime(options.from, start);
-  if (options.to) {
-    filter.frequency.exponentialRampToValueAtTime(Math.max(40, options.to), start + options.decay);
-  }
-
-  const gain = bus.ctx.createGain();
-  const end = shape(gain, start, options.peak, options.attack ?? 0.001, options.decay);
-
-  source.connect(filter);
-  filter.connect(gain);
-  route(bus, gain, options.send ?? 0);
-  source.start(start, ((start * 3.1) % 1) * 1.5);
-  source.stop(end);
-}
-
-/** The body. A low sine falling in pitch — this is what "weight" actually is. */
-function thump(
-  bus: Bus,
-  when: number,
-  options: { at?: number; freq: number; to: number; peak: number; decay: number; send?: number },
-): void {
+function pulse(bus: Bus, when: number, options: PulseOptions): void {
   const start = safe(when + (options.at ?? 0));
   const osc = bus.ctx.createOscillator();
-  const gain = bus.ctx.createGain();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(options.freq, start);
-  osc.frequency.exponentialRampToValueAtTime(Math.max(20, options.to), start + options.decay);
+  const wave = bus.pulses.get(options.duty ?? 0.25);
+  if (wave) osc.setPeriodicWave(wave);
+  else osc.type = "square";
 
-  const end = shape(gain, start, options.peak, 0.004, options.decay);
+  const gain = bus.ctx.createGain();
+  const end = stair(gain, start, options.peak, options.decay, options.curve);
+
+  // Pitch is stepped too. A chip changes its period register on a frame
+  // boundary and holds it; sliding smoothly is the one thing it cannot do.
+  const frames = Math.max(1, Math.round((end - start) / FRAME));
+  const arp = options.arp;
+  const arpRate = options.arpRate ?? 2;
+
+  for (let i = 0; i < frames; i++) {
+    const t = i / frames;
+    let semitones = (options.bend ?? 0) * t;
+    if (arp && arp.length > 0) semitones += arp[Math.floor(i / arpRate) % arp.length]!;
+    if (options.vibrato) {
+      semitones += (Math.sin(i * 0.9) * options.vibrato) / 100;
+    }
+    osc.frequency.setValueAtTime(options.freq * Math.pow(2, semitones / 12), start + i * FRAME);
+  }
+
   osc.connect(gain);
   route(bus, gain, options.send ?? 0);
   osc.start(start);
@@ -301,106 +280,73 @@ function thump(
 }
 
 /**
- * A ratchet: a run of tiny wooden ticks that speeds up and settles.
- *
- * This is the spin, and it is the most deliberately odd thing in here. A ring
- * turning under a thumb is a mechanism, not a breath, so it gets clicks rather
- * than the whoosh every other game reaches for — closer to a thumb run along a
- * comb, or an old rotary dial coming back.
+ * The triangle channel: the bass. On the real chip it has no volume control at
+ * all — it is on or it is off — so this only steps it coarsely, which keeps
+ * that flat, boxy low end.
  */
-function ratchet(
+function tri(
   bus: Bus,
   when: number,
-  options: { ticks: number; span: number; freq: number; peak: number; send?: number },
+  options: { at?: number; freq: number; peak: number; decay: number; bend?: number; send?: number },
 ): void {
-  for (let i = 0; i < options.ticks; i++) {
-    const t = i / (options.ticks - 1);
-    // Eased, so it accelerates away and settles rather than running at a
-    // constant machine rate.
-    const eased = t - Math.sin(t * Math.PI * 2) / (Math.PI * 2);
+  const start = safe(when + (options.at ?? 0));
+  const osc = bus.ctx.createOscillator();
+  osc.type = "triangle";
 
-    noiseBurst(bus, when, {
-      at: eased * options.span,
-      type: "bandpass",
-      from: options.freq * (1 + t * 0.5),
-      to: options.freq * 0.6,
-      q: 2.5,
-      // Each tick quieter than the last: the wheel is slowing.
-      peak: options.peak * (1 - t * 0.55),
-      decay: 0.02,
-      send: options.send ?? 0.12,
-    });
-  }
-}
-
-/**
- * A reverse swell: something rushing in and arriving.
- *
- * Almost every impact sound in every game falls — in pitch, in brightness, in
- * level — because that is what real objects do when they are hit. Running one
- * backwards is immediately unusual, and it turns a hit into an *arrival*. It is
- * the one thing in here nobody will have heard much of, which is exactly what
- * a signature moment needs.
- *
- * Scheduled so it lands on `when`, not so it starts there.
- */
-function swell(
-  bus: Bus,
-  when: number,
-  options: { duration: number; from: number; to: number; peak: number; send?: number },
-): void {
-  const start = safe(when - options.duration);
-  const source = bus.ctx.createBufferSource();
-  source.buffer = bus.noise;
-  source.playbackRate.value = 0.85;
-
-  const filter = bus.ctx.createBiquadFilter();
-  filter.type = "bandpass";
-  filter.Q.value = 1.1;
-  filter.frequency.setValueAtTime(options.from, start);
-  filter.frequency.exponentialRampToValueAtTime(options.to, start + options.duration);
-
-  // The inverted envelope. Rising, and steeply, so it reads as approach rather
-  // than as a fade-in.
   const gain = bus.ctx.createGain();
-  gain.gain.setValueAtTime(0.0001, start);
-  gain.gain.exponentialRampToValueAtTime(options.peak, start + options.duration);
-  gain.gain.exponentialRampToValueAtTime(0.0001, start + options.duration + 0.05);
+  const end = stair(gain, start, options.peak, options.decay, 0.6);
 
-  source.connect(filter);
-  filter.connect(gain);
-  route(bus, gain, options.send ?? 0.3);
-  source.start(start, 0.4);
-  source.stop(start + options.duration + 0.07);
+  const frames = Math.max(1, Math.round((end - start) / FRAME));
+  for (let i = 0; i < frames; i++) {
+    const semitones = (options.bend ?? 0) * (i / frames);
+    osc.frequency.setValueAtTime(options.freq * Math.pow(2, semitones / 12), start + i * FRAME);
+  }
+
+  osc.connect(gain);
+  route(bus, gain, options.send ?? 0);
+  osc.start(start);
+  osc.stop(end);
 }
 
-// ------------------------------------------------------------- instruments
+interface NoiseOptions {
+  readonly at?: number;
+  readonly peak: number;
+  readonly decay: number;
+  readonly curve?: number;
+  /** 0.25 is deep and slow, 4 is a bright hiss. */
+  readonly rate: number;
+  readonly rateTo?: number;
+  /** Short mode: metallic and nearly pitched. Where lasers come from. */
+  readonly short?: boolean;
+  readonly send?: number;
+}
 
-/** Wood. A kalimba tine, or a block set on a table: warm, short, no shimmer. */
-const TINE: readonly Partial[] = [
-  { ratio: 1, gain: 1, decay: 1 },
-  { ratio: 2.76, gain: 0.28, decay: 0.42 },
-  { ratio: 5.4, gain: 0.1, decay: 0.18 },
-];
+function noise(bus: Bus, when: number, options: NoiseOptions): void {
+  const start = safe(when + (options.at ?? 0));
+  const source = bus.ctx.createBufferSource();
+  source.buffer = options.short ? bus.noiseShort : bus.noiseLong;
+  source.playbackRate.setValueAtTime(options.rate, start);
 
-/**
- * Metal. A handpan: the octave and the fifth are tuned in, which is what makes
- * one sound like a chord being struck rather than a note.
- */
-const PAN: readonly Partial[] = [
-  { ratio: 1, gain: 1, decay: 1 },
-  { ratio: 2.01, gain: 0.5, decay: 0.72 },
-  { ratio: 3.02, gain: 0.28, decay: 0.5 },
-  { ratio: 4.94, gain: 0.1, decay: 0.3 },
-  { ratio: 6.31, gain: 0.05, decay: 0.18 },
-];
+  const gain = bus.ctx.createGain();
+  const end = stair(gain, start, options.peak, options.decay, options.curve);
 
-/** Glass. Few partials, very long, and it beats against itself. */
-const GLASS: readonly Partial[] = [
-  { ratio: 1, gain: 1, decay: 1 },
-  { ratio: 2, gain: 0.32, decay: 0.65 },
-  { ratio: 5.43, gain: 0.06, decay: 0.25 },
-];
+  if (options.rateTo) {
+    // Stepped, like everything else the chip does.
+    const frames = Math.max(1, Math.round((end - start) / FRAME));
+    for (let i = 0; i < frames; i++) {
+      const t = i / frames;
+      source.playbackRate.setValueAtTime(
+        options.rate * Math.pow(options.rateTo / options.rate, t),
+        start + i * FRAME,
+      );
+    }
+  }
+
+  source.connect(gain);
+  route(bus, gain, options.send ?? 0);
+  source.start(start, ((start * 3.7) % 1) * 1.2);
+  source.stop(end);
+}
 
 // -------------------------------------------------------------- the sounds
 
@@ -408,30 +354,22 @@ const GLASS: readonly Partial[] = [
  * How loud each sound sits relative to the others.
  *
  * Set against measurement rather than by ear: tools/audio-preview.mjs reports
- * the loudest 300 ms of each voice, and these are the trims that put them where
- * they belong. A placement is the floor because it happens constantly; a
- * bullseye is the ceiling because it happens once a session.
+ * the loudest 300 ms of each voice. A placement is the floor because it happens
+ * constantly; the bonus is the ceiling because it is the moment the game is for.
  */
 const TRIM: Record<Sound, number> = {
-  start: 0.63,
-  bonus: 1,
-  place: 1.07,
-  spin: 0.69,
-  denied: 1.37,
-  spoke: 0.72,
-  stripe: 0.93,
-  pure: 0.59,
-  ring: 0.572,
-  gameOver: 0.292,
+  start: 0.62,
+  bonus: 0.72,
+  place: 1.91,
+  spoke: 0.45,
+  stripe: 0.378,
+  pure: 0.45,
+  ring: 0.49,
+  gameOver: 0.36,
+  denied: 0.76,
+  spin: 1.32,
 };
 
-/**
- * Everything the game can say.
- *
- * `level` is the combo, which walks everything up the scale, so a run of clears
- * is a melody rather than a siren. `at` is where on the disc it happened, as a
- * scale degree — the caller derives it from the ring or the sector.
- */
 export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): void {
   const gain = TRIM[sound];
   const dry = bus.ctx.createGain();
@@ -440,214 +378,240 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
   const send = bus.ctx.createGain();
   send.gain.value = gain;
   send.connect(bus.send);
-  bus = { ctx: bus.ctx, dry, send, noise: bus.noise };
+  bus = { ...bus, dry, send };
 
   const degree = at + Math.min(level, 7);
 
   switch (sound) {
-    case "start": {
-      // Pressing play sets the wheel going. A flick of the ratchet, then a
-      // phrase climbing the scale — the exact opposite of game over, which
-      // walks down it and stops.
-      ratchet(bus, when, { ticks: 7, span: 0.16, freq: 2200, peak: 0.19, send: 0.2 });
-
-      [0, 2, 4].forEach((step, i) => {
-        struck(bus, when, PAN, {
-          at: 0.06 + i * 0.075,
-          freq: note(degree + step),
-          peak: 0.26,
-          decay: 0.7 + i * 0.2,
-          send: 0.4,
-        });
-      });
-
-      // The note it settles on, left ringing under the first board. This is
-      // the "ready" — everything before it is the run-up.
-      struck(bus, when, GLASS, {
-        at: 0.29,
-        freq: note(degree + 7),
-        peak: 0.2,
-        decay: 1.5,
-        attack: 0.04,
-        beat: 11,
-        send: 0.6,
-      });
-
-      // Rising, like the bonus: this family lifts rather than lands.
-      thump(bus, when, { at: 0.05, freq: 62, to: 124, peak: 0.42, decay: 0.4, send: 0.15 });
-      break;
-    }
-
-    case "bonus": {
-      // The signature. Whatever the banner says, this is what it sounds like.
-      //
-      // Three things nothing else in the game does: a swell running backwards
-      // into the hit, a sub that rises instead of falling, and the whole scale
-      // struck at once as a bloom rather than a chord. Together they are meant
-      // to be recognisable in one second, through a phone speaker, across a
-      // room.
-      //
-      // `level` is how big a moment it is: 0 a stripe, 1 a pure clear, 2 the
-      // bullseye. It buys length, depth and one more note on the bloom.
-      const tier = Math.min(2, Math.max(0, Math.round(level)));
-      // Size buys length, depth and notes — never amplitude. Pushed loud
-      // enough to slam the limiter, the swell and the strike are the first
-      // things flattened, and flattening them is flattening the whole idea.
-      const size = 1 + tier * 0.45;
-
-      swell(bus, when, {
-        duration: 0.16 + tier * 0.07,
-        from: 300,
-        to: 5200,
-        peak: 0.14 + tier * 0.02,
-        send: 0.35,
-      });
-
-      // Rising, not falling. This is the part that sounds wrong in the best way.
-      thump(bus, when, {
-        freq: 52,
-        to: 128 + tier * 24,
-        peak: 0.58,
-        decay: 0.4 + tier * 0.22,
-        send: 0.2,
-      });
-
-      // The bloom: the scale struck together, the top notes barely staggered,
-      // so it arrives as one event and separates as it rings.
-      const notes = [0, 2, 4, 6, 8].slice(0, 3 + tier);
-      notes.forEach((step, i) => {
-        struck(bus, when, PAN, {
-          at: i * 0.014,
-          freq: note(degree + step),
-          peak: 0.21 - i * 0.025,
-          decay: (0.9 + i * 0.25) * size,
-          send: 0.5,
-        });
-      });
-
-      // A glass tail over the top, left hanging after everything else has gone.
-      struck(bus, when, GLASS, {
-        at: 0.1,
-        freq: note(degree + 10),
-        peak: 0.14,
-        decay: 1.4 + tier * 0.6,
-        attack: 0.05,
-        beat: 14,
-        send: 0.65,
-      });
-      break;
-    }
-
     case "place": {
-      // A wooden tine, tuned to the ring it landed on, under a soft thock.
-      noiseBurst(bus, when, { from: 2000, to: 700, peak: 0.2, decay: 0.026 });
-      struck(bus, when, TINE, { freq: note(at - 5), peak: 0.34, decay: 0.26, send: 0.14 });
-      thump(bus, when, { freq: 150, to: 96, peak: 0.34, decay: 0.09 });
+      // A blip. Thin duty, a fast drop, gone in a few frames — the sound of
+      // something being put down in every game of the era.
+      pulse(bus, when, {
+        freq: note(at - 3),
+        duty: 0.125,
+        peak: 0.5,
+        decay: 0.07,
+        bend: -4,
+        curve: 1.2,
+      });
+      noise(bus, when, { peak: 0.16, decay: 0.035, rate: 2.6, curve: 2.4 });
       break;
     }
 
     case "spoke": {
-      // The bread-and-butter clear: the same tine struck harder, with the
-      // handpan an octave below holding it up.
-      noiseBurst(bus, when, { from: 5000, to: 1800, peak: 0.13, decay: 0.018 });
-      struck(bus, when, TINE, { freq: note(degree), peak: 0.34, decay: 0.42, send: 0.3 });
-      struck(bus, when, PAN, {
-        at: 0.012,
-        freq: note(degree - 5),
-        peak: 0.2,
-        decay: 0.5,
-        send: 0.35,
+      // A quick run up. Two notes rather than a chord, because that is what a
+      // pulse channel can actually do in a hurry.
+      pulse(bus, when, {
+        freq: note(degree),
+        duty: 0.25,
+        peak: 0.42,
+        decay: 0.2,
+        arp: [0, 7],
+        arpRate: 2,
+        send: 0.25,
       });
-      thump(bus, when, { freq: 140, to: 88, peak: 0.3, decay: 0.13 });
+      tri(bus, when, { freq: note(degree - 10), peak: 0.4, decay: 0.16 });
+      noise(bus, when, { peak: 0.14, decay: 0.04, rate: 3.4, curve: 2.2 });
       break;
     }
 
     case "ring": {
-      // A whole circle closed. The handpan struck three times in quick
-      // succession up the scale — a rolled chord, not a stab.
-      noiseBurst(bus, when, { from: 6000, to: 1500, peak: 0.18, decay: 0.03 });
-      [0, 2, 4].forEach((step, i) => {
-        struck(bus, when, PAN, {
-          at: i * 0.05,
-          freq: note(degree + step),
-          peak: 0.3 - i * 0.04,
-          decay: 0.9,
-          send: 0.45,
-        });
+      // A whole circle. A proper arpeggiated chord, flickering through the
+      // triad, over a triangle bass that bends down under it.
+      pulse(bus, when, {
+        freq: note(degree),
+        duty: 0.5,
+        peak: 0.38,
+        decay: 0.42,
+        arp: [0, 4, 7, 12],
+        arpRate: 2,
+        send: 0.4,
       });
-      thump(bus, when, { freq: 96, to: 54, peak: 0.72, decay: 0.34, send: 0.1 });
+      pulse(bus, when, {
+        at: 0.03,
+        freq: note(degree + 5),
+        duty: 0.125,
+        peak: 0.2,
+        decay: 0.36,
+        arp: [0, 7],
+        arpRate: 3,
+        send: 0.4,
+      });
+      tri(bus, when, { freq: note(degree - 12), peak: 0.55, decay: 0.4, bend: -5 });
+      noise(bus, when, { peak: 0.2, decay: 0.07, rate: 3.8, rateTo: 1.4, curve: 2 });
       break;
     }
 
     case "pure": {
-      // One colour, all the way round. Glass: slow to speak, slow to fade, and
-      // beating gently against itself the whole time.
-      noiseBurst(bus, when, { from: 8000, to: 3000, peak: 0.08, decay: 0.012 });
-      struck(bus, when, GLASS, {
-        freq: note(degree + 5),
+      // One colour all the way round. A rising figure with vibrato on the tail
+      // — the chiptune equivalent of a held, singing note.
+      pulse(bus, when, {
+        freq: note(degree),
+        duty: 0.25,
         peak: 0.4,
-        decay: 1.5,
-        attack: 0.03,
-        beat: 12,
-        send: 0.6,
+        decay: 0.5,
+        arp: [0, 5, 12],
+        arpRate: 3,
+        vibrato: 22,
+        send: 0.45,
       });
-      struck(bus, when, GLASS, {
-        at: 0.09,
-        freq: note(degree + 8),
-        peak: 0.22,
-        decay: 1.2,
-        attack: 0.04,
-        beat: 14,
-        send: 0.6,
-      });
-      thump(bus, when, { freq: 175, to: 117, peak: 0.28, decay: 0.22 });
+      tri(bus, when, { freq: note(degree - 7), peak: 0.42, decay: 0.44 });
       break;
     }
 
     case "stripe": {
-      // A detonation tearing across the disc: the ratchet at speed, a handpan
-      // struck flat with a triangle edge on it, and a sub underneath.
-      ratchet(bus, when, { ticks: 9, span: 0.13, freq: 2600, peak: 0.2, send: 0.25 });
-      struck(bus, when, PAN, {
-        freq: note(degree),
-        peak: 0.3,
-        decay: 0.6,
-        type: "triangle",
-        send: 0.35,
+      // A laser. Short-mode noise plus a pulse falling fast through an octave
+      // and a half: this is exactly how the era made things explode.
+      noise(bus, when, {
+        peak: 0.34,
+        decay: 0.22,
+        rate: 3.6,
+        rateTo: 0.5,
+        short: true,
+        curve: 1.4,
+        send: 0.3,
       });
-      thump(bus, when, { freq: 110, to: 46, peak: 0.72, decay: 0.32 });
+      pulse(bus, when, {
+        freq: note(degree + 7),
+        duty: 0.125,
+        peak: 0.32,
+        decay: 0.2,
+        bend: -18,
+        curve: 1.2,
+      });
+      tri(bus, when, { freq: note(degree - 12), peak: 0.5, decay: 0.26, bend: -7 });
       break;
     }
 
     case "spin": {
-      // The signature. A mechanism turning, not air moving.
-      ratchet(bus, when, { ticks: 11, span: 0.22, freq: 1800, peak: 0.26 });
-      struck(bus, when, TINE, { at: 0.2, freq: note(at), peak: 0.16, decay: 0.3, send: 0.3 });
+      // A menu tick with a slide in it: short, dry, and it gets out of the way.
+      pulse(bus, when, {
+        freq: note(at),
+        duty: 0.125,
+        peak: 0.3,
+        decay: 0.11,
+        bend: 5,
+        curve: 1.1,
+      });
+      noise(bus, when, { peak: 0.13, decay: 0.06, rate: 1.6, rateTo: 3.2, curve: 1.8 });
       break;
     }
 
     case "denied": {
-      // A tine stopped by a thumb: it starts to speak and is damped. The player
-      // has done nothing wrong, the board has.
-      noiseBurst(bus, when, { from: 500, peak: 0.2, decay: 0.05 });
-      struck(bus, when, TINE, { freq: note(-7), peak: 0.3, decay: 0.055 });
-      thump(bus, when, { freq: 128, to: 86, peak: 0.34, decay: 0.09 });
+      // The buzz. Fat 50% duty, low, bent down — every "no" on every console.
+      pulse(bus, when, {
+        freq: note(-9),
+        duty: 0.5,
+        peak: 0.36,
+        decay: 0.13,
+        bend: -3,
+        curve: 0.9,
+      });
+      break;
+    }
+
+    case "start": {
+      // The level-start fanfare: four notes up the scale, brisk, then the top
+      // one held with the bass under it.
+      [0, 2, 4].forEach((step, i) => {
+        pulse(bus, when, {
+          at: i * 0.075,
+          freq: note(degree + step),
+          duty: 0.25,
+          peak: 0.4,
+          decay: 0.09,
+          curve: 1,
+        });
+      });
+      pulse(bus, when, {
+        at: 0.225,
+        freq: note(degree + 7),
+        duty: 0.25,
+        peak: 0.42,
+        decay: 0.4,
+        vibrato: 18,
+        send: 0.4,
+      });
+      tri(bus, when, { at: 0.225, freq: note(degree - 5), peak: 0.5, decay: 0.36 });
+      noise(bus, when, { at: 0.225, peak: 0.16, decay: 0.05, rate: 3.2, curve: 2 });
+      break;
+    }
+
+    case "bonus": {
+      // The signature: the power-up. A pulse climbing the whole scale in
+      // frame-length steps, then the chord arpeggiating over a bending bass.
+      //
+      // `level` is how big the moment was — 0 a stripe, 1 a pure clear, 2 the
+      // bullseye. It buys length, another octave on the climb and a fatter tail.
+      const tier = Math.min(2, Math.max(0, Math.round(level)));
+      const climb = 6 + tier * 3;
+
+      for (let i = 0; i < climb; i++) {
+        pulse(bus, when, {
+          at: i * 0.035,
+          freq: note(degree + i),
+          duty: i % 2 === 0 ? 0.125 : 0.25,
+          peak: 0.34,
+          decay: 0.05,
+          curve: 0.8,
+        });
+      }
+
+      const land = climb * 0.035;
+      pulse(bus, when, {
+        at: land,
+        freq: note(degree + climb),
+        duty: 0.5,
+        peak: 0.42,
+        decay: 0.5 + tier * 0.2,
+        arp: [0, 4, 7],
+        arpRate: 2,
+        vibrato: 20,
+        send: 0.5,
+      });
+      tri(bus, when, {
+        at: land,
+        freq: note(degree - 12),
+        peak: 0.6,
+        decay: 0.5 + tier * 0.2,
+        bend: 7,
+      });
+      noise(bus, when, {
+        at: land,
+        peak: 0.26,
+        decay: 0.16 + tier * 0.06,
+        rate: 4,
+        rateTo: 1.2,
+        curve: 1.8,
+        send: 0.35,
+      });
       break;
     }
 
     case "gameOver": {
-      // The instrument settling. Three notes down the scale, the last left to
-      // ring out into the room.
-      [4, 2, 0].forEach((step, i) => {
-        struck(bus, when, PAN, {
-          at: i * 0.17,
-          freq: note(step - 5),
-          peak: 0.3,
-          decay: i === 2 ? 1.8 : 0.8,
-          send: 0.6,
+      // The descent. Four notes down, the last bent through the floor with the
+      // bass following it. Nobody has ever needed this explained.
+      [0, -2, -4].forEach((step, i) => {
+        pulse(bus, when, {
+          at: i * 0.16,
+          freq: note(degree + step),
+          duty: 0.5,
+          peak: 0.34,
+          decay: 0.15,
+          curve: 1,
         });
       });
-      thump(bus, when, { at: 0.34, freq: 110, to: 55, peak: 0.6, decay: 0.8, send: 0.2 });
+      pulse(bus, when, {
+        at: 0.48,
+        freq: note(degree - 7),
+        duty: 0.25,
+        peak: 0.36,
+        decay: 0.55,
+        bend: -12,
+        curve: 1.1,
+        send: 0.45,
+      });
+      tri(bus, when, { at: 0.48, freq: note(degree - 19), peak: 0.5, decay: 0.5, bend: -7 });
       break;
     }
   }
