@@ -58,7 +58,11 @@ export type Sound =
   /** The ramp dropping a stone on the rim. */
   | "stone"
   /** One depth deeper. The floor moving. */
-  | "deeper";
+  | "deeper"
+  /** The countdown, in the last seconds of a timed round. */
+  | "tick"
+  /** Seconds bought back by a clear. */
+  | "gainTime";
 
 // -------------------------------------------------------------------- scale
 
@@ -456,6 +460,11 @@ const TRIM: Record<Sound, number> = {
   // where game over does.
   stone: 0.093,
   deeper: 0.079,
+  // The tick fires up to five times in the last five seconds, over whatever
+  // else is playing, so it is set low enough to sit under a clear rather than
+  // cut through it.
+  tick: 0.1,
+  gainTime: 0.085,
 };
 
 export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): void {
@@ -486,6 +495,37 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
       const shade = at % 5;
       noise(bus, when, { peak: 0.34, decay: 0.028, rate: 1.35 + shade * 0.11, curve: 2.8 });
       tri(bus, when, { freq: 88 + shade * 6, peak: 0.72, decay: 0.085 });
+      break;
+    }
+
+    case "tick": {
+      // The last five seconds. Rising, so the fifth is plainly worse than the
+      // first, and short enough to sit under whatever else is playing — this
+      // fires while the player is at their busiest.
+      pulse(bus, when, {
+        freq: note(2 + at * 2),
+        duty: 0.5,
+        peak: 0.4,
+        decay: 0.055,
+        curve: 1.4,
+      });
+      noise(bus, when, { peak: 0.12, decay: 0.02, rate: 2.6, curve: 3 });
+      break;
+    }
+
+    case "gainTime": {
+      // Seconds back on the clock. Short, bright and up the scale, so it reads
+      // as relief in a mode where nothing else does.
+      pulse(bus, when, {
+        freq: note(degree + 7),
+        duty: 0.125,
+        peak: 0.34,
+        decay: 0.14,
+        arp: [0, 5],
+        arpRate: 2,
+        send: 0.3,
+      });
+      tri(bus, when, { freq: note(degree - 5), peak: 0.6, decay: 0.16 });
       break;
     }
 

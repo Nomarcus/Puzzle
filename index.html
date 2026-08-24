@@ -77,6 +77,20 @@
         background: rgba(255, 255, 255, 0.86);
       }
 
+      /*
+       * Twenty tiles are taller than a phone, so this one scrolls. Anchored to
+       * the top rather than centred — a centred list that overflows crops
+       * equally at both ends, which put the first tiles under the status bar.
+       */
+      .overlay.levels {
+        justify-content: flex-start;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        padding-top: calc(var(--safe-top) + 68px);
+        background: rgba(255, 255, 255, 0.93);
+      }
+
       .overlay[hidden] {
         display: none;
       }
@@ -159,6 +173,12 @@
         box-shadow: 0 6px 0 #d65a00, 0 10px 18px rgba(0, 0, 0, 0.18);
       }
 
+      /* Time attack. Red, because it is the one mode that is actively hostile. */
+      .big.hot {
+        background: #ff2d42;
+        box-shadow: 0 6px 0 #d40a22, 0 10px 18px rgba(0, 0, 0, 0.18);
+      }
+
       .big:active {
         transform: translateY(5px);
         box-shadow: 0 1px 0 #005fd6;
@@ -166,6 +186,7 @@
 
       .big.alt:active { box-shadow: 0 1px 0 #35a408; }
       .big.warm:active { box-shadow: 0 1px 0 #d65a00; }
+      .big.hot:active { box-shadow: 0 1px 0 #d40a22; }
 
       .big:disabled {
         background: #9fb6c4;

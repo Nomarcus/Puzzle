@@ -45,6 +45,15 @@ const TABLE = {
   goalBullseye: { sv: "Landa en fullträff", en: "Land a bullseye" },
   goalCombo: { sv: "Nå kombo x%n", en: "Reach a combo of %n" },
   depth: { sv: "DJUP", en: "DEPTH" },
+  time: { sv: "TID", en: "TIME" },
+  timeAttack: { sv: "Mot klockan", en: "Time attack" },
+  timeBlurb: {
+    sv: "Klockan går hela tiden. Varje rensning ger sekunder tillbaka — slutar du rensa är du död på en minut.",
+    en: "The clock never stops. Every clear buys seconds back — stop clearing and you are dead in a minute.",
+  },
+  timeUp: { sv: "Tiden är ute!", en: "Time!" },
+  timeBest: { sv: "TIDSREKORD", en: "TIME BEST" },
+  timeSurvived: { sv: "ÖVERLEVDE", en: "SURVIVED" },
   challenge: { sv: "Utmaning", en: "Challenge" },
   challengeBlurb: {
     sv: "Samma skiva, samma bitar, samma antal drag. Skicka koden till en kompis och se vem som får ut mest.",
@@ -116,6 +125,10 @@ const TABLE = {
   how6: {
     sv: "I fritt spel växer sten in från kanten ju djupare du kommer. En rad med sten i rensas inte — bara en rand eller en fullträff tar bort den. Snurr och skjut flyttar den.",
     en: "In free play, stone creeps in from the rim the deeper you get. A line with stone in it will not clear — only a stripe or a bullseye removes it. Spins and pushes move it.",
+  },
+  how7: {
+    sv: "Mot klockan är kort och stressigt. Klockan går hela tiden och går snabbare ju längre du håller dig kvar — bara rensningar ger sekunder tillbaka.",
+    en: "Time attack is short and stressful. The clock is always running and runs faster the longer you last — only clears buy seconds back.",
   },
   gotIt: { sv: "Kör!", en: "Got it!" },
   how: { sv: "Så spelar du", en: "How to play" },

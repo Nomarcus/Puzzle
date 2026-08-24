@@ -24,13 +24,13 @@ the only thing that pays for one is clearing a line in a **single colour**, or
 a bullseye. That is what gives the palette a job. Both act as lives: the round
 ends only when nothing fits *and* neither power remains.
 
-Four modes. **Levels** is twenty hand-built puzzles, each a fixed board, a fixed
-goal and a fixed number of pieces. **Free play** is the high-score chase; it
-gets harder the longer it lasts and every round ends. **Daily** derives its
-board, piece pack and sequence from the UTC date so every player in the world
-gets the identical puzzle, rationed to 60 pieces, one attempt per day.
-**Challenge** hands somebody else the exact round you just played, as a short
-code. All four are described below.
+Four modes on the menu. **Daily** derives its board, piece pack and sequence
+from the UTC date so every player in the world gets the identical puzzle,
+rationed to 60 pieces, one attempt per day. **Levels** is twenty hand-built
+puzzles, each a fixed board, a fixed goal and a fixed number of pieces. **Free
+play** is the high-score chase; it gets harder the longer it lasts and every
+round ends. **Time attack** is the short, stressful one — the clock never stops
+and only clearing lines buys seconds back. All four are described below.
 
 ## Free play gets harder, and now it ends
 
@@ -98,7 +98,71 @@ everybody, so a ramp reacting to how far you got would make two players' boards
 diverge. `createGame` defaults to no ramp; free play is the only caller that
 passes one.
 
+## Time attack
+
+The other modes run out of space; this one runs out of time, and it is the most
+directly competitive thing in the game. There is nothing in the score but how
+fast you can think — no ration to pace yourself against, no ramp to plan
+around, and no way to sit and stare at the board.
+
+- **Thirty seconds on the clock**, and thirty is also the ceiling.
+- The clock **speeds up** the longer you last: +18% per 40 seconds survived,
+  with no upper limit.
+- Clears buy time: a spoke **+1.5 s**, a ring **+4 s**, a bullseye **+8 s**,
+  each striped block **+1 s**.
+- Always the standard disc and the mixed pack. The other modes let you choose;
+  this one cannot, or two scores would not be comparable — and comparing scores
+  is the whole point of it.
+
+None of this is in the engine. `applyMove` is a pure function of moves and knows
+nothing about wall-clock time, which is what makes replays, the daily's seed
+vetting and the balance bot possible — so the clock belongs to the screen. The
+arithmetic lives in `src/engine/timeattack.ts` where it can be tested on its
+own.
+
+### How the numbers were picked
+
+Five standards of play were modelled — from someone clearing a spoke every eight
+seconds to someone doing it every two — against each candidate clock, reading
+four numbers off every run: does everyone die, how far apart are the best and
+worst, how much of the round is spent under ten seconds, and how many clears
+paid nothing.
+
+| | struggling | ok | good | strong | expert |
+|---|---|---|---|---|---|
+| round lasts | 36 s | 46 s | 59 s | 87 s | 143 s |
+
+A fourfold gap between a beginner and an expert, and about a third of a good
+player's round spent in the red.
+
+Two things that measurement caught, both of which I had wrong first:
+
+**A capped drain is not an ending.** The clock originally stopped speeding up at
+2.2× — and at that rate, someone clearing a spoke every second and a ring every
+five earns 2.3 seconds per second and *never dies*. The test that plays that
+standard ran to its own hour-long ceiling. Exactly the same mistake the free
+play ramp made with stone: any dial meant to end a round has to grow without
+bound, or it is a plateau rather than an ending.
+
+**A clock that opens higher than it caps ignores the player.** A version that
+started at 45 seconds and capped at 25 measured beautifully — most tense of
+anything tried — and played terribly, because above the cap a clear is worth
+nothing, so the first twenty seconds of every round silently swallowed
+everything the player did. A mode whose one mechanic is "clearing buys time"
+cannot have a phase where clearing buys no time.
+
+**One more leaderboard is needed in App Store Connect:**
+`com.nomarcus.shiftle.time` — Time attack. Same settings as the other two
+(integer, high score is best, no decimals, at least one localisation).
+
 ## Challenges: the same round, sent to somebody
+
+**Not on the menu.** The button was removed at Marcus's request — the mode
+worked, but time attack is the competitive hook now and two of them on one menu
+is one too many. Everything below still works and is still tested; a challenge
+opens from a `#c=CODE` link, and putting the button back is one line in
+`showMenu`.
+
 
 This is what a deterministic engine is *for*. A whole round — disc, pack,
 ration and the exact sequence of pieces — is a seed and three small numbers, so
@@ -219,10 +283,11 @@ Game Center boards stay for the daily and free play.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 94 unit tests. |
+| Game engine | Done. Pure, deterministic, 101 unit tests. |
 | Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
-| Challenges | Done. Fifteen-character codes, no backend. |
+| Time attack | Done. Clock tuned against five modelled standards of play. |
+| Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance` and `npm run ramp`. |
@@ -447,10 +512,11 @@ What is already in the repository:
 
 **What still needs a human, in App Store Connect:**
 
-1. Create two leaderboards with exactly these IDs:
+1. Create three leaderboards with exactly these IDs:
    - `com.nomarcus.shiftle.daily` — Today's puzzle
    - `com.nomarcus.shiftle.endless` — Free play
-   Both: integer score format, high score is best, no decimals.
+   - `com.nomarcus.shiftle.time` — Time attack
+   All three: integer score format, high score is best, no decimals.
 2. Add at least one localisation per leaderboard (English works; Swedish too if
    you want it) — App Store Connect will not accept a leaderboard without one.
 

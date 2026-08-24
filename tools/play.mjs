@@ -411,9 +411,15 @@ await page.waitForTimeout(250);
 // The whole feature is "your friend plays exactly the round you played", so the
 // checks that matter are that a code survives the trip out and back, and that
 // a mistyped one is refused rather than quietly becoming a different round.
-await page.locator('[data-action="challenge"]').click();
+// Challenges are no longer on the menu — the button was removed — but the
+// codec and the #c= route are still live, so the flow is driven by hook.
+await page.evaluate(() => window.__shiftle.challenge());
 await page.waitForTimeout(200);
 check("the challenge screen opens", await page.locator('[data-action="challenge-new"]').isVisible());
+check(
+  "but nothing on the menu points at it any more",
+  (await page.locator('[data-action="challenge"]').count()) === 0,
+);
 
 await page.locator('[data-action="challenge-code"]').fill("NOT A REAL CODE AT ALL");
 await page.locator('[data-action="challenge-take"]').click();
@@ -464,6 +470,70 @@ check(
 
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
+
+// --- time attack -----------------------------------------------------------
+// The clock lives in the screen, not the engine, so this is the only place it
+// can be tested at all.
+await page.evaluate(() => window.__shiftle.timeAttack());
+await page.waitForTimeout(500);
+
+const opening = await page.evaluate(() => window.__shiftle.clock());
+check("a timed round opens with a clock running", opening !== null && opening > 20, `${opening}s`);
+check("and the clock is the tense kind, not a comfortable one", opening !== null && opening <= 35, `${opening}s`);
+
+const drained = await page.evaluate(async () => {
+  const before = window.__shiftle.clock();
+  await new Promise((done) => setTimeout(done, 900));
+  return { before, after: window.__shiftle.clock() };
+});
+check("and the clock actually runs down", drained.after < drained.before,
+  `${drained.before?.toFixed(1)} -> ${drained.after?.toFixed(1)}`);
+
+// Clearing has to buy time back, or the mode is just a timer.
+const bought = await page.evaluate(async () => {
+  const api = window.__shiftle;
+  for (let i = 0; i < 120; i++) {
+    const before = api.clock();
+    const state = api.state();
+    if (!state || state.over) break;
+    if (!api.botMove()) break;
+    const after = api.clock();
+    if (after > before) return { before, after };
+  }
+  return null;
+});
+check("clearing a line buys seconds back", bought !== null,
+  bought ? `${bought.before.toFixed(1)} -> ${bought.after.toFixed(1)}` : "never gained time");
+
+// Wound down rather than waited out: a test that sat through a real round is a
+// test nobody runs. `ranOutOfTime` is read while the screen is still up — the
+// result screen tears it down.
+const ended = await page.evaluate(async () => {
+  window.__shiftle.burnClock(999);
+  await new Promise((done) => setTimeout(done, 200));
+  const ranOut = window.__shiftle.ranOutOfTime();
+  await new Promise((done) => setTimeout(done, 2000));
+  return { ranOut, title: document.querySelector(".how-title")?.textContent };
+});
+check("running out of time ends the round", ended.ranOut === true);
+check("and the result says time, not game over", ended.title === "Time!" || ended.title === "Tiden är ute!", ended.title);
+
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
+// --- the level grid --------------------------------------------------------
+// Quitting a level used to come back here without stopping the round, so the
+// abandoned board carried on animating behind a translucent list.
+await page.locator('[data-action="levels"]').click();
+await page.waitForTimeout(300);
+check("the level list has a pinned way out", await page.locator('.hud [data-action="menu"]').isVisible());
+check("and nothing is still playing behind it", (await page.evaluate(() => window.__shiftle.state())) === null);
+{
+  const box = await page.locator('.hud [data-action="menu"]').boundingBox();
+  check("the way out is reachable without scrolling", box !== null && box.y < 200, `y=${box?.y}`);
+}
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(200);
 
 // --- the free play ramp ----------------------------------------------------
 // Free play used to never end: 0 of 20 bot rounds finished inside 4,000 pieces

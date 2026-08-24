@@ -11,6 +11,7 @@ import { stoneCount } from "./engine/board.js";
 import { chooseMove } from "./engine/bot.js";
 import { applyMove } from "./engine/game.js";
 import { FREE_PLAY_RAMP } from "./engine/ramp.js";
+import { TIME_ATTACK } from "./engine/timeattack.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
 import {
@@ -192,13 +193,23 @@ function goalText(level: Level): string {
   return t(key).replace("%n", localeNumber(level.goal.target));
 }
 
+/**
+ * Tears the current screen down completely: the running game or menu scene, the
+ * corner buttons, the goal strip, and any overlay on top of them.
+ *
+ * The overlay used to be somebody else's job — startGame and startLevel each
+ * cleared it themselves — so a start path that forgot left the previous screen
+ * sitting over a live round. Every start path already calls this, so it is the
+ * one place that can be relied on to do all of it.
+ */
 function stopEverything(): void {
-  document.querySelector(".goal-strip")?.remove();
+  document.querySelectorAll(".overlay").forEach((node) => node.remove());
+  document.querySelectorAll(".goal-strip").forEach((node) => node.remove());
+  document.querySelectorAll(".hud").forEach((node) => node.remove());
   screen?.destroy();
   screen = null;
   menu?.stop();
   menu = null;
-  document.querySelector(".hud")?.remove();
 }
 
 /**
@@ -260,7 +271,7 @@ function confirmThen(title: string, body: string, onConfirm: () => void): void {
  * `restart` is passed in for a challenge, which cannot be restarted by looking
  * at the current mode — the round it has to rebuild is the one in the code.
  */
-function gameHud(mode: "daily" | "endless" | "challenge", restartRound?: () => void): void {
+function gameHud(mode: "daily" | "endless" | "challenge" | "time", restartRound?: () => void): void {
   const hud = el("div", "hud");
 
   const quit = el("button", "icon");
@@ -354,10 +365,13 @@ function showMenu(): void {
   const best = readNumber("best", 0);
   if (best > 0) node.append(el("div", "best", `${t("best")} ${localeNumber(best)}`));
 
-  const duel = el("button", "big alt", t("challenge"));
-  duel.dataset.action = "challenge";
-  duel.addEventListener("click", () => showChallenge());
-  node.append(duel);
+  const timed = el("button", "big hot", t("timeAttack"));
+  timed.dataset.action = "time";
+  timed.addEventListener("click", startTimeAttack);
+  node.append(timed);
+
+  const timeBest = readNumber("bestTime", 0);
+  if (timeBest > 0) node.append(el("div", "best", `${t("timeBest")} ${localeNumber(timeBest)}`));
 
   const row = el("div", "swatches");
   for (const option of THEMES) {
@@ -431,8 +445,28 @@ function showMenu(): void {
  * no answer, and dressing that up would only obscure which one to play next.
  */
 function showLevels(): void {
+  // Quitting a level came here without stopping the round, so the abandoned
+  // board and its score carried on animating behind a translucent overlay.
+  stopEverything();
+  applyThemeChrome();
+  menu = new MenuScene(canvas, theme);
+  menu.start();
+
   const done = levelsDone();
   const node = overlay("result levels");
+
+  // Twenty tiles do not fit on a phone, so this screen scrolls — which means
+  // the way out cannot live at the bottom of it. Appended to the app rather
+  // than to the overlay so it stays pinned while the tiles scroll under it.
+  const hud = el("div", "hud");
+  const close = el("button", "icon");
+  close.innerHTML = ICON_QUIT;
+  close.dataset.action = "menu";
+  close.setAttribute("aria-label", t("menu"));
+  close.addEventListener("click", showMenu);
+  hud.append(close);
+  app.append(hud);
+
   node.append(el("div", "how-title", t("levels")));
 
   const grid = el("div", "level-grid");
@@ -457,7 +491,6 @@ function showLevels(): void {
   if (done.length === LEVELS.length) node.append(el("div", "confirm-body", t("allLevelsDone")));
 
   const back = el("button", "big alt", t("menu"));
-  back.dataset.action = "menu";
   back.addEventListener("click", showMenu);
   node.append(back);
 }
@@ -538,6 +571,7 @@ function showHowTo(): void {
       ["★", t("how4")],
       ["◆", t("how5")],
       ["▣", t("how6")],
+      ["⏱", t("how7")],
     ] as Array<[string, string]>
   ).forEach(
     ([num, text]) => {
@@ -559,7 +593,6 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   // Here rather than on each button: every way into a round goes through this,
   // so daily, free play, play again and restart all get the same send-off.
   playSound("start", 0, 2);
-  document.querySelectorAll(".overlay").forEach((node) => node.remove());
   stopEverything();
   applyThemeChrome();
 
@@ -589,6 +622,100 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   });
   screen.start();
   gameHud(mode);
+}
+
+// ---------------------------------------------------------------- time attack
+
+/**
+ * Time attack.
+ *
+ * The other modes run out of space; this one runs out of time. It is the most
+ * stressful thing in the game on purpose — the clock never stops, and only
+ * clearing lines puts seconds back — and the most directly competitive, because
+ * there is nothing in the score but how fast you can think. No ration to pace
+ * yourself against and no ramp to plan around.
+ *
+ * Always the standard disc and the mixed pack. The other modes let you pick;
+ * this one cannot, or two scores would not be comparable, and comparing scores
+ * is the entire point of it.
+ */
+function startTimeAttack(): void {
+  stopEverything();
+  applyThemeChrome();
+  playSound("start");
+
+  const game = createGame({
+    seed: hashSeed(`time:${Date.now()}`),
+    mode: "time",
+    spec: sizeById("standard").spec,
+    pack: "mixed",
+    // The adaptive deal stays on. Being handed three dead pieces is annoying in
+    // a mode you can think your way out of and unplayable in one you cannot.
+    fairDeal: true,
+  });
+
+  screen = new GameScreen(canvas, game, {
+    theme,
+    haptic,
+    clock: TIME_ATTACK,
+    onGameOver: (final) => showTimeResult(final),
+  });
+  screen.start();
+  gameHud("time", startTimeAttack);
+}
+
+function showTimeResult(state: GameState): void {
+  // Read before the screen is torn down: it owns the clock, because the engine
+  // is a pure function of moves and has no idea what time it is.
+  const survived = screen?.getElapsed() ?? 0;
+  stopEverything();
+  applyThemeChrome();
+  menu = new MenuScene(canvas, theme);
+  menu.start();
+
+  const beat = state.score > readNumber("bestTime", 0);
+  if (beat) writeNumber("bestTime", state.score);
+  if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
+  void submitScore(LEADERBOARDS.time, state.score);
+
+  const node = overlay("result");
+  node.append(el("div", "how-title", t("timeUp")));
+  node.append(el("div", "score-big", localeNumber(state.score)));
+
+  const stats = el("div", "stats");
+  for (const [value, label] of [
+    [`${Math.round(survived)}s`, t("timeSurvived")],
+    [String(state.stats.ringsCleared), t("rings")],
+    [`x${state.stats.bestCombo}`, t("bestCombo")],
+  ] as const) {
+    const stat = el("div", "stat");
+    stat.append(el("b", undefined, value));
+    stat.append(el("span", undefined, label));
+    stats.append(stat);
+  }
+  node.append(stats);
+  if (!beat) node.append(el("div", "best", `${t("timeBest")} ${localeNumber(readNumber("bestTime", 0))}`));
+
+  const again = el("button", "big hot", t("again"));
+  again.dataset.action = "again";
+  again.addEventListener("click", startTimeAttack);
+  node.append(again);
+
+  if (gameCenterAvailable()) {
+    const boards = el("button", "big alt", t("leaderboard"));
+    boards.dataset.action = "leaderboard";
+    boards.addEventListener("click", () => {
+      void showLeaderboard(LEADERBOARDS.time).then((shown) => {
+        if (!shown) notice(t("gameCenter"), t("gameCenterSignedOut"));
+      });
+    });
+    node.append(boards);
+  }
+
+  const back = el("button", "big alt", t("menu"));
+  back.dataset.action = "menu";
+  back.addEventListener("click", showMenu);
+  node.append(back);
 }
 
 // ----------------------------------------------------------------- challenges
@@ -788,8 +915,6 @@ const WIN_BEAT = 900;
 
 function startLevel(level: Level): void {
   playSound("start", 0, 2);
-  document.querySelectorAll(".overlay").forEach((node) => node.remove());
-  document.querySelector(".goal-strip")?.remove();
   stopEverything();
   applyThemeChrome();
 
@@ -1022,6 +1147,16 @@ if (import.meta.env.DEV) {
     },
     levelsDone,
     clearLevels: () => writeJson("levels", []),
+
+    /** Time attack, for the browser tests. */
+    timeAttack: () => {
+      startTimeAttack();
+      return true;
+    },
+    clock: () => screen?.getClock() ?? null,
+    ranOutOfTime: () => screen?.ranOutOfTime() ?? false,
+    /** Winds the clock down without waiting for it, so a test can reach zero. */
+    burnClock: (seconds: number) => screen?.burnClock(seconds) ?? false,
 
     /** The challenge flow. */
     challenge: (code?: string) => {

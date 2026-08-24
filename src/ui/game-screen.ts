@@ -19,6 +19,7 @@ import {
   slotPiece,
 } from "../engine/game.js";
 import { rampActive } from "../engine/ramp.js";
+import { type ClockSpec, addTime, drainRate, timeBonus } from "../engine/timeattack.js";
 import type { Piece } from "../engine/pieces.js";
 import type { SpinDirection } from "../engine/rotate.js";
 import {
@@ -102,6 +103,22 @@ export interface GameScreenOptions {
   readonly onChange?: (state: GameState) => void;
   readonly onGameOver?: (state: GameState) => void;
   readonly haptic?: (kind: HapticKind) => void;
+  /**
+   * Runs a clock against the round. Time attack only. It lives here rather
+   * than in the engine because the engine is a pure function of moves and
+   * knows nothing about wall-clock time — which is what makes replays, the
+   * daily's seed vetting and the balance bot possible.
+   */
+  readonly clock?: ClockSpec;
+}
+
+interface RunningClock {
+  /** Seconds remaining. */
+  left: number;
+  /** Seconds of play so far. Drives how fast the rest drains. */
+  elapsed: number;
+  /** Last whole second announced, so the countdown ticks once per second. */
+  lastTick: number;
 }
 
 type Pointer =
@@ -173,6 +190,9 @@ export class GameScreen {
    */
   private diedAt = 0;
   private announced = false;
+  private runningClock: RunningClock | null = null;
+  /** Set when the clock ran out, so the result can say so rather than "stuck". */
+  private timeUp = false;
 
   constructor(canvas: HTMLCanvasElement, state: GameState, options: GameScreenOptions) {
     this.canvas = canvas;
@@ -184,6 +204,70 @@ export class GameScreen {
     this.measure();
     this.refreshPlaceable();
     this.bindPointer();
+
+    if (options.clock) {
+      this.runningClock = { left: options.clock.seconds, elapsed: 0, lastTick: Math.ceil(options.clock.seconds) };
+    }
+  }
+
+  /** Seconds left, or null when this round is not on a clock. */
+  getClock(): number | null {
+    return this.runningClock ? Math.max(0, this.runningClock.left) : null;
+  }
+
+  /** Whether the round ended because the clock ran out rather than the board. */
+  ranOutOfTime(): boolean {
+    return this.timeUp;
+  }
+
+  /** Seconds of play this round lasted. Only meaningful on a clock. */
+  getElapsed(): number {
+    return this.runningClock?.elapsed ?? 0;
+  }
+
+  /**
+   * Takes seconds off the clock directly. Only the browser test uses it — a
+   * test that waited out a real minute would be a test nobody runs.
+   */
+  burnClock(seconds: number): boolean {
+    if (!this.runningClock) return false;
+    this.runningClock.left = Math.max(0, this.runningClock.left - seconds);
+    return true;
+  }
+
+  /**
+   * Advances the clock. Called once a frame, and only while the round is live:
+   * time must not drain during the beat where the dead board is held on screen,
+   * or a player who just died would watch the clock keep falling.
+   */
+  private stepClock(dt: number): void {
+    const spec = this.options.clock;
+    const clock = this.runningClock;
+    if (!spec || !clock || this.state.over || this.diedAt) return;
+
+    const seconds = dt / 1000;
+    clock.elapsed += seconds;
+    clock.left -= seconds * drainRate(spec, clock.elapsed);
+
+    // The last few seconds tick, once each, so the end is heard as well as
+    // seen — by then the player is looking at the board, not the header.
+    const whole = Math.ceil(Math.max(0, clock.left));
+    if (whole < clock.lastTick) {
+      clock.lastTick = whole;
+      if (whole <= 5 && whole > 0) {
+        playSound("tick", 0, 5 - whole);
+        this.options.haptic?.("light");
+      }
+    }
+
+    if (clock.left <= 0) {
+      clock.left = 0;
+      this.timeUp = true;
+      this.pointer = { kind: "none" };
+      this.diedAt = performance.now();
+      playSound("gameOver");
+      this.effects.push(shake());
+    }
   }
 
   /**
@@ -222,6 +306,7 @@ export class GameScreen {
       const dt = Math.min(now - this.lastTime, 64);
       this.lastTime = now;
       this.clock += dt / 1000;
+      this.stepClock(dt);
       this.effects = stepEffects(this.effects, dt);
       this.particles = stepParticles(this.particles, dt);
       this.animateScore(dt);
@@ -751,6 +836,37 @@ export class GameScreen {
 
     if (events.spinsGained > 0 || events.pushesGained > 0) this.options.haptic?.("success");
 
+    // Seconds back on the clock. The only thing keeping a timed round alive, so
+    // it gets its own float and its own sound rather than being folded into the
+    // score that flies up at the same moment.
+    const spec = this.options.clock;
+    if (spec && this.runningClock && !this.timeUp) {
+      const bonus = timeBonus(events);
+      if (bonus > 0) {
+        const before = this.runningClock.left;
+        this.runningClock.left = addTime(spec, before, bonus);
+        this.runningClock.lastTick = Math.ceil(this.runningClock.left);
+        const gained = this.runningClock.left - before;
+        // Half a second is the floor for saying anything. Near a full clock a
+        // clear can land a fraction, and "+0.2s" shouted across the header is
+        // noise about nothing.
+        if (gained >= 0.5) {
+          this.effects.push(
+            floatText(
+              this.layout.contentLeft + this.layout.contentWidth / 2,
+              // Below the clock and its bar, not over them: the float rises as
+              // it fades, and started life climbing straight through the one
+              // number the player is watching.
+              this.layout.headerY + 118,
+              `+${gained.toFixed(1)}s`,
+              gained >= 4,
+            ),
+          );
+          playSound("gainTime", events.combo, events.clears.rings[0] ?? 0);
+        }
+      }
+    }
+
     // The ramp. All of it announces itself: stone lands where you can watch it
     // land and the depth says its own name. A game that gets harder quietly is
     // the thing this one is arguing against.
@@ -1030,6 +1146,53 @@ export class GameScreen {
       ctx.font = `700 12px ${FONT}`;
       ctx.fillStyle = this.theme.textSoft;
       ctx.fillText(t("pieces"), centre, headerY + 26);
+    } else if (this.runningClock && this.options.clock) {
+      // The clock owns the centre in a timed round. It is the only number that
+      // matters — the score is a consequence of it, not a competitor for
+      // attention — so it is drawn larger than anything else in the header and
+      // turns red at the point where it is worth panicking.
+      const left = Math.max(0, this.runningClock.left);
+      const urgent = left <= 10;
+      const beat = urgent ? 1 + Math.sin(performance.now() / 90) * 0.07 : 1;
+
+      ctx.save();
+      try {
+        ctx.textAlign = "center";
+        ctx.translate(centre, headerY - 2);
+        ctx.scale(beat, beat);
+        ctx.font = `900 34px ${FONT}`;
+        ctx.fillStyle = urgent ? "#FF2D42" : this.theme.text;
+        ctx.fillText(left >= 10 ? left.toFixed(0) : left.toFixed(1), 0, 0);
+      } finally {
+        ctx.restore();
+      }
+
+      ctx.textAlign = "center";
+      ctx.font = `700 12px ${FONT}`;
+      ctx.fillStyle = urgent ? "#FF2D42" : this.theme.textSoft;
+      ctx.fillText(t("time"), centre, headerY + 26);
+
+      // A bar under it, because a number falling is harder to read at a glance
+      // than a bar emptying — and at ten seconds nobody is reading anything.
+      const spec = this.options.clock;
+      const barWidth = Math.min(180, this.layout.contentWidth * 0.4);
+      const barY = headerY + 40;
+      ctx.save();
+      try {
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = this.theme.textSoft;
+        ctx.beginPath();
+        ctx.roundRect(centre - barWidth / 2, barY, barWidth, 6, 3);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = urgent ? "#FF2D42" : "#4FD31A";
+        const filled = Math.max(0, Math.min(1, left / spec.seconds)) * barWidth;
+        ctx.beginPath();
+        ctx.roundRect(centre - barWidth / 2, barY, filled, 6, 3);
+        ctx.fill();
+      } finally {
+        ctx.restore();
+      }
     } else if (rampActive(this.state.ramp)) {
       // Flashes for a moment on the way down, so the number that just changed
       // is the one thing moving on an otherwise still header.

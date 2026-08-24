@@ -36,6 +36,7 @@ import {
   stoneDue,
   stoneInterval,
 } from "../src/engine/ramp.js";
+import { TIME_ATTACK, addTime, drainRate, timeBonus } from "../src/engine/timeattack.js";
 import {
   CHALLENGE_PIECES,
   MAX_CODE_SCORE,
@@ -1160,6 +1161,113 @@ function firstPlacement(state: ReturnType<typeof createGame>) {
   }
   return null;
 }
+
+describe("time attack", () => {
+  const noClears = {
+    clears: { rings: [], spokes: [] },
+    stripesFired: 0,
+    sweep: false,
+  } as unknown as Parameters<typeof timeBonus>[0];
+
+  const events = (over: Partial<Record<string, unknown>>) =>
+    ({ ...noClears, ...over }) as unknown as Parameters<typeof timeBonus>[0];
+
+  it("pays nothing for a move that clears nothing", () => {
+    // The whole mode rests on this: placing pieces does not buy time, only
+    // clearing does. Otherwise the clock is a formality.
+    expect(timeBonus(noClears)).toBe(0);
+  });
+
+  it("pays for clears in the order the game values them", () => {
+    const spoke = timeBonus(events({ clears: { rings: [], spokes: [2] } }));
+    const ring = timeBonus(events({ clears: { rings: [1], spokes: [] } }));
+    const sweep = timeBonus(events({ clears: { rings: [1], spokes: [2] }, sweep: true }));
+
+    expect(spoke).toBeGreaterThan(0);
+    expect(ring).toBeGreaterThan(spoke);
+    expect(sweep).toBeGreaterThan(ring);
+  });
+
+  it("cannot be outrun: the clock speeds up without bound until it caps", () => {
+    // A constant drain against a fixed refill is a treadmill a good player
+    // walks forever, which is exactly what free play did before its ramp.
+    expect(drainRate(TIME_ATTACK, 0)).toBe(1);
+    expect(drainRate(TIME_ATTACK, TIME_ATTACK.drainEvery)).toBeGreaterThan(1);
+    expect(drainRate(TIME_ATTACK, TIME_ATTACK.drainEvery * 3)).toBeGreaterThan(
+      drainRate(TIME_ATTACK, TIME_ATTACK.drainEvery),
+    );
+    // No ceiling, on purpose. A capped drain is a rate a good enough player
+    // out-earns, and then the round never ends — measured, not assumed.
+    expect(drainRate(TIME_ATTACK, 100_000)).toBeGreaterThan(100);
+  });
+
+  it("always pays something for a clear, at any point in the round", () => {
+    // An earlier version opened at 45 seconds and capped at 25, so above the
+    // cap a clear was worth literally nothing and the first twenty seconds of
+    // every round silently ignored the player. A mode whose one mechanic is
+    // "clearing buys time" cannot have a phase where clearing buys no time.
+    for (let left = 0.5; left < TIME_ATTACK.seconds; left += 0.5) {
+      expect(addTime(TIME_ATTACK, left, 1.5), `nothing gained at ${left}s`).toBeGreaterThan(left);
+    }
+    // Only a full clock absorbs it, and it never overflows.
+    expect(addTime(TIME_ATTACK, TIME_ATTACK.seconds, 8)).toBe(TIME_ATTACK.seconds);
+  });
+
+  /**
+   * Plays a round at a fixed standard of play and reports how long it lasted.
+   * `spokeEvery` and `ringEvery` are seconds between clears; Infinity means
+   * never. This is the same model the shipping numbers were tuned against.
+   */
+  function survives(spokeEvery: number, ringEvery = Infinity): number {
+    const step = 0.05;
+    let left = TIME_ATTACK.seconds;
+    let elapsed = 0;
+    let nextSpoke = spokeEvery;
+    let nextRing = ringEvery;
+
+    while (left > 0 && elapsed < 3600) {
+      left -= step * drainRate(TIME_ATTACK, elapsed);
+      elapsed += step;
+      if (elapsed >= nextSpoke) {
+        left = addTime(TIME_ATTACK, left, timeBonus(events({ clears: { rings: [], spokes: [1] } })));
+        nextSpoke += spokeEvery;
+      }
+      if (elapsed >= nextRing) {
+        left = addTime(TIME_ATTACK, left, timeBonus(events({ clears: { rings: [1], spokes: [] } })));
+        nextRing += ringEvery;
+      }
+    }
+    return elapsed;
+  }
+
+  it("a player who never clears gets the opening clock and nothing more", () => {
+    const idle = survives(Infinity);
+    expect(idle).toBeGreaterThan(TIME_ATTACK.seconds * 0.7);
+    expect(idle).toBeLessThan(TIME_ATTACK.seconds + 1);
+  });
+
+  it("clearing buys life, and playing better buys more of it", () => {
+    // The mechanic, stated as an ordering rather than as numbers — the numbers
+    // are tuning and will move; that better play lasts longer must not.
+    const idle = survives(Infinity);
+    const slow = survives(8, 60);
+    const good = survives(3.5, 25);
+    const expert = survives(2, 12);
+
+    expect(slow).toBeGreaterThan(idle);
+    expect(good).toBeGreaterThan(slow);
+    expect(expert).toBeGreaterThan(good);
+    // And the gap is worth having: an expert should last multiples of a
+    // beginner, or the leaderboard cannot tell them apart.
+    expect(expert / slow).toBeGreaterThan(2);
+  });
+
+  it("ends for everyone, however well they play", () => {
+    // Even someone clearing a spoke every second and a ring every five — far
+    // beyond human — has to run out. A mode that does not end ranks patience.
+    expect(survives(1, 5)).toBeLessThan(3600);
+  });
+});
 
 describe("challenge codes", () => {
   const sample = {

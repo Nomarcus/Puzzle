@@ -15,6 +15,7 @@ import { hasPlugin, isNative, registerPlugin } from "./native.js";
 export const LEADERBOARDS = {
   daily: "com.nomarcus.shiftle.daily",
   endless: "com.nomarcus.shiftle.endless",
+  time: "com.nomarcus.shiftle.time",
 } as const;
 
 export type LeaderboardId = (typeof LEADERBOARDS)[keyof typeof LEADERBOARDS];

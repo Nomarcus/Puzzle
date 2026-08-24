@@ -88,7 +88,7 @@ export const DEFAULT_RULES: RuleSet = {
   pieceLimit: 0,
 };
 
-export type GameMode = "daily" | "endless" | "level" | "challenge";
+export type GameMode = "daily" | "endless" | "level" | "challenge" | "time";
 
 export interface TraySlot {
   readonly pieceId: string;
