@@ -15,6 +15,7 @@ import { FREE_PLAY_RAMP } from "./engine/ramp.js";
 import { TIME_ATTACK } from "./engine/timeattack.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
+import { type DailyHistory, bestStreakOf, recentDays, streakOf } from "./engine/streak.js";
 import {
   type Challenge,
   decodeChallenge,
@@ -121,6 +122,21 @@ function applyThemeChrome(): void {
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme.backdrop[0]);
 }
 
+/** Every daily ever finished, as date key to score. */
+function dailyHistory(): DailyHistory {
+  const stored = readJson<Record<string, number>>("history", {});
+  if (!stored || typeof stored !== "object") return {};
+  const clean: Record<string, number> = {};
+  for (const [key, value] of Object.entries(stored)) {
+    if (typeof value === "number" && /^\d{4}-\d{2}-\d{2}$/.test(key)) clean[key] = value;
+  }
+  return clean;
+}
+
+function recordDaily(date: Date, score: number): void {
+  writeJson("history", { ...dailyHistory(), [dateKey(date)]: score });
+}
+
 function todayResult(): DailyResult | null {
   const stored = readJson<DailyResult | null>("daily", null);
   return stored && stored.date === dateKey(new Date()) ? stored : null;
@@ -129,7 +145,10 @@ function todayResult(): DailyResult | null {
 /** The shareable line. The mandala image is generated separately. */
 export function shareLine(result: DailyResult): string {
   const score = result.score.toLocaleString(lang() === "sv" ? "sv-SE" : "en-GB");
-  return `Shiftle #${result.puzzle} · ${score} ${t("points")} · ⟳${result.spinsLeft} ${t("left")}`;
+  // The streak rides along, because it is the part somebody else reacts to.
+  const streak = streakOf(dailyHistory(), new Date());
+  const run = streak.length > 1 ? ` · 🔥${streak.length}` : "";
+  return `Shiftle #${result.puzzle} · ${score} ${t("points")} · ⟳${result.spinsLeft} ${t("left")}${run}`;
 }
 
 function localeNumber(value: number): string {
@@ -229,6 +248,7 @@ function bankDaily(state: GameState): void {
     bestCombo: state.stats.bestCombo,
     spinsLeft: state.spins,
   } satisfies DailyResult);
+  recordDaily(new Date(), state.score);
   if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
 }
 
@@ -351,6 +371,18 @@ function showMenu(): void {
   // player can see at a glance that it is a different puzzle from yesterday.
   const today = dailyPuzzle(new Date());
   node.append(el("div", "best", `#${today.number} · ${variantLabel(today.size, today.pack)}`));
+
+  // The streak. Shown even when it is only one day long: a streak nobody can
+  // see is not a streak, and the first day is the one worth encouraging.
+  const streak = streakOf(dailyHistory(), new Date());
+  if (streak.length > 0) {
+    const badge = el("div", `streak${streak.atRisk ? " at-risk" : ""}`);
+    badge.dataset.streak = String(streak.length);
+    badge.append(el("span", "streak-flame", "🔥"));
+    badge.append(el("b", undefined, String(streak.length)));
+    badge.append(el("span", undefined, streak.atRisk ? t("streakKeep") : t("streakDays")));
+    node.append(badge);
+  }
 
   const levels = el("button", "big warm", t("levels"));
   levels.dataset.action = "levels";
@@ -499,6 +531,44 @@ function showLevels(): void {
 }
 
 /** Pick a disc and a piece pack before a free round. */
+/**
+ * The streak, its record, and a fortnight of squares.
+ *
+ * Shown on the daily's result screen rather than the menu, because that is the
+ * moment it just changed — a streak that only appears somewhere else is a
+ * statistic, and this is meant to be a reward.
+ */
+function streakPanel(): HTMLDivElement {
+  const history = dailyHistory();
+  const now = new Date();
+  const streak = streakOf(history, now);
+  const best = bestStreakOf(history);
+
+  const panel = el("div", "streak-panel");
+
+  const numbers = el("div", "stats");
+  for (const [value, label] of [
+    [String(streak.length), t("streakNow")],
+    [String(best), t("streakBest")],
+  ] as const) {
+    const stat = el("div", "stat");
+    stat.append(el("b", undefined, value));
+    stat.append(el("span", undefined, label));
+    numbers.append(stat);
+  }
+  panel.append(numbers);
+
+  const strip = el("div", "day-strip");
+  for (const day of recentDays(history, now)) {
+    const cell = el("i", `day${day.score !== null ? " played" : ""}${day.today ? " today" : ""}`);
+    cell.title = day.score !== null ? `${day.key} · ${localeNumber(day.score)}` : day.key;
+    strip.append(cell);
+  }
+  panel.append(strip);
+
+  return panel;
+}
+
 function showSetup(): void {
   let size = savedSize();
   let pack = savedPack();
@@ -1057,6 +1127,13 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   }
   node.append(el("div", "confirm-body", variantLabel(lastVariant.size, lastVariant.pack)));
 
+  // The streak, and the fortnight behind it.
+  //
+  // The number alone is a statistic; the strip is the thing that makes anyone
+  // care about it, because a run of filled squares with one gap in it says
+  // more about what happened than any sentence would.
+  if (mode === "daily") node.append(streakPanel());
+
   // Encoded now, not on the tap. Two reasons: the card has just been drawn for
   // the preview, so doing it twice is waste — and iOS only lets a share sheet
   // open while the tap that asked for it is still live. Waiting on a PNG encode
@@ -1181,6 +1258,13 @@ if (import.meta.env.DEV) {
       const digits = shown.replace(/[^0-9]/g, "");
       return digits ? Number(digits) : null;
     },
+
+    /** The daily streak, for the browser tests. */
+    setHistory: (history: Record<string, number>) => {
+      writeJson("history", history);
+      return true;
+    },
+    streak: () => streakOf(dailyHistory(), new Date()),
 
     /** The core, for the browser tests. */
     charge: () => screen?.getState()?.charge ?? 0,

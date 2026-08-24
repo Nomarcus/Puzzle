@@ -231,6 +231,58 @@
         color: #5b8aa6;
       }
 
+      /*
+       * The streak badge on the menu. Warm and slightly loud — it is a small
+       * number that wants to be noticed, and the flame does most of the work.
+       */
+      .streak {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 5px 14px;
+        border-radius: 999px;
+        background: rgba(255, 122, 0, 0.9);
+        color: #fff;
+        font-size: 13px;
+        font-weight: 800;
+        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.14);
+      }
+
+      .streak b { font-size: 17px; }
+      .streak-flame { font-size: 15px; }
+
+      /* A streak you still have to earn today gets a pulse, not a colour
+         change — losing one is bad news and the badge should not look broken. */
+      .streak.at-risk { animation: streakPulse 1.6s ease-in-out infinite; }
+
+      @keyframes streakPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.07); }
+      }
+
+      .streak-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+
+      /* A fortnight of squares. The gaps are the point of showing it. */
+      .day-strip {
+        display: flex;
+        gap: 4px;
+      }
+
+      .day {
+        width: 13px;
+        height: 13px;
+        border-radius: 4px;
+        background: rgba(18, 56, 79, 0.13);
+      }
+
+      .day.played { background: #4fd31a; }
+      .day.today { outline: 2.5px solid #ff7a00; outline-offset: 2px; }
+
       .best {
         font-size: 14px;
         font-weight: 800;

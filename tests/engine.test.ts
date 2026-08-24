@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { cellIndex, sectorDelta, wrapSector } from "../src/engine/geometry.js";
 import { DEFAULT_RULES } from "../src/engine/game.js";
 import { dailyNumber, dailySeed, hashSeed, nextRandom } from "../src/engine/rng.js";
+import { bestStreakOf, recentDays, streakOf } from "../src/engine/streak.js";
 import {
   applyClears,
   canPlace,
@@ -1181,6 +1182,67 @@ function firstPlacement(state: ReturnType<typeof createGame>) {
   }
   return null;
 }
+
+describe("the daily streak", () => {
+  const day = (iso: string) => new Date(`${iso}T12:00:00Z`);
+  const history = (...days: string[]) =>
+    Object.fromEntries(days.map((d) => [d, 1000]));
+
+  it("counts today when today has been played", () => {
+    const h = history("2026-03-01", "2026-03-02", "2026-03-03");
+    expect(streakOf(h, day("2026-03-03"))).toEqual({ length: 3, atRisk: false });
+  });
+
+  it("keeps a streak alive on a day not yet played", () => {
+    // A streak does not break when the clock passes midnight — it breaks when
+    // a whole day goes by unplayed. Showing zero to somebody who played
+    // yesterday and has not opened the app yet today would be a lie, and the
+    // demoralising kind.
+    const h = history("2026-03-01", "2026-03-02", "2026-03-03");
+    expect(streakOf(h, day("2026-03-04"))).toEqual({ length: 3, atRisk: true });
+  });
+
+  it("breaks once a whole day is missed", () => {
+    const h = history("2026-03-01", "2026-03-02", "2026-03-03");
+    expect(streakOf(h, day("2026-03-05")).length).toBe(0);
+  });
+
+  it("counts across a month boundary", () => {
+    // The one place naive date handling always goes wrong.
+    const h = history("2026-02-27", "2026-02-28", "2026-03-01", "2026-03-02");
+    expect(streakOf(h, day("2026-03-02")).length).toBe(4);
+  });
+
+  it("counts across a leap day", () => {
+    const h = history("2024-02-28", "2024-02-29", "2024-03-01");
+    expect(streakOf(h, day("2024-03-01")).length).toBe(3);
+  });
+
+  it("is zero for somebody who has never played", () => {
+    expect(streakOf({}, day("2026-03-02"))).toEqual({ length: 0, atRisk: false });
+  });
+
+  it("remembers the longest run, however long ago", () => {
+    const h = history(
+      "2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05",
+      "2026-03-01", "2026-03-02",
+    );
+    expect(bestStreakOf(h)).toBe(5);
+    // And the current one is still only the recent pair.
+    expect(streakOf(h, day("2026-03-02")).length).toBe(2);
+  });
+
+  it("shows a fortnight with the gaps left in", () => {
+    // The gaps are the reason to draw it at all.
+    const h = history("2026-03-01", "2026-03-03");
+    const days = recentDays(h, day("2026-03-03"), 5);
+    expect(days.map((d) => d.key)).toEqual([
+      "2026-02-27", "2026-02-28", "2026-03-01", "2026-03-02", "2026-03-03",
+    ]);
+    expect(days.map((d) => d.score !== null)).toEqual([false, false, true, false, true]);
+    expect(days.filter((d) => d.today)).toHaveLength(1);
+  });
+});
 
 describe("wild blocks", () => {
   const spec = sizeById("standard").spec;

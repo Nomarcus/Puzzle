@@ -99,6 +99,30 @@ everybody, so a ramp reacting to how far you got would make two players' boards
 diverge. `createGame` defaults to no ramp; free play is the only caller that
 passes one.
 
+## The daily streak
+
+Levels give a player somewhere to get to and free play gives them a number to
+beat. The daily gives them a reason to come back — but only if coming back is
+*visible*.
+
+- A **badge on the menu** the moment there is a streak to show, from day one.
+- On the daily's result screen: the current streak, the longest ever, and a
+  **fortnight of squares** with the gaps left in. The gaps are the reason to
+  draw it.
+- The streak rides along in the **share text**, because that is the part
+  somebody else reacts to.
+
+One detail that matters more than it looks: **a streak does not break at
+midnight.** It breaks when a whole day goes by unplayed. Somebody who played
+yesterday and has not opened the app yet today still has their streak, and the
+badge says so and pulses instead of showing a zero that is not true. Showing
+the zero is both wrong and the most demoralising possible moment to be wrong.
+
+The arithmetic is in `src/engine/streak.ts`, kept out of the UI so the awkward
+cases are tested rather than eyeballed: month boundaries, leap days, and the
+alive-but-unplayed state. Days are compared as timestamps, not as strings —
+"2026-03-01" follows "2026-02-28" and no amount of string arithmetic knows that.
+
 ## Wild blocks
 
 Colour was the thinnest system in the game. It has exactly one job — a line
@@ -386,12 +410,13 @@ Game Center boards stay for the daily and free play.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 118 unit tests. |
+| Game engine | Done. Pure, deterministic, 126 unit tests. |
 | Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
 | Time attack | Done. Clock tuned against five modelled standards of play. |
 | The core | Done. Charge, tap-to-sweep, tuned with `npm run core`. |
 | Wild blocks | Done. Frequency measured against the pure-clear rate. |
+| Daily streak | Done. Badge, fortnight strip, and it survives midnight correctly. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |

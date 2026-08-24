@@ -525,6 +525,56 @@ check("and the result says time, not game over", ended.title === "Time!" || ende
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 
+// --- the daily streak ------------------------------------------------------
+// Retention lives or dies on this being visible and correct across midnight,
+// so both the badge and the fortnight strip are driven with a planted history.
+// Dated relative to today, not to fixed days: a fixed history is months stale
+// by the time anyone runs this, and the check passes without testing anything.
+await page.evaluate(() => {
+  const day = (back) => new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+  window.__shiftle.setHistory({ [day(2)]: 4000, [day(1)]: 5200, [day(0)]: 6100 });
+});
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(300);
+
+{
+  const shown = await page.evaluate(() => window.__shiftle.streak());
+  check("three days running counts as three", shown.length === 3, `length ${shown.length}`);
+  check("and the badge is on the menu", (await page.locator(".streak").count()) === 1);
+  check("with no warning, because today is already played",
+    (await page.locator(".streak.at-risk").count()) === 0);
+}
+
+// Yesterday but not today: the streak stands, and the badge asks for it.
+await page.evaluate(() => {
+  const day = (back) => new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+  window.__shiftle.setHistory({ [day(3)]: 4000, [day(2)]: 5200, [day(1)]: 6100 });
+});
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+{
+  const shown = await page.evaluate(() => window.__shiftle.streak());
+  check("a streak survives a day not yet played", shown.length === 3 && shown.atRisk === true,
+    `length ${shown.length} atRisk ${shown.atRisk}`);
+  check("and the badge says so", (await page.locator(".streak.at-risk").count()) === 1);
+}
+
+// A day genuinely missed.
+await page.evaluate(() => {
+  const day = (back) => new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+  window.__shiftle.setHistory({ [day(5)]: 4000, [day(4)]: 5200, [day(3)]: 6100 });
+});
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+check("a missed day breaks it",
+  (await page.evaluate(() => window.__shiftle.streak())).length === 0);
+
+await page.evaluate(() => window.__shiftle.setHistory({}));
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(200);
+check("and no badge for somebody who has never played",
+  (await page.locator(".streak").count()) === 0);
+
 // --- the core --------------------------------------------------------------
 // The hub charges from clears and sweeps the disc when tapped. The tap has to
 // be checked before the spin gesture, since the hub sits inside the disc.
