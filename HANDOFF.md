@@ -212,14 +212,17 @@ to **1.5x** — everybody fires roughly the same number of cores, so everybody
 scores roughly the same. A mechanic that homogenises outcomes is worse than no
 mechanic on a game whose point is a leaderboard.
 
-At capacity 34 it fires about every eighty pieces, and the spread comes back to
-**5.6x — wider than with no core at all (3.7x)**, because a core you only get a
-few times is worth holding for a packed board, and knowing when to do that is a
-real difference between players. `npm run core` is the tool.
+At capacity 34 it fires about every sixty-five pieces, and the spread comes
+back to **3.7x, against 3.6x with no core at all** — so the core costs the
+leaderboard nothing while adding the decision. `npm run core` is the tool.
 
-Rounds are longer with it: free play's bot median went from about 230 pieces to
-330. Worth watching, but the spread is what the leaderboard needs and the spread
-improved.
+(That figure measured 5.6x when the core shipped and 3.7x once wild blocks
+existed. Wilds hand out frequent single-colour clears, which lifts a bad run
+more than a good one and so compresses the ratio. The number to watch is the
+*comparison* with no core, which has stayed level.)
+
+Rounds are longer with it: free play's bot median went from about 235 pieces to
+320. Worth watching, but nothing about the ranking got worse.
 
 ## Time attack
 
