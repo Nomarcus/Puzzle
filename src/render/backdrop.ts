@@ -29,10 +29,12 @@ export interface Drifter {
   readonly spin: number;
   /** 0 is far away and faint, 1 is near and solid. Gives the drift some depth. */
   readonly depth: number;
+  /** Fractions of the screen height per second. Negative: everything rises. */
+  readonly rise: number;
 }
 
 /** Roughly one candidate block per square of this many pixels a side. */
-const CELL = 148;
+const CELL = 96;
 
 /**
  * A fixed hash rather than an RNG: the background looks the same every time
@@ -44,74 +46,67 @@ function hash(x: number, y: number, salt: number): number {
   return n - Math.floor(n);
 }
 
-export interface KeepClear {
-  readonly x: number;
-  readonly y: number;
-  readonly radius: number;
-}
-
-/** A rectangle the drift stays out of. Used for menu text and buttons. */
-export interface KeepClearBox {
+/**
+ * Somewhere the drift should keep out of: the score, the meters, the tray, the
+ * menu column. Blocks fade out as they approach rather than vanishing at an
+ * edge, because a block that pops out of existence is far more distracting
+ * than one drifting past.
+ */
+export interface QuietZone {
   readonly x: number;
   readonly y: number;
   readonly width: number;
   readonly height: number;
 }
 
+/** How far outside a quiet zone a block is back to full strength. */
+const QUIET_FADE = 54;
+
+function quietFactor(zones: readonly QuietZone[], x: number, y: number): number {
+  let factor = 1;
+  for (const zone of zones) {
+    // Distance from the rectangle, zero anywhere inside it.
+    const dx = Math.max(zone.x - x, x - (zone.x + zone.width), 0);
+    const dy = Math.max(zone.y - y, y - (zone.y + zone.height), 0);
+    factor = Math.min(factor, Math.min(1, Math.hypot(dx, dy) / QUIET_FADE));
+    if (factor === 0) return 0;
+  }
+  return factor;
+}
+
 /**
  * Scatters blocks over a jittered grid, so the count follows the area of the
- * screen: a phone gets a handful around the edges and a tablet fills its wide
- * margins without anyone having to pick a number per device.
+ * screen: a phone gets a modest handful and a tablet fills its wide margins
+ * without anyone having to pick a number per device.
  *
- * `keepClear` is where the disc will be, and `avoid` is anything the player
- * has to read. Blocks landing inside either are dropped rather than nudged
- * aside, which keeps a clean gap instead of a suspicious ring of debris
- * hugging whatever they were pushed off.
+ * Nothing is filtered out here. Where they are allowed to be is decided every
+ * frame instead, because they move.
  */
-export function makeDrifters(
-  width: number,
-  height: number,
-  keepClear?: KeepClear,
-  avoid?: KeepClearBox,
-): Drifter[] {
+export function makeDrifters(width: number, height: number): Drifter[] {
   if (width <= 0 || height <= 0) return [];
 
-  const cols = Math.max(2, Math.round(width / CELL));
-  const rows = Math.max(3, Math.round(height / CELL));
+  const cols = Math.max(3, Math.round(width / CELL));
+  const rows = Math.max(4, Math.round(height / CELL));
   const drifters: Drifter[] = [];
 
   for (let col = 0; col < cols; col++) {
     for (let row = 0; row < rows; row++) {
       // Leaving gaps is what stops it looking like wallpaper.
-      if (hash(col, row, 1) < 0.34) continue;
-
-      const fx = (col + 0.2 + hash(col, row, 2) * 0.6) / cols;
-      const fy = (row + 0.2 + hash(col, row, 3) * 0.6) / rows;
-
-      const x = fx * width;
-      const y = fy * height;
-
-      if (keepClear && Math.hypot(x - keepClear.x, y - keepClear.y) < keepClear.radius) continue;
-      if (
-        avoid &&
-        x > avoid.x &&
-        x < avoid.x + avoid.width &&
-        y > avoid.y &&
-        y < avoid.y + avoid.height
-      ) {
-        continue;
-      }
+      if (hash(col, row, 1) < 0.42) continue;
 
       const depth = 0.35 + hash(col, row, 4) * 0.65;
       drifters.push({
-        fx,
-        fy,
-        size: 13 + depth * 21,
+        fx: (col + 0.15 + hash(col, row, 2) * 0.7) / cols,
+        fy: (row + 0.15 + hash(col, row, 3) * 0.7) / rows,
+        size: 14 + depth * 26,
         colour: 1 + Math.floor(hash(col, row, 5) * 8),
         phase: hash(col, row, 6) * Math.PI * 2,
         // The near ones tumble faster, which is what sells the depth.
         spin: (0.06 + depth * 0.2) * (hash(col, row, 7) < 0.5 ? -1 : 1),
         depth,
+        // ...and rise faster. Slow enough that nothing races the eye: the
+        // whole field takes upwards of a minute to cross the screen.
+        rise: -(0.006 + depth * 0.013),
       });
     }
   }
@@ -126,6 +121,102 @@ export interface BackdropOptions {
   readonly clock: number;
   /** Scales the whole layer down. The game uses less of it than the menu. */
   readonly alpha?: number;
+  /** Where the drift has to make way for something the player is reading. */
+  readonly quiet?: readonly QuietZone[];
+  /** Baked sweets, from makeCandySprites. Falls back to drawing when absent. */
+  readonly sprites?: readonly HTMLCanvasElement[];
+  /**
+   * The disc. Blocks pass behind it — the plate is opaque, so one sliding
+   * under simply disappears and comes out the other side, which reads as depth
+   * and is what gives a phone any room at all. Blocks buried deep enough to be
+   * invisible are skipped, to save the draw rather than to change the look.
+   */
+  readonly behind?: { x: number; y: number; radius: number };
+}
+
+/**
+ * One baked sweet per colour.
+ *
+ * A drifting block is a rounded path, a clip and three fills — perfectly
+ * affordable for one and not for ninety, which is what a tablet ends up with.
+ * Since they are all the same eight shapes at different sizes and angles, they
+ * are drawn once into sprites and blitted after that. Rotation and scale come
+ * free from the blit.
+ *
+ * Baked larger than any drifter is drawn, so it is always a downscale and
+ * never a soft upscale.
+ */
+const SPRITE = 96;
+
+export function makeCandySprites(theme: Theme): HTMLCanvasElement[] {
+  const sprites: HTMLCanvasElement[] = [];
+
+  for (let colour = 1; colour <= 8; colour++) {
+    const canvas = document.createElement("canvas");
+    canvas.width = SPRITE;
+    canvas.height = SPRITE;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return [];
+    // A hair of margin so the rounded corners keep their antialiasing.
+    drawCandySquare(ctx, SPRITE / 2, SPRITE / 2, SPRITE * 0.94, 0, colour, theme, 1);
+    sprites.push(canvas);
+  }
+
+  return sprites;
+}
+
+export function drawDrifters(
+  ctx: CanvasRenderingContext2D,
+  drifters: readonly Drifter[],
+  theme: Theme,
+  options: BackdropOptions,
+): void {
+  const { width, height, clock } = options;
+  const alpha = options.alpha ?? 0.4;
+  const quiet = options.quiet ?? [];
+  const behind = options.behind;
+
+  for (const drifter of drifters) {
+    // The near ones swing further, so the whole field does not move as a sheet.
+    const swing = 8 + drifter.depth * 16;
+    const x = width * drifter.fx + Math.cos(clock * 0.31 + drifter.phase) * swing * 0.5;
+
+    // Rising, and wrapped: a block that leaves the top comes back at the
+    // bottom, so the field never runs out. The margin keeps the wrap itself
+    // off screen.
+    const margin = 0.06;
+    const span = 1 + margin * 2;
+    let travel = (drifter.fy + margin + clock * drifter.rise) % span;
+    if (travel < 0) travel += span;
+    const y = height * (travel - margin) + Math.sin(clock * 0.42 + drifter.phase) * swing * 0.4;
+
+    if (behind) {
+      const buried = behind.radius - drifter.size;
+      if (buried > 0 && Math.hypot(x - behind.x, y - behind.y) < buried) continue;
+    }
+
+    const strength = quietFactor(quiet, x, y);
+    if (strength <= 0) continue;
+
+    const fade = alpha * (0.55 + drifter.depth * 0.45) * strength;
+    const angle = clock * drifter.spin + drifter.phase;
+    const sprite = options.sprites?.[drifter.colour - 1];
+
+    if (!sprite) {
+      drawCandySquare(ctx, x, y, drifter.size, angle, drifter.colour, theme, fade);
+      continue;
+    }
+
+    ctx.save();
+    try {
+      ctx.globalAlpha *= fade;
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.drawImage(sprite, -drifter.size / 2, -drifter.size / 2, drifter.size, drifter.size);
+    } finally {
+      ctx.restore();
+    }
+  }
 }
 
 export interface Halo {
@@ -170,20 +261,25 @@ export function makeBackdropSheet(
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, w, h);
 
-  const spots: ReadonlyArray<readonly [number, number, number]> = [
-    [0.12, 0.18, 0.55],
-    [0.88, 0.32, 0.45],
-    [0.2, 0.82, 0.5],
-    [0.82, 0.9, 0.4],
+  // Some of the pools are tinted rather than white. A single-hue gradient is
+  // what makes a backdrop read as "just blue": these put a warm corner and a
+  // cool one into it, far too faint to name but enough that the eye stops
+  // seeing one flat colour.
+  const spots: ReadonlyArray<readonly [fx: number, fy: number, scale: number, tint: string]> = [
+    [0.12, 0.16, 0.55, "255, 255, 255"],
+    [0.9, 0.28, 0.5, "255, 214, 120"],
+    [0.06, 0.52, 0.45, "255, 160, 190"],
+    [0.2, 0.84, 0.5, "255, 255, 255"],
+    [0.86, 0.92, 0.48, "150, 245, 220"],
   ];
-  for (const [fx, fy, scale] of spots) {
+  for (const [fx, fy, scale, tint] of spots) {
     const radius = Math.max(w, h) * scale;
     const x = w * fx;
     const y = h * fy;
 
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    gradient.addColorStop(0, "rgba(255, 255, 255, 0.20)");
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+    gradient.addColorStop(0, `rgba(${tint}, 0.30)`);
+    gradient.addColorStop(1, `rgba(${tint}, 0)`);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, w, h);
   }
@@ -227,32 +323,3 @@ export function drawBackdropSheet(
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 }
-
-export function drawDrifters(
-  ctx: CanvasRenderingContext2D,
-  drifters: readonly Drifter[],
-  theme: Theme,
-  options: BackdropOptions,
-): void {
-  const { width, height, clock } = options;
-  const alpha = options.alpha ?? 0.4;
-
-  for (const drifter of drifters) {
-    // The near ones swing further, so the whole field does not move as a sheet.
-    const swing = 8 + drifter.depth * 16;
-    const x = width * drifter.fx + Math.cos(clock * 0.31 + drifter.phase) * swing * 0.5;
-    const y = height * drifter.fy + Math.sin(clock * 0.42 + drifter.phase) * swing;
-
-    drawCandySquare(
-      ctx,
-      x,
-      y,
-      drifter.size,
-      clock * drifter.spin + drifter.phase,
-      drifter.colour,
-      theme,
-      alpha * (0.4 + drifter.depth * 0.6),
-    );
-  }
-}
-

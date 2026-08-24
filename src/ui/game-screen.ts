@@ -51,9 +51,11 @@ import {
 } from "../render/canvas.js";
 import {
   type Drifter,
+  type QuietZone,
   drawBackdropSheet,
   drawDrifters,
   makeBackdropSheet,
+  makeCandySprites,
   makeDrifters,
 } from "../render/backdrop.js";
 import { drawPushMeter, drawSpinMeter } from "../render/icons.js";
@@ -145,6 +147,10 @@ export class GameScreen {
   /** Seconds since the screen opened. Only the background reads it. */
   private clock = 0;
   private drifters: Drifter[] = [];
+  /** Where the drift makes way: the header corners and the tray. */
+  private quiet: QuietZone[] = [];
+  /** Baked sweets for the drift, one per colour. */
+  private sprites: HTMLCanvasElement[] = [];
   /** The static background, baked once per size and theme. */
   private sheet: HTMLCanvasElement | null = null;
   /** Which tray slots still have somewhere to go. Recomputed after every move. */
@@ -355,23 +361,30 @@ export class GameScreen {
       headerY,
     };
 
-    // Scattered over the whole window, not just the playable column: on a
-    // tablet the margins around the disc are the part that needs filling.
-    // A fixed margin rather than a multiple of the radius, so a big disc keeps
-    // the same clean gap around it instead of clearing half the screen.
     this.sheet = makeBackdropSheet(width, height, this.theme, {
       x: cx,
       y: cy,
       radius: boardRadius,
     });
-    this.drifters = makeDrifters(width, height, { x: cx, y: cy, radius: boardRadius + 44 }).filter(
-      (drifter) => {
-        // The score and the meters have to stay readable, and the tray is
-        // something you aim at — neither wants confetti behind it.
-        const y = drifter.fy * height;
-        return y > headerBottom - 12 && y < trayTop - 30;
-      },
-    );
+
+    // Scattered over the whole window, not just the playable column. On a
+    // tablet the margins around the disc are the part that needs filling; on a
+    // phone there is no margin at all, because the disc is nearly as wide as
+    // the screen — so the drift rises past behind it instead of being fenced
+    // off it. Where it has to make way is decided per frame, since it moves.
+    this.sprites = makeCandySprites(this.theme);
+    this.drifters = makeDrifters(width, height);
+    // Sized to the text, not to the row: a zone any taller than what it
+    // protects washes out blocks that were never in the way.
+    const label = 170 * scale;
+    this.quiet = [
+      // The score on the left, the two meters on the right. Between and above
+      // them is open, so blocks still rise through the top of the screen.
+      { x: contentLeft, y: headerY - 28, width: label, height: 64 },
+      { x: contentLeft + contentWidth - label, y: headerY - 24, width: label, height: 112 },
+      // The tray is something you aim at.
+      { x: 0, y: trayTop - 12, width, height: height - trayTop + 12 },
+    ];
   }
 
   /** The board layout with any in-flight spin offset folded in. */
@@ -752,7 +765,10 @@ export class GameScreen {
           width,
           height,
           clock: this.clock,
-          alpha: 0.3,
+          alpha: 0.38,
+          quiet: this.quiet,
+          sprites: this.sprites,
+          behind: { x: board.cx, y: board.cy, radius: this.layout.boardRadius },
         });
       } catch (error) {
         this.reportPaintFailure(error);

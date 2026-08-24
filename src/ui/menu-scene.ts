@@ -15,9 +15,11 @@ import { computeLayout, drawBoard, fitCanvas, withRingOffset } from "../render/c
 import type { Theme } from "../render/theme.js";
 import {
   type Drifter,
+  type QuietZone,
   drawBackdropSheet,
   drawDrifters,
   makeBackdropSheet,
+  makeCandySprites,
   makeDrifters,
 } from "../render/backdrop.js";
 
@@ -47,6 +49,9 @@ export class MenuScene {
   private readonly board = decorativeBoard();
   private theme: Theme;
   private drifters: Drifter[] = [];
+  private quiet: QuietZone[] = [];
+  /** Baked sweets for the drift, one per colour. */
+  private sprites: HTMLCanvasElement[] = [];
   private sheet: HTMLCanvasElement | null = null;
   private width = 0;
   private height = 0;
@@ -70,20 +75,20 @@ export class MenuScene {
       y: this.height * 0.3,
       radius: this.discRadius(),
     });
-    // The disc is the logo and the column underneath is the menu itself.
-    // Confetti behind either just makes them harder to read.
+    this.sprites = makeCandySprites(this.theme);
+    this.drifters = makeDrifters(this.width, this.height);
+    // The menu column is the one thing here anybody reads. The disc is the
+    // logo, and blocks pass behind it rather than being fenced off it.
     const column = Math.min(this.width, 380);
-    this.drifters = makeDrifters(
-      this.width,
-      this.height,
-      { x: this.width / 2, y: this.height * 0.3, radius: this.discRadius() * 1.12 },
+    this.quiet = [
       {
         x: (this.width - column) / 2,
-        y: this.height * 0.58,
+        // From the title down: everything below the disc is text or buttons.
+        y: this.height * 0.5,
         width: column,
-        height: this.height * 0.42,
+        height: this.height * 0.5,
       },
-    );
+    ];
   }
 
   setTheme(theme: Theme): void {
@@ -125,7 +130,13 @@ export class MenuScene {
 
     drawBackdropSheet(ctx, this.sheet, this.width, this.height, this.theme);
     // Bolder here than in a round: the menu has nothing else to look at.
-    drawDrifters(ctx, this.drifters, this.theme, { ...scene, alpha: 0.46 });
+    drawDrifters(ctx, this.drifters, this.theme, {
+      ...scene,
+      alpha: 0.46,
+      quiet: this.quiet,
+      sprites: this.sprites,
+      behind: { x: this.width / 2, y: this.height * 0.3, radius: this.discRadius() },
+    });
 
     let layout = computeLayout(SPEC, this.width / 2, this.height * 0.3, this.discRadius());
     for (let r = 0; r < SPEC.rings; r++) {

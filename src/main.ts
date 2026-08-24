@@ -28,7 +28,14 @@ import { haptic } from "./platform/haptics.js";
 import { isMuted, setMuted, unlock as unlockAudio } from "./platform/audio.js";
 import { shareResult } from "./platform/share.js";
 import { type ShareCard, renderShareDataUrl, renderShareImage } from "./render/share-card.js";
-import { LEADERBOARDS, signIn, submitScore } from "./platform/gamecenter.js";
+import {
+  LEADERBOARDS,
+  isAvailable as gameCenterAvailable,
+  refresh as refreshGameCenter,
+  showLeaderboard,
+  signIn,
+  submitScore,
+} from "./platform/gamecenter.js";
 import {
   readJson,
   readNumber,
@@ -289,6 +296,15 @@ function showMenu(): void {
   help.addEventListener("click", showHowTo);
   langs.append(help);
   node.append(langs);
+
+  // Only when there is a native side to open. A button that does nothing is
+  // worse than no button, so the browser build simply never shows one.
+  if (gameCenterAvailable()) {
+    const boards = el("button", "pill wide", t("leaderboard"));
+    boards.dataset.action = "leaderboard";
+    boards.addEventListener("click", () => void showLeaderboard());
+    langs.append(boards);
+  }
 }
 
 /** Pick a disc and a piece pack before a free round. */
@@ -479,6 +495,16 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   });
   node.append(share);
 
+  // Straight to the board this score went to. This is the moment a player
+  // cares where they placed, so it is the moment to offer it.
+  if (gameCenterAvailable()) {
+    const board = mode === "daily" ? LEADERBOARDS.daily : LEADERBOARDS.endless;
+    const boards = el("button", "big alt", t(mode === "daily" ? "leaderboardDaily" : "leaderboardEndless"));
+    boards.dataset.action = "leaderboard";
+    boards.addEventListener("click", () => void showLeaderboard(board));
+    node.append(boards);
+  }
+
   if (mode === "endless") {
     const again = el("button", "big warm", t("again"));
     again.dataset.action = "again";
@@ -504,12 +530,56 @@ app.addEventListener("pointerdown", () => unlockAudio(), { once: true });
 window.addEventListener("resize", onResize);
 window.addEventListener("orientationchange", onResize);
 
+// A player can sign into Game Center from the Settings app while Shiftle is in
+// the background. Re-reading on the way back means the leaderboard works
+// without a relaunch.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) void refreshGameCenter();
+});
+
 // Lets tools/play.mjs drive and inspect a real session in a real browser.
 if (import.meta.env.DEV) {
   (window as unknown as { __shiftle: unknown }).__shiftle = {
     state: () => screen?.getState() ?? null,
     start: startGame,
     menu: showMenu,
+
+    /**
+     * Stands in for the native Game Center plugin so the leaderboard buttons
+     * can be driven in a browser. Without it this whole feature would only
+     * ever be exercised on a device, which is to say never until it broke.
+     *
+     * Records what it was asked to do; tools/play.mjs reads that back.
+     */
+    fakeGameCenter: () => {
+      const calls: Array<{ method: string; options?: unknown }> = [];
+      const global = window as unknown as {
+        Capacitor?: { Plugins?: Record<string, unknown> };
+        __gameCenterCalls?: unknown;
+      };
+      global.Capacitor = global.Capacitor ?? {};
+      global.Capacitor.Plugins = global.Capacitor.Plugins ?? {};
+      global.Capacitor.Plugins.GameConnect = {
+        signIn: async () => {
+          calls.push({ method: "signIn" });
+          return { authenticated: true };
+        },
+        isAuthenticated: async () => ({ authenticated: true }),
+        submitScore: async (options: unknown) => {
+          calls.push({ method: "submitScore", options });
+          return { submitted: true };
+        },
+        showLeaderboard: async (options: unknown) => {
+          calls.push({ method: "showLeaderboard", options });
+          return { shown: true };
+        },
+      };
+      global.__gameCenterCalls = calls;
+      return true;
+    },
+
+    gameCenterCalls: () =>
+      (window as unknown as { __gameCenterCalls?: unknown[] }).__gameCenterCalls ?? [],
 
     /**
      * Jams the disc so nothing in the tray fits, for testing the stuck and

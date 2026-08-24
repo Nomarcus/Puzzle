@@ -34,13 +34,14 @@ puzzle. One attempt per day.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 37 unit tests. |
+| Game engine | Done. Pure, deterministic, 68 unit tests. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Tuned against bot measurements (`npm run balance`). |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
 | Particles and sound | Done. Sound is synthesised, no audio files. |
+| Game Center | Native plugin written and committed. Needs two leaderboards created in App Store Connect. |
 | Share image | Done. The final disc renders to a 1080px card. |
 
 ## Key facts
@@ -51,8 +52,9 @@ puzzle. One attempt per day.
 - **Orientation**: portrait only
 - **Capacitor 8** — dependencies come from **Swift Package Manager**, so there
   is **no `Podfile` and no `pod install`**. Xcode resolves packages on open.
-- **No network access at runtime.** The whole game is bundled. Nothing is
-  collected, stored remotely, or tracked.
+- **No network access of our own.** The whole game is bundled; there is no
+  server, no analytics and no account system. The one thing that leaves the
+  device is a Game Center score, and that goes through GameKit to Apple.
 - `ITSAppUsesNonExemptEncryption` is already set to `false`, so TestFlight
   will not ask about export compliance on each upload.
 
@@ -110,26 +112,63 @@ game, which many people prefer. There is a sound toggle in the menu either way.
 
 ## Game Center
 
-The code is wired but inert until the capability exists — every call no-ops
-when the plugin is absent, which is why the web build still runs.
+Everything on this side is done and committed. There is **no plugin to install**
+— the native half is written into the app itself at
+`ios/App/App/GameConnect.swift`, about a hundred lines of GameKit exposed to
+the web layer as a Capacitor plugin. Capacitor discovers it through the
+Objective-C runtime, so there is no registration step either.
 
-1. In Xcode: **Signing & Capabilities ▸ + Capability ▸ Game Center**.
-2. In App Store Connect, create two leaderboards with exactly these IDs:
-   - `com.nomarcus.shiftle.daily`
-   - `com.nomarcus.shiftle.endless`
-3. Install a Game Center bridge plugin exposing `Capacitor.Plugins.GameConnect`
-   with `signIn`, `submitScore({ leaderboardID, totalScoreAmount })` and
-   `showLeaderboard({ leaderboardID })`. See `src/platform/gamecenter.ts` — the
-   interface it expects is at the top of the file.
+What is already in the repository:
 
-Leaderboards are optional for a first TestFlight build. Skipping them changes
-nothing else.
+- `ios/App/App/GameConnect.swift` — sign-in, score submission and the Game
+  Center overlay.
+- `ios/App/App/App.entitlements` — the `com.apple.developer.game-center`
+  entitlement, with `CODE_SIGN_ENTITLEMENTS` already set on both the Debug and
+  Release configurations of the App target.
+- `src/platform/gamecenter.ts` — the web side. Resolves the plugin off the
+  global at runtime and no-ops when it is absent, which is why the browser
+  build still runs.
+- Leaderboard buttons in the menu and on the result screen. They only appear
+  when the native plugin is actually present, so nothing on the web shows a
+  button that cannot work.
+
+**What still needs a human, in App Store Connect:**
+
+1. Create two leaderboards with exactly these IDs:
+   - `com.nomarcus.shiftle.daily` — Today's puzzle
+   - `com.nomarcus.shiftle.endless` — Free play
+   Both: integer score format, high score is best, no decimals.
+2. Add at least one localisation per leaderboard (English works; Swedish too if
+   you want it) — App Store Connect will not accept a leaderboard without one.
+
+**In Xcode:** the entitlement file is already wired, so opening
+**Signing & Capabilities** should show Game Center already on. If it does not,
+add it there — Xcode will then match the entitlement that is already committed.
+The capability also has to exist on the App ID in the Developer portal; Xcode's
+automatic signing normally does that for you the first time you archive.
+
+Until the leaderboards exist in App Store Connect, submissions fail silently
+and the overlay opens empty. Nothing else in the game is affected, so a first
+TestFlight build works fine without them.
+
+### Testing it
+
+The plugin is exercised in the browser through a stand-in, so this is not
+untested code: `npm run play` installs a fake `GameConnect`, clicks the
+leaderboard buttons, and asserts that a finished round submits the round's real
+score to the right board. On a device, sign-in happens at launch and the
+overlay opens from either leaderboard button.
 
 ## App Store Connect answers
 
 - **Category**: Games ▸ Puzzle
 - **Age rating**: 4+
-- **App Privacy**: no data collected. No analytics, no accounts, no network.
+- **App Privacy**: nothing is collected by us — no analytics, no accounts, no
+  backend. Worth a moment on the questionnaire though: the app submits scores
+  to Game Center, so it does hand gameplay data to Apple, tied to the player's
+  Game Center identity. We never receive or store any of it. Most puzzle games
+  in this position either declare nothing or declare "Gameplay Content ▸ App
+  Functionality"; declaring it is the safer of the two and costs nothing.
 - **Third-party content**: none. All art is generated by the app's own code.
 
 ## Where things live

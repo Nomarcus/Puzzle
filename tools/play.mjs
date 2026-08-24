@@ -323,6 +323,62 @@ check(
 check("there is a share button", (await page.locator('[data-action="share"]').count()) === 1);
 await shot("11-game-over");
 
+// --- Game Center -----------------------------------------------------------
+// There is no native plugin in a browser, so nothing here would ever be
+// exercised until it broke on a device. __shiftle.fakeGameCenter() installs a
+// stand-in that records what it was asked to do.
+check(
+  "no leaderboard button without a native plugin",
+  (await page.locator('[data-action="leaderboard"]').count()) === 0,
+);
+
+await page.evaluate(() => window.__shiftle.fakeGameCenter());
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(300);
+check(
+  "the menu offers the leaderboard once Game Center is there",
+  (await page.locator('[data-action="leaderboard"]').count()) === 1,
+);
+
+await page.locator('[data-action="leaderboard"]').click();
+await page.waitForTimeout(300);
+let gc = await page.evaluate(() => window.__shiftle.gameCenterCalls());
+check(
+  "the leaderboard button signs in and opens the overlay",
+  gc.some((c) => c.method === "signIn") && gc.some((c) => c.method === "showLeaderboard"),
+  gc.map((c) => c.method).join(", "),
+);
+
+// A finished round has to reach the right board.
+await page.evaluate(() => window.__shiftle.start("endless"));
+await page.waitForTimeout(400);
+// Something on the scoreboard first, so this proves a real score travels
+// rather than that zero does.
+for (let i = 0; i < 6; i++) {
+  await page.evaluate(() => window.__shiftle.botMove());
+  await page.waitForTimeout(60);
+}
+await page.evaluate(() => window.__shiftle.jam(0));
+await page.waitForTimeout(1800);
+gc = await page.evaluate(() => window.__shiftle.gameCenterCalls());
+const submitted = gc.filter((c) => c.method === "submitScore").pop();
+check(
+  "finishing a free round submits to the endless board",
+  submitted?.options?.leaderboardID === "com.nomarcus.shiftle.endless",
+  submitted ? String(submitted.options.leaderboardID) : "nothing submitted",
+);
+check(
+  "the score submitted is the round's, as a whole number",
+  Number.isInteger(submitted?.options?.totalScoreAmount) &&
+    submitted.options.totalScoreAmount > 0,
+  String(submitted?.options?.totalScoreAmount),
+);
+check(
+  "the result screen links to that board",
+  (await page.locator('[data-action="leaderboard"]').count()) === 1,
+);
+await shot("12-game-center");
+
 await browser.close();
 await server.close();
 
