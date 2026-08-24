@@ -27,8 +27,17 @@ import {
   place,
   pureLines,
 } from "./board.js";
-import { type Piece, drawPiece, pieceById } from "./pieces.js";
-import { type PackId, DEFAULT_PACK, bagFor } from "./variants.js";
+import { type Bag, type Piece, drawPiece, pieceById } from "./pieces.js";
+import { type PackId, DEFAULT_PACK, bagFor, bagFrom } from "./variants.js";
+import {
+  type RampSpec,
+  NO_RAMP,
+  depthAt,
+  dropStone,
+  rampedRules,
+  rampedWeights,
+  stoneDue,
+} from "./ramp.js";
 import { nextInt, nextRandom } from "./rng.js";
 import { type SpinDirection, pushSpoke, spinRing } from "./rotate.js";
 import { clearScore, placementScore } from "./scoring.js";
@@ -79,7 +88,7 @@ export const DEFAULT_RULES: RuleSet = {
   pieceLimit: 0,
 };
 
-export type GameMode = "daily" | "endless" | "level";
+export type GameMode = "daily" | "endless" | "level" | "challenge";
 
 export interface TraySlot {
   readonly pieceId: string;
@@ -117,6 +126,11 @@ export interface GameState {
   /** Whether a full spoke pops as well as a full ring. */
   readonly spokeClears: boolean;
   readonly rules: RuleSet;
+  /**
+   * How the round gets harder as it goes on. NO_RAMP for the daily and for
+   * levels, both of which must stay the same puzzle for everybody.
+   */
+  readonly ramp: RampSpec;
   /** Whether the deal avoids handing out pieces with nowhere to go. */
   readonly fairDeal: boolean;
   readonly board: Board;
@@ -153,6 +167,10 @@ export interface MoveEvents {
   readonly bullseye: boolean;
   readonly trayRefilled: boolean;
   readonly gameOver: boolean;
+  /** Where the ramp just dropped a fresh stone, if it did. */
+  readonly stoneDropped: Cell | null;
+  /** Set on the move that takes the round one depth deeper. */
+  readonly depthReached: number | null;
 }
 
 export interface MoveResult {
@@ -176,14 +194,22 @@ function emptyStats(): GameStats {
   };
 }
 
+/**
+ * The bag to deal from right now. Off the ramp this is the pack's own bag,
+ * built once and cached; on it the weights have been bent toward the heavy
+ * pieces by however deep the round has got.
+ */
+function bagAt(spec: BoardSpec, pack: PackId, ramp: RampSpec, depth: number): Bag {
+  if (depth === 0) return bagFor(spec.rings, pack);
+  return bagFrom(spec.rings, rampedWeights(pack, ramp, depth));
+}
+
 /** Draws three pieces blind. */
 function drawTray(
   rngState: number,
-  spec: BoardSpec,
-  pack: PackId,
+  bag: Bag,
   stripeChance: number,
 ): [tray: TraySlot[], next: number] {
-  const bag = bagFor(spec.rings, pack);
   const tray: TraySlot[] = [];
   let state = rngState;
 
@@ -220,13 +246,12 @@ function drawTray(
  */
 function dealTray(
   rngState: number,
-  spec: BoardSpec,
-  pack: PackId,
+  bag: Bag,
   board: Board,
   fairDeal: boolean,
   stripeChance: number,
 ): [tray: TraySlot[], next: number] {
-  if (!fairDeal) return drawTray(rngState, spec, pack, stripeChance);
+  if (!fairDeal) return drawTray(rngState, bag, stripeChance);
 
   let state = rngState;
   let bestTray: TraySlot[] | null = null;
@@ -234,7 +259,7 @@ function dealTray(
   let bestLive = -1;
 
   for (let attempt = 0; attempt < 10; attempt++) {
-    const [tray, next] = drawTray(state, spec, pack, stripeChance);
+    const [tray, next] = drawTray(state, bag, stripeChance);
     let live = 0;
     for (const slot of tray) {
       if (hasPlacement(board, pieceById(slot.pieceId))) live++;
@@ -267,19 +292,29 @@ export function createGame(options: {
    * target on it.
    */
   board?: Board;
+  ramp?: RampSpec;
 }): GameState {
   const spec = options.spec ?? DEFAULT_SPEC;
   const pack = options.pack ?? DEFAULT_PACK;
   const spokeClears = options.spokeClears ?? true;
   const rules: RuleSet = { ...DEFAULT_RULES, ...options.rules };
   const mode = options.mode ?? "endless";
+  // Never on by default. The daily and the levels are the same puzzle for
+  // everybody, and a ramp would make two players' boards diverge.
+  const ramp = options.ramp ?? NO_RAMP;
   // The daily must deal the same pieces to everyone, so it never adapts.
   // A level deals from a fixed sequence for the same reason the daily does:
   // it is the same puzzle for everybody, so the deal must not adapt to how
   // somebody happens to be playing it.
   const fairDeal = options.fairDeal ?? (mode === "endless");
   const board = options.board ?? createBoard(spec);
-  const [tray, rngState] = dealTray(options.seed, spec, pack, board, fairDeal, rules.stripeChance);
+  const [tray, rngState] = dealTray(
+    options.seed,
+    bagAt(spec, pack, ramp, 0),
+    board,
+    fairDeal,
+    rules.stripeChance,
+  );
 
   return {
     mode,
@@ -287,6 +322,7 @@ export function createGame(options: {
     pack,
     spokeClears,
     rules,
+    ramp,
     fairDeal,
     board,
     tray,
@@ -310,13 +346,25 @@ export function createGame(options: {
 export function dealFreshTray(state: GameState): GameState {
   const [tray, rngState] = dealTray(
     state.rngState,
-    state.spec,
-    state.pack,
+    bagAt(state.spec, state.pack, state.ramp, depthAt(state.ramp, state.stats.piecesPlaced)),
     state.board,
     state.fairDeal,
     state.rules.stripeChance,
   );
   return { ...state, tray, rngState };
+}
+
+/** How deep the round has got. 0 unless free play's ramp is running. */
+export function depthOf(state: GameState): number {
+  return depthAt(state.ramp, state.stats.piecesPlaced);
+}
+
+/**
+ * The rules as they stand at this depth, which is what the game actually runs
+ * on. `state.rules` is the round's starting contract; the ramp bends it.
+ */
+export function rulesNow(state: GameState): RuleSet {
+  return rampedRules(state.rules, state.ramp, depthOf(state));
 }
 
 export function slotPiece(slot: TraySlot | null): Piece | null {
@@ -443,6 +491,7 @@ function applyPlace(
   if (!piece || !slot) return null;
   if (!canPlace(state.board, piece, move.r, move.s)) return null;
 
+  const rules = rulesNow(state);
   const placedCells = pieceCells(state.board, piece, move.r, move.s);
   let board = place(state.board, piece, move.r, move.s, slot.colour, slot.striped);
 
@@ -455,25 +504,46 @@ function applyPlace(
   const scoreDelta = placementScore(piece.size) + gained;
   const combo = didClear ? state.combo + 1 : 0;
   const [spins, clearsTowardSpin, spinsGained] = didClear
-    ? grantSpins(state.rules, state.spins, state.clearsTowardSpin, clears)
+    ? grantSpins(rules, state.spins, state.clearsTowardSpin, clears)
     : [state.spins, state.clearsTowardSpin, 0];
-  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, sweep);
+  const [pushes, pushesGained] = grantPushes(rules, state.pushes, pure, sweep);
+
+  const piecesPlaced = state.stats.piecesPlaced + 1;
+  let rngState = state.rngState;
+
+  // The rim crusts over. Dropped after the clears have settled, so a move that
+  // opened the board up is not immediately punished on the cell it just freed,
+  // and before the tray is dealt, so a fair deal can see the stone is there.
+  let stoneDropped: Cell | null = null;
+  if (stoneDue(state.ramp, piecesPlaced)) {
+    const drop = dropStone(board, rngState);
+    if (drop) {
+      board = drop.board;
+      stoneDropped = drop.cell;
+      rngState = drop.rngState;
+    }
+  }
 
   // The tray only refills once all three slots are spent — that is what makes
   // the third piece a genuine planning problem rather than an afterthought.
   const tray: (TraySlot | null)[] = [...state.tray];
   tray[move.slot] = null;
   const trayRefilled = tray.every((s) => s === null);
-  let rngState = state.rngState;
   let nextTray: (TraySlot | null)[] = tray;
+  const depth = depthAt(state.ramp, piecesPlaced);
   if (trayRefilled) {
-    const [filled, afterFill] = dealTray(rngState, state.spec, state.pack, board, state.fairDeal, state.rules.stripeChance);
+    const [filled, afterFill] = dealTray(
+      rngState,
+      bagAt(state.spec, state.pack, state.ramp, depth),
+      board,
+      state.fairDeal,
+      rules.stripeChance,
+    );
     nextTray = filled;
     rngState = afterFill;
   }
 
-  const piecesPlaced = state.stats.piecesPlaced + 1;
-  const outOfPieces = state.rules.pieceLimit > 0 && piecesPlaced >= state.rules.pieceLimit;
+  const outOfPieces = rules.pieceLimit > 0 && piecesPlaced >= rules.pieceLimit;
   const over = outOfPieces || isGameOver(board, nextTray, spins, pushes);
 
   const stats: GameStats = {
@@ -522,6 +592,8 @@ function applyPlace(
       sweep,
       trayRefilled,
       gameOver: over,
+      stoneDropped,
+      depthReached: depth > depthAt(state.ramp, state.stats.piecesPlaced) ? depth : null,
     },
   };
 }
@@ -540,11 +612,12 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
   const gained = clearScore(clears, state.combo, true, pure, sweep);
   const combo = didClear ? state.combo + 1 : state.combo;
 
+  const rules = rulesNow(state);
   const spentSpins = state.spins - 1;
   const [spins, clearsTowardSpin, spinsGained] = didClear
-    ? grantSpins(state.rules, spentSpins, state.clearsTowardSpin, clears)
+    ? grantSpins(rules, spentSpins, state.clearsTowardSpin, clears)
     : [spentSpins, state.clearsTowardSpin, 0];
-  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes, pure, sweep);
+  const [pushes, pushesGained] = grantPushes(rules, state.pushes, pure, sweep);
 
   const stats: GameStats = {
     ...state.stats,
@@ -590,6 +663,8 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
       sweep,
       trayRefilled: false,
       gameOver: over,
+      stoneDropped: null,
+      depthReached: null,
     },
   };
 }
@@ -612,10 +687,11 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
   const gained = clearScore(clears, state.combo, true, pure, sweep);
   const combo = didClear ? state.combo + 1 : state.combo;
 
+  const rules = rulesNow(state);
   const [spins, clearsTowardSpin, spinsGained] = didClear
-    ? grantSpins(state.rules, state.spins, state.clearsTowardSpin, clears)
+    ? grantSpins(rules, state.spins, state.clearsTowardSpin, clears)
     : [state.spins, state.clearsTowardSpin, 0];
-  const [pushes, pushesGained] = grantPushes(state.rules, state.pushes - 1, pure, sweep);
+  const [pushes, pushesGained] = grantPushes(rules, state.pushes - 1, pure, sweep);
 
   const stats: GameStats = {
     ...state.stats,
@@ -661,6 +737,8 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
       sweep,
       trayRefilled: false,
       gameOver: over,
+      stoneDropped: null,
+      depthReached: null,
     },
   };
 }

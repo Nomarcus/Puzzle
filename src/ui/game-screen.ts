@@ -8,15 +8,17 @@
  */
 
 import { type Cell } from "../engine/geometry.js";
-import { colourOf, getCell, hasPlacement, isStripedValue } from "../engine/board.js";
+import { colourOf, getCell, hasPlacement, isStone, isStripedValue } from "../engine/board.js";
 import {
   type GameState,
   type Move,
   RULES,
   applyMove,
   dealFreshTray,
+  depthOf,
   slotPiece,
 } from "../engine/game.js";
+import { rampActive } from "../engine/ramp.js";
 import type { Piece } from "../engine/pieces.js";
 import type { SpinDirection } from "../engine/rotate.js";
 import {
@@ -32,6 +34,7 @@ import {
   pushSettle,
   shockwave,
   spinSettle,
+  stoneLands,
   stepEffects,
 } from "../render/animate.js";
 import { type Particle, burst, drawParticles, stepParticles } from "../render/particles.js";
@@ -44,6 +47,7 @@ import {
   drawBlock,
   drawBoard,
   drawGhost,
+  drawStone,
   fitCanvas,
   ringWidth,
   withRingOffset,
@@ -726,6 +730,23 @@ export class GameScreen {
 
     if (events.spinsGained > 0 || events.pushesGained > 0) this.options.haptic?.("success");
 
+    // The ramp. All of it announces itself: stone lands where you can watch it
+    // land and the depth says its own name. A game that gets harder quietly is
+    // the thing this one is arguing against.
+    if (events.stoneDropped) {
+      this.effects.push(stoneLands(events.stoneDropped));
+      this.effects.push(shake());
+      this.options.haptic?.("medium");
+      playSound("stone", 0, this.state.spec.rings - 1 - events.stoneDropped.r);
+    }
+
+    if (events.depthReached !== null) {
+      const { cx, cy } = this.layout.board;
+      this.effects.push(floatText(cx, cy - 40, `${t("depth")} ${events.depthReached}`, true));
+      this.options.haptic?.("heavy");
+      playSound("deeper", 0, events.depthReached);
+    }
+
     this.refreshPlaceable();
     this.options.onChange?.(this.state);
     if (events.gameOver && !this.diedAt) {
@@ -805,6 +826,7 @@ export class GameScreen {
       // a board and a tray they can act on.
       try {
         this.drawDropPops(ctx, board);
+        this.drawStoneDrops(ctx, board);
         this.drawClearBursts(ctx, board);
         if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
         this.drawShockwaves(ctx);
@@ -973,8 +995,11 @@ export class GameScreen {
     ctx.fillStyle = this.theme.textSoft;
     ctx.fillText(t("pushes"), right, headerY + 78);
 
-    // A rationed round has to show what is left of the ration.
+    // A rationed round has to show what is left of the ration. A ramping one
+    // shows the depth instead — the two never both apply, and both belong in
+    // the same place: the one number that says how far through this round is.
     const limit = this.state.rules.pieceLimit;
+    const depth = depthOf(this.state);
     if (limit > 0) {
       const remaining = Math.max(0, limit - this.state.stats.piecesPlaced);
       ctx.textAlign = "center";
@@ -984,6 +1009,27 @@ export class GameScreen {
       ctx.font = `700 12px ${FONT}`;
       ctx.fillStyle = this.theme.textSoft;
       ctx.fillText(t("pieces"), centre, headerY + 26);
+    } else if (rampActive(this.state.ramp)) {
+      // Flashes for a moment on the way down, so the number that just changed
+      // is the one thing moving on an otherwise still header.
+      let flash = 0;
+      for (const effect of this.effects) {
+        if (effect.kind === "float" && effect.text.startsWith(t("depth"))) {
+          flash = 1 - progress(effect);
+        }
+      }
+      ctx.textAlign = "center";
+      ctx.font = `800 22px ${FONT}`;
+      ctx.fillStyle = flash > 0 ? this.theme.text : this.theme.textSoft;
+      ctx.save();
+      const scale = 1 + flash * 0.35;
+      ctx.translate(centre, headerY - 2);
+      ctx.scale(scale, scale);
+      ctx.fillText(String(depth), 0, 0);
+      ctx.restore();
+      ctx.font = `700 12px ${FONT}`;
+      ctx.fillStyle = this.theme.textSoft;
+      ctx.fillText(t("depth"), centre, headerY + 26);
     }
   }
 
@@ -1001,10 +1047,34 @@ export class GameScreen {
         ctx.save();
         try {
           ctx.globalAlpha = Math.min(1, t * 2);
-          drawBlock(ctx, g, colourOf(value), this.theme, 1, false, isStripedValue(value));
+          if (isStone(value)) drawStone(ctx, g, this.theme);
+          else drawBlock(ctx, g, colourOf(value), this.theme, 1, false, isStripedValue(value));
         } finally {
           ctx.restore();
         }
+      }
+    }
+  }
+
+  /**
+   * Stone arriving. It falls in from outside the rim and lands heavy — the one
+   * thing on this board that comes from somewhere else.
+   */
+  private drawStoneDrops(ctx: CanvasRenderingContext2D, board: BoardLayout): void {
+    for (const effect of this.effects) {
+      if (effect.kind !== "stone") continue;
+      const t = progress(effect);
+      const g = cellGeometry(board, effect.cell.r, effect.cell.s);
+      const drop = (1 - easeOutBack(t)) * board.outerRadius * 0.35;
+      const angle = (g.startAngle + g.endAngle) / 2;
+
+      ctx.save();
+      try {
+        ctx.globalAlpha = Math.min(1, t * 3);
+        ctx.translate(Math.cos(angle) * drop, Math.sin(angle) * drop);
+        drawStone(ctx, g, this.theme);
+      } finally {
+        ctx.restore();
       }
     }
   }
@@ -1023,7 +1093,10 @@ export class GameScreen {
           ctx.translate(g.cx, g.cy);
           ctx.scale(grow, grow);
           ctx.translate(-g.cx, -g.cy);
-          drawBlock(ctx, g, cell.colour, this.theme, fade);
+          // Stone has no colour id, so it must not be routed through the candy
+          // palette — colour 0 there is a clamped guess, not a grey.
+          if (cell.stone) drawStone(ctx, g, this.theme, fade);
+          else drawBlock(ctx, g, cell.colour, this.theme, fade);
 
           // A white flash on the way out.
           if (t < 0.4) {

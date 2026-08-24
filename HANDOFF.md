@@ -24,31 +24,117 @@ the only thing that pays for one is clearing a line in a **single colour**, or
 a bullseye. That is what gives the palette a job. Both act as lives: the round
 ends only when nothing fits *and* neither power remains.
 
-Three modes. **Levels** is twenty hand-built puzzles, each a fixed board, a
-fixed goal and a fixed number of pieces — see below. **Free play** runs
-indefinitely — a high-score chase, not a puzzle with an ending. **Daily**
-derives its board, piece pack and sequence from the UTC date so every player in
-the world gets the identical puzzle, and it is rationed to 60 pieces so every
-attempt is the same length as well as the same puzzle. One attempt per day.
+Four modes. **Levels** is twenty hand-built puzzles, each a fixed board, a fixed
+goal and a fixed number of pieces. **Free play** is the high-score chase; it
+gets harder the longer it lasts and every round ends. **Daily** derives its
+board, piece pack and sequence from the UTC date so every player in the world
+gets the identical puzzle, rationed to 60 pieces, one attempt per day.
+**Challenge** hands somebody else the exact round you just played, as a short
+code. All four are described below.
 
-### One thing worth deciding before the endless leaderboard goes live
+## Free play gets harder, and now it ends
 
-"Runs indefinitely" turns out to be literal. With the bot playing properly,
-`npm run endless` says free play essentially never ends on the default packs:
-0 of 12 rounds finished within 6,000 placements on standard or large *curves*,
-and 1 or 2 of 12 on *mixed*. Only *chunks* reliably kills you (12 of 12 on
-small and standard, median about 770 and 1,700 pieces).
+Free play used to be literally endless. The bot said so: **0 of 20 rounds
+finished** within 4,000 pieces on standard or large *curves*, and 10–15% on
+*mixed*. A leaderboard over that ranks patience, not skill — the top score
+belongs to whoever sat there longest.
 
-So the three packs are not difficulty settings, they are three different games:
-chunks has an ending, curves does not, mixed is nearly endless. That is fine for
-a relaxing mode, but it means the **endless leaderboard ranks patience rather
-than skill** — the top score belongs to whoever sat there longest.
+So free play now ramps. Three dials move together as a round goes deeper, and
+`npm run ramp` measures them:
 
-The daily is unaffected: it is rationed to 60 pieces, so it already measures
-points per piece, which is skill. If the endless board should measure skill too,
-the usual fix is a difficulty ramp — the deal gets meaner the longer a round
-lasts, so every run ends eventually without an arbitrary cap. That is a rules
-change and has not been made; it is Marcus's call.
+1. **The deal gets heavier.** Whatever pack you chose, the weights blend toward
+   fat bricks and rosettes, and the single dot — the piece that patches a
+   one-cell hole — becomes rare. It never reaches zero; a bag that could not
+   fill a gap would make boards unsolvable.
+2. **Lives get scarce.** The spin cap falls from three to one and the refill
+   costs more clears. Nothing banked is confiscated; the cap only limits the
+   next refill.
+3. **The rim turns to stone.** Every so often an empty cell on the outermost
+   ring with room left becomes a blockage, and the interval shrinks all the way
+   to one stone per piece.
+
+**All three are telegraphed.** The depth is on screen, it announces itself when
+it changes, and stone lands where you can watch it land. That is the whole
+difference between this and the games it is answering: Block Blast gets harder
+by quietly handing you pieces that do not fit, which is why losing to it feels
+like a swindle. Getting harder is fine; hiding it is not.
+
+### Two things the bot corrected, both of which I had backwards
+
+**The spin price was inert.** Making a spin cost two rings and then three did
+nothing at all — the bot's numbers were byte-identical with the dial on and off.
+Playing a full round it sat at the three-spin cap for **92% of its turns** and
+spent four spins in 359 pieces. You cannot make lives expensive for somebody who
+is never short of one. The cap had to come down, not the price.
+
+**Stone was a gift.** As first written it was an ordinary filled cell that took
+two clears to break — and the harder the ramp pushed, the *longer* rounds ran.
+On a board where the goal is completing lines, anything that counts as filled is
+help, and stone lands on the rim, where a completed ring is the biggest prize in
+the game. So the rule is now the opposite: **a line containing stone does not
+clear.** Stone is a hole that cannot be filled. It kills its ring and its spoke
+until it is shifted, and only a striped block detonating across it or the sweep
+from a bullseye will do that — which finally gives stripes and the bullseye a
+job they did not have. Spins and pushes still move stone like any other cell, so
+you can herd it into one spoke and keep the rest of the disc alive.
+
+Neither would have been caught by playing it. Both showed up the moment a bot
+played a few hundred rounds.
+
+### The result
+
+| | rounds that end | median length |
+|---|---|---|
+| before | 0–65% (0% on curves) | never, or thousands of pieces |
+| after | **100% on every disc and pack** | 155–224 pieces |
+
+Score spreads stay four- to eightfold between a bad run and a good one, which is
+the part that makes the leaderboard worth having: a ramp that killed everybody in
+the same place would end rounds without making them a contest. Read those as a
+floor — a person plays better than this bot.
+
+Levels and the daily do **not** ramp, and cannot: both are the same puzzle for
+everybody, so a ramp reacting to how far you got would make two players' boards
+diverge. `createGame` defaults to no ramp; free play is the only caller that
+passes one.
+
+## Challenges: the same round, sent to somebody
+
+This is what a deterministic engine is *for*. A whole round — disc, pack,
+ration and the exact sequence of pieces — is a seed and three small numbers, so
+it fits in a fifteen-character code:
+
+```
+7F67S-FS1W1-HSYNF
+```
+
+Your friend types or pastes that and plays the round you played, piece for
+piece, with your score on screen as the target. **No server, no account, no
+network call.** The code also carries the sender's score, so a challenge passed
+down a group chat keeps raising its own bar.
+
+Deliberately not a global leaderboard. Being four thousandth on a public board
+tells a new player nothing; beating the number a friend just sent them is a
+game.
+
+Details worth knowing:
+
+- The deal is **fixed, never adaptive**. Free play's dealer reads the board to
+  avoid handing you dead pieces; two players who played differently would get
+  different pieces, so a challenge uses the daily's approach instead and vets
+  its seed with the bot up front.
+- The alphabet is **Crockford base32** — no I, L, O or U — so nothing reads as a
+  different character in a text message, and the decoder maps those back anyway.
+- The decoder **scans for the code inside whatever it was pasted in**, so
+  pasting the whole message works.
+- Two check characters. The first attempt used a digit sum and the test that
+  feeds it every possible single-character typo caught it **accepting** one that
+  decoded to a different score on the same seed — the worst failure this feature
+  can have. It now rejects every single-character typo.
+- On the web a challenge also opens from `#c=CODE` in the address bar. On the
+  device it is pasted: a link cannot open the app without a registered domain
+  and an apple-app-site-association file behind it. Worth doing later if Shiftle
+  gets a domain.
 
 ## The twenty levels
 
@@ -133,11 +219,13 @@ Game Center boards stay for the daily and free play.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 75 unit tests. |
+| Game engine | Done. Pure, deterministic, 94 unit tests. |
 | Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
+| Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
+| Challenges | Done. Fifteen-character codes, no backend. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
-| Balance | Measured with `npm run balance`. Free play does not reliably end — see below. |
+| Balance | Measured with `npm run balance` and `npm run ramp`. |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
 | Particles and sound | Done. 8-bit chip synthesis — pulse, triangle and LFSR noise — tuned to a D major pentatonic, with pitch following the disc. `npm run audio` renders every voice to WAV. |
@@ -406,7 +494,8 @@ src/ui/         screens, menus, the animation loop
 src/platform/   storage, haptics, share, Game Center — all no-op on the web
 tools/          bot, balance sweeps, browser tests, icon generation
                 `npm run balance` sweeps every disc and pack; `npm run endless`
-                asks whether a round ever ends at all
+                asks whether a round ever ends at all; `npm run ramp` measures
+                the difficulty ramp; `npm run levels` the twenty levels
 ios/            the Xcode project
 ```
 

@@ -6,11 +6,20 @@
  * hand-draw those.
  */
 
-import { type GameState, createGame, isGameOver } from "./engine/game.js";
+import { type GameState, createGame, depthOf, isGameOver } from "./engine/game.js";
+import { stoneCount } from "./engine/board.js";
 import { chooseMove } from "./engine/bot.js";
 import { applyMove } from "./engine/game.js";
+import { FREE_PLAY_RAMP } from "./engine/ramp.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
+import {
+  type Challenge,
+  decodeChallenge,
+  encodeChallenge,
+  formatCode,
+  newChallenge,
+} from "./engine/challenge.js";
 import {
   LEVELS,
   type Level,
@@ -238,7 +247,13 @@ function confirmThen(title: string, body: string, onConfirm: () => void): void {
 }
 
 /** The quit and restart buttons that sit in the top corners while playing. */
-function gameHud(mode: "daily" | "endless"): void {
+/**
+ * The quit and restart corners.
+ *
+ * `restart` is passed in for a challenge, which cannot be restarted by looking
+ * at the current mode — the round it has to rebuild is the one in the code.
+ */
+function gameHud(mode: "daily" | "endless" | "challenge", restartRound?: () => void): void {
   const hud = el("div", "hud");
 
   const quit = el("button", "icon");
@@ -259,15 +274,16 @@ function gameHud(mode: "daily" | "endless"): void {
   restart.dataset.action = "restart";
   restart.setAttribute("aria-label", t("restart"));
   restart.addEventListener("click", () => {
+    const again = restartRound ?? (() => startGame(mode as "daily" | "endless", lastVariant));
     const state = screen?.getState();
-    if (!state || state.score === 0) return startGame(mode, lastVariant);
+    if (!state || state.score === 0) return again();
     confirmThen(t("restartAsk"), mode === "daily" ? t("usesAttempt") : t("loseScore"), () => {
       if (mode === "daily") {
         bankDaily(state);
         showMenu();
         return;
       }
-      startGame(mode, lastVariant);
+      again();
     });
   });
 
@@ -330,6 +346,11 @@ function showMenu(): void {
 
   const best = readNumber("best", 0);
   if (best > 0) node.append(el("div", "best", `${t("best")} ${localeNumber(best)}`));
+
+  const duel = el("button", "big alt", t("challenge"));
+  duel.dataset.action = "challenge";
+  duel.addEventListener("click", () => showChallenge());
+  node.append(duel);
 
   const row = el("div", "swatches");
   for (const option of THEMES) {
@@ -509,6 +530,7 @@ function showHowTo(): void {
       ["3", t("how3")],
       ["★", t("how4")],
       ["◆", t("how5")],
+      ["▣", t("how6")],
     ] as Array<[string, string]>
   ).forEach(
     ([num, text]) => {
@@ -547,9 +569,11 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
     mode,
     spec: sizeById(setup.size).spec,
     pack: setup.pack,
-    // Free play has no ending; the daily is rationed so every attempt is the
-    // same length as well as the same puzzle.
+    // The daily is rationed so every attempt is the same length as well as the
+    // same puzzle. Free play is not rationed — it ramps instead, so a round
+    // ends because the disc beat you rather than because a counter ran out.
     rules: puzzle ? { pieceLimit: puzzle.pieceLimit } : undefined,
+    ramp: puzzle ? undefined : FREE_PLAY_RAMP,
   });
   screen = new GameScreen(canvas, game, {
     theme,
@@ -558,6 +582,156 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   });
   screen.start();
   gameHud(mode);
+}
+
+// ----------------------------------------------------------------- challenges
+
+/**
+ * The challenge screen: start one, or take one somebody sent you.
+ *
+ * Everything here works with no network at all, which is the point. A code is
+ * the entire round — disc, pack, ration, piece sequence and the score to beat —
+ * so it travels by whatever people already use to talk to each other.
+ */
+function showChallenge(incoming?: Challenge): void {
+  stopEverything();
+  applyThemeChrome();
+  menu = new MenuScene(canvas, theme);
+  menu.start();
+
+  const node = overlay("result challenge");
+  node.append(el("div", "how-title", t("challenge")));
+  node.append(el("p", "how-line", t("challengeBlurb")));
+
+  if (incoming) {
+    node.append(
+      el(
+        "div",
+        "goal-line",
+        `${variantLabel(incoming.size, incoming.pack)} · ${incoming.pieces} ${t("pieces").toLowerCase()}`,
+      ),
+    );
+    if (incoming.score > 0) {
+      node.append(el("div", "how-title", localeNumber(incoming.score)));
+      node.append(el("div", "best", t("challengeBeat")));
+    }
+    const go = el("button", "big", t("challengePlay"));
+    go.dataset.action = "challenge-play";
+    go.addEventListener("click", () => startChallenge(incoming));
+    node.append(go);
+  } else {
+    const go = el("button", "big", t("challengeNew"));
+    go.dataset.action = "challenge-new";
+    go.addEventListener("click", () => {
+      startChallenge({ ...newChallenge(String(Date.now())), score: 0 });
+    });
+    node.append(go);
+  }
+
+  // Pasting is how a code actually arrives — out of a message, usually with the
+  // rest of the sentence still attached, which the decoder is built to survive.
+  const field = el("input", "code-field") as HTMLInputElement;
+  field.type = "text";
+  field.placeholder = t("challengePaste");
+  field.autocapitalize = "characters";
+  field.spellcheck = false;
+  field.dataset.action = "challenge-code";
+  node.append(field);
+
+  const take = el("button", "big alt", t("challengeTake"));
+  take.dataset.action = "challenge-take";
+  const status = el("div", "best", "");
+  take.addEventListener("click", () => {
+    const found = decodeChallenge(field.value);
+    if (!found) {
+      status.textContent = t("challengeBad");
+      playSound("denied");
+      return;
+    }
+    showChallenge(found);
+  });
+  node.append(take);
+  node.append(status);
+
+  const back = el("button", "big alt", t("menu"));
+  back.dataset.action = "menu";
+  back.addEventListener("click", showMenu);
+  node.append(back);
+}
+
+function startChallenge(challenge: Challenge): void {
+  stopEverything();
+  applyThemeChrome();
+  playSound("start");
+
+  const game = createGame({
+    seed: challenge.seed,
+    mode: "challenge",
+    spec: sizeById(challenge.size).spec,
+    pack: challenge.pack,
+    // Fixed, never adaptive: an adaptive deal reads the board, so two players
+    // who played differently would get different pieces and the challenge would
+    // not be the same round at all.
+    fairDeal: false,
+    rules: { pieceLimit: challenge.pieces },
+  });
+
+  screen = new GameScreen(canvas, game, {
+    theme,
+    haptic,
+    onGameOver: (final) => showChallengeResult(challenge, final),
+  });
+  screen.start();
+  gameHud("challenge", () => startChallenge(challenge));
+}
+
+/**
+ * The result of a challenge round, and the code to send on.
+ *
+ * The code always carries *this* player's score, so a challenge passed down a
+ * group chat keeps raising its own bar — each person sends on the number to
+ * beat rather than the one they were beating.
+ */
+function showChallengeResult(challenge: Challenge, state: GameState): void {
+  stopEverything();
+  applyThemeChrome();
+  menu = new MenuScene(canvas, theme);
+  menu.start();
+
+  if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
+
+  const node = overlay("result challenge");
+  const beat = challenge.score > 0 && state.score > challenge.score;
+  const lost = challenge.score > 0 && !beat;
+
+  node.append(el("div", "how-title", beat ? t("challengeWon") : lost ? t("challengeLost") : t("gameOver")));
+  node.append(el("div", "score-big", localeNumber(state.score)));
+  if (challenge.score > 0) {
+    node.append(el("div", "best", `${t("challengeTarget")} ${localeNumber(challenge.score)}`));
+  }
+
+  const code = encodeChallenge({ ...challenge, score: state.score });
+  const shown = el("div", "code-shown", formatCode(code));
+  node.append(shown);
+
+  const send = el("button", "big", t("challengeSend"));
+  send.dataset.action = "challenge-send";
+  send.addEventListener("click", () => {
+    void shareResult(
+      `${t("challengeMessage").replace("%s", localeNumber(state.score))}\n\n${formatCode(code)}`,
+    );
+  });
+  node.append(send);
+
+  const again = el("button", "big alt", t("again"));
+  again.dataset.action = "again";
+  again.addEventListener("click", () => startChallenge(challenge));
+  node.append(again);
+
+  const back = el("button", "big alt", t("menu"));
+  back.dataset.action = "menu";
+  back.addEventListener("click", showMenu);
+  node.append(back);
 }
 
 // --------------------------------------------------------------------- levels
@@ -842,6 +1016,33 @@ if (import.meta.env.DEV) {
     levelsDone,
     clearLevels: () => writeJson("levels", []),
 
+    /** The challenge flow. */
+    challenge: (code?: string) => {
+      const found = code ? decodeChallenge(code) : undefined;
+      if (code && !found) return false;
+      showChallenge(found ?? undefined);
+      return true;
+    },
+    challengeCode: () => document.querySelector(".code-shown")?.textContent ?? null,
+    encodeChallenge,
+    decodeChallenge,
+    /** The score of the round that just finished, read off the result screen. */
+    lastScore: () => {
+      const shown = document.querySelector(".score-big")?.textContent ?? "";
+      const digits = shown.replace(/[^0-9]/g, "");
+      return digits ? Number(digits) : null;
+    },
+
+    /** The ramp, for the browser tests. */
+    depth: () => {
+      const state = screen?.getState();
+      return state ? depthOf(state) : 0;
+    },
+    stoneOnBoard: () => {
+      const state = screen?.getState();
+      return state ? stoneCount(state.board) : 0;
+    },
+
     /**
      * Stands in for the native Game Center plugin so the leaderboard buttons
      * can be driven in a browser. Without it this whole feature would only
@@ -1044,7 +1245,20 @@ void signIn();
 // The menu goes up straight away rather than waiting on a native round trip —
 // a blank frame at launch is a worse trade than a menu that corrects itself a
 // moment later. It only redraws if something was actually restored.
-showMenu();
+/**
+ * A challenge can arrive in the address bar as #c=CODE. That is how one gets
+ * shared on the web build; on the device the code is pasted instead, because a
+ * link cannot open the app without a registered domain behind it.
+ */
+function challengeFromUrl(): Challenge | null {
+  const hash = location.hash;
+  if (!hash.includes("c=")) return null;
+  return decodeChallenge(hash.slice(hash.indexOf("c=") + 2));
+}
+
+const invited = challengeFromUrl();
+if (invited) showChallenge(invited);
+else showMenu();
 void hydrate().then((restored) => {
   if (restored && document.querySelector(".overlay.menu")) showMenu();
 });

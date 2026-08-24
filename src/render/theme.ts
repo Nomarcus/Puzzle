@@ -35,6 +35,8 @@ export interface Theme {
   readonly muted: BlockColour;
   /** Index 0 is unused — colour ids start at 1 to keep 0 meaning "empty". */
   readonly blocks: readonly BlockColour[];
+  /** The ramp's blockage. Deliberately outside the candy palette. */
+  readonly stone: BlockColour;
 }
 
 function candy(base: string, light: string, dark: string): BlockColour {
@@ -57,6 +59,14 @@ const CANDY_BLOCKS: readonly BlockColour[] = [
   candy("#FF3D93", "#FF7DB5", "#DB1C71"), // 8 bubblegum
 ];
 
+/**
+ * Stone sits outside the candy palette on purpose: it is the one thing on the
+ * disc that is not a sweet to be cleared but an obstacle in the way, and it has
+ * to be legible as that at a glance, on every theme, without stealing a hue
+ * from the eight colours that carry meaning.
+ */
+const STONE = candy("#94A0AC", "#BAC4CE", "#6E7A87");
+
 /** Bright sky. Reads instantly as a mobile puzzle game. */
 export const SKY: Theme = {
   id: "sky",
@@ -71,6 +81,7 @@ export const SKY: Theme = {
   text: "#12384F",
   textSoft: "#5B8AA6",
   blocks: CANDY_BLOCKS,
+  stone: STONE,
 };
 
 /** Warm cream. Softer and more "wooden toy" than the sky. */
@@ -87,6 +98,7 @@ export const CREAM: Theme = {
   text: "#5A3B14",
   textSoft: "#A5824F",
   blocks: CANDY_BLOCKS,
+  stone: STONE,
 };
 
 /** Fresh mint. Cooler, a little more grown-up, still nowhere near techy. */
@@ -103,6 +115,7 @@ export const MINT: Theme = {
   text: "#14513A",
   textSoft: "#579B7C",
   blocks: CANDY_BLOCKS,
+  stone: STONE,
 };
 
 export const THEMES: readonly Theme[] = [SKY, CREAM, MINT];

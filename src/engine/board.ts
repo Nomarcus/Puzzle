@@ -18,18 +18,47 @@ import type { Piece } from "./pieces.js";
 
 /**
  * Cells are packed into a byte: the low bits carry the colour (1..8, with 0
- * meaning empty) and one high bit marks a striped block. Keeping it in a
- * Uint8Array rather than an object array is what lets a board be cloned dozens
- * of times a frame without the allocator noticing.
+ * meaning empty) and the high bits carry flags. Keeping it in a Uint8Array
+ * rather than an object array is what lets a board be cloned dozens of times a
+ * frame without the allocator noticing.
  */
 export const STRIPE_FLAG = 16;
+
+/**
+ * Stone. Not a colour — a blockage the ramp drops on the rim as a round wears
+ * on, and the thing that gives free play an ending.
+ *
+ * One rule: **a line containing stone does not clear.** That is the whole of
+ * it, and it took a measurement to arrive at. Stone started out as an ordinary
+ * filled cell that merely took two clears to break, and the bot showed it was a
+ * *gift*: a filled cell helps complete a line, stone lands on the rim, and a
+ * full ring is the biggest prize in the game — so the harder the ramp pushed,
+ * the faster the outer ring completed itself and the longer rounds ran. On a
+ * board where filling lines is the goal, anything that counts as filled is
+ * help. A blockage has to be a hole that cannot be filled.
+ *
+ * So stone kills its ring and its spoke for as long as it sits there, and only
+ * two things shift it: a striped block detonating across it, or the sweep from
+ * a bullseye. Spins and pushes still move it like any other cell, which is what
+ * makes them worth saving — you cannot destroy stone with them, but you can
+ * herd it into one spoke and keep the rest of the disc alive.
+ */
+export const STONE_FLAG = 32;
+
+export const STONE = STONE_FLAG;
 
 export function colourOf(value: number): number {
   return value & (STRIPE_FLAG - 1);
 }
 
 export function isStripedValue(value: number): boolean {
-  return value >= STRIPE_FLAG;
+  // Masked rather than compared: stone sets higher bits, and `value >= 16`
+  // called every stone a striped block, which would have let stone detonate.
+  return (value & STRIPE_FLAG) !== 0;
+}
+
+export function isStone(value: number): boolean {
+  return (value & STONE_FLAG) !== 0;
 }
 
 export interface Board {
@@ -135,10 +164,18 @@ export function findClears(board: Board, spokeClears = true): Clears {
   const rings: number[] = [];
   const spokes: number[] = [];
 
+  // Empty does not complete a line, and neither does stone. Stone is the hole
+  // that cannot be filled: see STONE_FLAG above for why it has to work that way
+  // rather than merely being a cell that is awkward to remove.
+  const blocks = (r: number, s: number) => {
+    const value = board.cells[cellIndex(board.spec, r, s)]!;
+    return value === 0 || isStone(value);
+  };
+
   for (let r = 0; r < ringCount; r++) {
     let full = true;
     for (let s = 0; s < sectors; s++) {
-      if (board.cells[cellIndex(board.spec, r, s)] === 0) {
+      if (blocks(r, s)) {
         full = false;
         break;
       }
@@ -150,7 +187,7 @@ export function findClears(board: Board, spokeClears = true): Clears {
     for (let s = 0; s < sectors; s++) {
       let full = true;
       for (let r = 0; r < ringCount; r++) {
-        if (board.cells[cellIndex(board.spec, r, s)] === 0) {
+        if (blocks(r, s)) {
           full = false;
           break;
         }
@@ -233,6 +270,8 @@ export interface ClearedCell extends Cell {
    * place this can be read correctly is here, before the cell is wiped.
    */
   readonly colour: number;
+  /** A stone that broke. It has no colour, so the renderer bursts it grey. */
+  readonly stone?: boolean;
 }
 
 export function applyClears(
@@ -250,17 +289,30 @@ export function applyClears(
     const index = cellIndex(board.spec, r, s);
     if (seen.has(index)) return;
     seen.add(index);
+    const raw = board.cells[index]!;
+
+    // Stone that gets here is stone a stripe or a sweep reached, and it goes.
+    // Nothing else can put a stone's coordinates in a clear: findClears refuses
+    // to complete a line containing one, so an ordinary clear never touches it.
+    if (isStone(raw)) {
+      cells.push({ r, s, colour: 0, stone: true });
+      next.cells[index] = 0;
+      return;
+    }
+
     // A stripe widens a clear onto lines that are not themselves full, so some
     // of what it takes is empty space. Nothing happens to an empty cell and
     // there is nothing there to burst, so it is not a cleared cell.
-    const value = colourOf(board.cells[index]!);
+    const value = colourOf(raw);
     if (value === 0) return;
     cells.push({ r, s, colour: value });
     next.cells[index] = 0;
   };
 
   if (sweep) {
-    // A ring and a spoke together sweep the disc, filled cells and all.
+    // A ring and a spoke together sweep the disc, filled cells and all — stone
+    // included, which is most of what makes a bullseye worth engineering once
+    // the rim has started to crust over.
     for (let r = 0; r < board.spec.rings; r++) {
       for (let s = 0; s < board.spec.sectors; s++) {
         if (board.cells[cellIndex(board.spec, r, s)] !== 0) take(r, s);
@@ -277,6 +329,39 @@ export function applyClears(
   }
 
   return { board: next, cells };
+}
+
+/**
+ * Turns one empty cell to stone, working from the rim inward.
+ *
+ * The rim first is not decoration: it is the only edge a round disc has, so
+ * "the outside is closing in" is the one spatial threat that needs no
+ * explaining. Returns null when the board has no room left, which means the
+ * move that called this has already ended the round.
+ */
+export function petrify(board: Board, roll: number): { board: Board; cell: Cell } | null {
+  const { rings, sectors } = board.spec;
+
+  for (let r = rings - 1; r >= 0; r--) {
+    const open: number[] = [];
+    for (let s = 0; s < sectors; s++) {
+      if (board.cells[cellIndex(board.spec, r, s)] === 0) open.push(s);
+    }
+    if (open.length === 0) continue;
+
+    const s = open[Math.min(open.length - 1, Math.floor(roll * open.length))]!;
+    const next = cloneBoard(board);
+    next.cells[cellIndex(board.spec, r, s)] = STONE;
+    return { board: next, cell: { r, s } };
+  }
+
+  return null;
+}
+
+export function stoneCount(board: Board): number {
+  let n = 0;
+  for (const value of board.cells) if (isStone(value)) n++;
+  return n;
 }
 
 /**

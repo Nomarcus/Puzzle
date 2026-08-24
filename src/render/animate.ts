@@ -12,11 +12,15 @@ import type { Cell } from "../engine/geometry.js";
 
 export interface ClearedCell extends Cell {
   readonly colour: number;
+  /** Stone, which bursts grey rather than in one of the eight candy colours. */
+  readonly stone?: boolean;
 }
 
 export type Effect =
   | { kind: "clear"; cells: ClearedCell[]; elapsed: number; duration: number }
   | { kind: "drop"; cells: Cell[]; elapsed: number; duration: number }
+  /** The ramp dropping a fresh stone on the rim. */
+  | { kind: "stone"; cell: Cell; elapsed: number; duration: number }
   | { kind: "float"; x: number; y: number; text: string; big: boolean; elapsed: number; duration: number }
   | { kind: "spinSettle"; ring: number; from: number; elapsed: number; duration: number }
   | { kind: "pushSettle"; sector: number; from: number; elapsed: number; duration: number }
@@ -30,6 +34,15 @@ export function clearBurst(cells: ClearedCell[]): Effect {
 
 export function dropIn(cells: Cell[]): Effect {
   return { kind: "drop", cells, elapsed: 0, duration: 220 };
+}
+
+/**
+ * Stone landing. Slower than a piece dropping in, and it overshoots: you are
+ * meant to notice this one, because it is the game getting harder and the whole
+ * point of the ramp is that it never does that behind your back.
+ */
+export function stoneLands(cell: Cell): Effect {
+  return { kind: "stone", cell, elapsed: 0, duration: 380 };
 }
 
 export function floatText(x: number, y: number, text: string, big = false): Effect {

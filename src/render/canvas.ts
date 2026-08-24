@@ -9,7 +9,7 @@
  */
 
 import type { BoardSpec } from "../engine/geometry.js";
-import { type Board, colourOf, getCell, isStripedValue } from "../engine/board.js";
+import { type Board, colourOf, getCell, isStone, isStripedValue } from "../engine/board.js";
 import type { Piece } from "../engine/pieces.js";
 import { type SectorGeometry, annularSectorPath, ringRadii } from "./annulus.js";
 import { type Theme, blockColour } from "./theme.js";
@@ -240,6 +240,99 @@ export function drawBlock(
   }
 }
 
+/**
+ * A stone cell. Same bevel as a block so it belongs on the disc, but grey, matt
+ * and split by a fissure — no gloss streak, because the gloss is what makes the
+ * candy look edible and this is the one thing on the board you cannot eat.
+ *
+ * A cracked stone is paler and split further, which is the whole tell: it says
+ * "one more clear through here" without a number or a bar.
+ */
+export function drawStone(
+  ctx: CanvasRenderingContext2D,
+  g: SectorGeometry,
+  theme: Theme,
+  alpha = 1,
+): void {
+  const colour = theme.stone;
+  const ri = g.innerRadius + g.pad;
+  const ro = g.outerRadius - g.pad;
+  const width = ro - ri;
+  if (width <= 0) return;
+
+  ctx.save();
+  try {
+    ctx.globalAlpha *= alpha;
+
+    annularSectorPath(ctx, g);
+    ctx.save();
+    try {
+      ctx.clip();
+
+      ctx.fillStyle = colour.base;
+      ctx.fillRect(g.cx - g.outerRadius, g.cy - g.outerRadius, g.outerRadius * 2, g.outerRadius * 2);
+
+      const bandOut = width * 0.28;
+      ctx.strokeStyle = colour.light;
+      ctx.lineWidth = bandOut;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ro - bandOut / 2, g.startAngle - 0.2, g.endAngle + 0.2);
+      ctx.stroke();
+
+      const bandIn = width * 0.3;
+      ctx.strokeStyle = colour.dark;
+      ctx.lineWidth = bandIn;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ri + bandIn / 2, g.startAngle - 0.2, g.endAngle + 0.2);
+      ctx.stroke();
+
+      // The fissure. Drawn from fixed fractions of the cell rather than from a
+      // random walk so a stone looks the same every frame it is on screen.
+      const span = g.endAngle - g.startAngle;
+      const at = (t: number, u: number) => ({
+        x: g.cx + (ri + width * u) * Math.cos(g.startAngle + span * t),
+        y: g.cy + (ri + width * u) * Math.sin(g.startAngle + span * t),
+      });
+
+      ctx.strokeStyle = colour.dark;
+      ctx.lineWidth = Math.max(1.5, width * 0.11);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      ctx.beginPath();
+      const a = at(0.18, 0.05);
+      const b = at(0.42, 0.48);
+      const c = at(0.3, 0.72);
+      const d = at(0.62, 1);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.lineTo(d.x, d.y);
+      ctx.stroke();
+
+      // A second split. Two fissures rather than one is what stops a grey
+      // cell reading as just another colour of sweet.
+      ctx.beginPath();
+      const e = at(0.88, 0.1);
+      const f = at(0.62, 0.44);
+      const h = at(0.86, 0.86);
+      ctx.moveTo(e.x, e.y);
+      ctx.lineTo(f.x, f.y);
+      ctx.lineTo(h.x, h.y);
+      ctx.stroke();
+    } finally {
+      ctx.restore();
+    }
+
+    annularSectorPath(ctx, g);
+    ctx.strokeStyle = theme.blockOutline;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  } finally {
+    ctx.restore();
+  }
+}
+
 /** The dish the puzzle sits on, plus the hub in the middle. */
 export function drawPlate(ctx: CanvasRenderingContext2D, layout: BoardLayout, theme: Theme): void {
   const rim = layout.outerRadius + layout.pad * 4;
@@ -287,6 +380,7 @@ export function drawBoard(
       const g = cellGeometry(layout, r, s);
       const value = getCell(board, r, s);
       if (value === 0) drawEmptyCell(ctx, g, theme);
+      else if (isStone(value)) drawStone(ctx, g, theme);
       else drawBlock(ctx, g, colourOf(value), theme, 1, false, isStripedValue(value));
     }
   }

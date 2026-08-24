@@ -54,7 +54,11 @@ export type Sound =
   | "stripe"
   | "spin"
   | "denied"
-  | "gameOver";
+  | "gameOver"
+  /** The ramp dropping a stone on the rim. */
+  | "stone"
+  /** One depth deeper. The floor moving. */
+  | "deeper";
 
 // -------------------------------------------------------------------- scale
 
@@ -443,6 +447,15 @@ const TRIM: Record<Sound, number> = {
   gameOver: 0.093,
   denied: 0.09,
   spin: 0.157,
+  // Set by tools/audio-preview.mjs against the same loudest-300ms target as
+  // the rest. Both were first set by ear and both were wrong: stone came out at
+  // -14.7 dB, louder than a ring clear and nearly the bonus, and a run of them
+  // drowned everything else. Stone happens every few pieces once the ramp is
+  // going, so it belongs down among the small events — noticeable, never a
+  // flinch. Going one depth deeper is rare and significant, so it sits about
+  // where game over does.
+  stone: 0.093,
+  deeper: 0.079,
 };
 
 export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): void {
@@ -473,6 +486,41 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
       const shade = at % 5;
       noise(bus, when, { peak: 0.34, decay: 0.028, rate: 1.35 + shade * 0.11, curve: 2.8 });
       tri(bus, when, { freq: 88 + shade * 6, peak: 0.72, decay: 0.085 });
+      break;
+    }
+
+    case "stone": {
+      // Something landing that is not a sweet. Deliberately unmusical: no pulse
+      // channel, nothing in the scale. A slow, deep noise thud with a short-mode
+      // rattle over it and a triangle knock underneath.
+      //
+      // It has to be plainly heavier than a placement without being alarming —
+      // it happens every few pieces once the ramp is running, and a sound that
+      // startles at that rate is a sound people turn off.
+      noise(bus, when, { peak: 0.5, decay: 0.13, rate: 0.5, rateTo: 0.22, curve: 2.2 });
+      noise(bus, when, { at: 0.01, peak: 0.16, decay: 0.05, rate: 1.1, short: true, curve: 2.6 });
+      tri(bus, when, { freq: 62, peak: 1.0, decay: 0.2, bend: -4, sub: 2.2 });
+      break;
+    }
+
+    case "deeper": {
+      // The floor moving. Two notes down the scale on a fat 50% duty, low, with
+      // the triangle sliding under them — the same descent as game over, but
+      // half the length and nowhere near the bottom, so it reads as a warning
+      // rather than an ending.
+      [0, -3].forEach((step, i) => {
+        pulse(bus, when, {
+          at: i * 0.11,
+          freq: note(-5 + step),
+          duty: 0.5,
+          peak: 0.34,
+          decay: 0.14,
+          curve: 1,
+          send: 0.3,
+        });
+      });
+      tri(bus, when, { freq: note(-19), peak: 1.0, decay: 0.42, bend: -3, sub: 2.4 });
+      noise(bus, when, { at: 0.22, peak: 0.2, decay: 0.16, rate: 0.4, rateTo: 0.2, curve: 2 });
       break;
     }
 

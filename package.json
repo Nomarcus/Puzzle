@@ -21,6 +21,7 @@
     "ios:assets": "node tools/assets.mjs && npx @capacitor/assets generate --ios",
     "endless": "vite-node tools/endless.ts",
     "levels": "vite-node tools/levels.ts",
+    "ramp": "vite-node tools/ramp.ts",
     "verify:ios": "node tools/verify-ios.mjs",
     "audio": "node tools/audio-preview.mjs"
   },

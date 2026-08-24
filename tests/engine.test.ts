@@ -16,13 +16,34 @@ import {
 } from "../src/engine/board.js";
 import { PIECES, pieceById } from "../src/engine/pieces.js";
 import {
+  STONE,
   STRIPE_FLAG,
   colourOf,
   detonate,
   isBullseye,
+  isStone,
   isStripedValue,
   lineColour,
+  petrify,
+  stoneCount,
 } from "../src/engine/board.js";
+import {
+  FREE_PLAY_RAMP,
+  NO_RAMP,
+  depthAt,
+  rampedRules,
+  rampedWeights,
+  stoneDue,
+  stoneInterval,
+} from "../src/engine/ramp.js";
+import {
+  CHALLENGE_PIECES,
+  MAX_CODE_SCORE,
+  decodeChallenge,
+  encodeChallenge,
+  formatCode,
+  newChallenge,
+} from "../src/engine/challenge.js";
 import { chooseMove, playOut } from "../src/engine/bot.js";
 import { LEVELS, goalProgress, levelBoard, levelSeed } from "../src/engine/levels.js";
 import { PACKS, SIZES, bagFor, dailyVariant, sizeById } from "../src/engine/variants.js";
@@ -999,5 +1020,273 @@ describe("levels", () => {
         `level ${level.number} only placed ${result.state.stats.piecesPlaced}/${level.budget}`,
       ).toBeGreaterThan(level.budget * 0.5);
     }
+  });
+});
+
+describe("the free play ramp", () => {
+  const spec = sizeById("standard").spec;
+
+  it("is off unless a round asks for it", () => {
+    // The daily and the levels must never ramp: both are the same puzzle for
+    // everybody, and a ramp would make two players' boards diverge.
+    const game = createGame({ seed: 7, mode: "daily", spec });
+    expect(game.ramp).toEqual(NO_RAMP);
+    expect(depthAt(game.ramp, 500)).toBe(0);
+    expect(stoneDue(game.ramp, 40)).toBe(false);
+  });
+
+  it("does not touch a round until the ramp says so", () => {
+    for (let n = 1; n < FREE_PLAY_RAMP.stoneFrom * FREE_PLAY_RAMP.piecesPerDepth; n++) {
+      expect(stoneDue(FREE_PLAY_RAMP, n), `stone at piece ${n}`).toBe(false);
+    }
+  });
+
+  it("closes to one stone a piece and stays there", () => {
+    // The dial that ends a round. If it levelled off the way the other two do,
+    // deep play would reach a steady state it could sit in forever — which is
+    // exactly what the bot did before this was uncapped.
+    const deep = FREE_PLAY_RAMP.stoneFrom + FREE_PLAY_RAMP.stoneEvery + 20;
+    expect(stoneInterval(FREE_PLAY_RAMP, deep)).toBe(1);
+    expect(stoneInterval(FREE_PLAY_RAMP, deep * 4)).toBe(1);
+  });
+
+  it("shrinks the spin cap rather than only raising the price", () => {
+    // Raising the price alone was measurably inert: the bot sat at the cap for
+    // 92% of its turns, so a dearer refill never came up.
+    const shallow = rampedRules(DEFAULT_RULES, FREE_PLAY_RAMP, 0);
+    expect(shallow).toEqual(DEFAULT_RULES);
+
+    const deep = rampedRules(DEFAULT_RULES, FREE_PLAY_RAMP, 8);
+    expect(deep.maxSpins).toBeLessThan(DEFAULT_RULES.maxSpins);
+    expect(deep.clearsPerSpin).toBeGreaterThan(DEFAULT_RULES.clearsPerSpin);
+    expect(deep.maxSpins).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps a get-out-of-jail piece in the bag however deep it gets", () => {
+    // A bag that could not fill a one-cell hole would make boards unsolvable,
+    // which is the complaint this whole game exists to answer.
+    for (const pack of PACKS) {
+      const deep = rampedWeights(pack.id, FREE_PLAY_RAMP, 999);
+      expect(deep.dot, `${pack.id} dot weight`).toBeGreaterThan(0);
+      expect(deep.brick).toBeGreaterThan(deep.arc);
+    }
+  });
+
+  it("stone lands on the rim and works inward", () => {
+    let board = createBoard(spec);
+    const rim = spec.rings - 1;
+
+    // Fill the rim, and the next stone has to go one ring in.
+    for (let i = 0; i < spec.sectors; i++) {
+      const dropped = petrify(board, i / spec.sectors)!;
+      expect(dropped.cell.r).toBe(rim);
+      board = dropped.board;
+    }
+    expect(petrify(board, 0.5)!.cell.r).toBe(rim - 1);
+  });
+
+  it("stops the line it sits in from clearing", () => {
+    // The rule the whole ramp rests on, and the one a measurement corrected:
+    // stone that merely took two clears to break was a *gift*, because a filled
+    // cell helps complete a line and a full ring is the biggest prize going.
+    let board = createBoard(spec);
+    for (let s = 0; s < spec.sectors; s++) {
+      board = place(board, pieceById("dot"), 0, s, 3);
+    }
+    expect(findClears(board).rings).toEqual([0]);
+
+    board.cells[cellIndex(spec, 0, 4)] = STONE;
+    expect(findClears(board).rings).toEqual([]);
+    expect(lineColour(board, "ring", 0)).toBe(0);
+  });
+
+  it("only a stripe or a sweep shifts stone", () => {
+    let board = createBoard(spec);
+    board.cells[cellIndex(spec, 2, 5)] = STONE;
+    expect(stoneCount(board)).toBe(1);
+
+    // An ordinary clear elsewhere leaves it alone.
+    const elsewhere = applyClears(board, { rings: [4], spokes: [] });
+    expect(stoneCount(elsewhere.board)).toBe(1);
+
+    // A clear that reaches it — which only a stripe's expansion or a sweep can
+    // produce, since findClears will not complete a line containing stone.
+    const reached = applyClears(board, { rings: [2], spokes: [] });
+    expect(stoneCount(reached.board)).toBe(0);
+    expect(reached.cells.some((cell) => cell.stone && cell.r === 2 && cell.s === 5)).toBe(true);
+  });
+
+  it("stone is never mistaken for a striped block", () => {
+    // isStripedValue used to be `value >= 16`, which called every stone a
+    // stripe and would have let the ramp's own blockages detonate.
+    expect(isStripedValue(STONE)).toBe(false);
+    expect(isStone(STONE)).toBe(true);
+    expect(colourOf(STONE)).toBe(0);
+    expect(isStripedValue(3 | STRIPE_FLAG)).toBe(true);
+    expect(isStone(3 | STRIPE_FLAG)).toBe(false);
+  });
+
+  it("ends a round that would otherwise run forever", () => {
+    // The measurement in one assertion. Free play on curves finished 0 of 20
+    // bot rounds inside 4,000 pieces before the ramp existed.
+    for (const pack of ["curves", "mixed"] as const) {
+      const game = createGame({
+        seed: hashSeed(`ramp-test:${pack}`),
+        mode: "endless",
+        spec,
+        pack,
+        ramp: FREE_PLAY_RAMP,
+      });
+      const result = playOut(game, 3000);
+      expect(result.state.over, `${pack} never ended`).toBe(true);
+      expect(result.state.stats.piecesPlaced, `${pack} ended too early`).toBeGreaterThan(40);
+    }
+  });
+});
+
+/** Crockford's alphabet, mirrored here so the typo test can walk every symbol. */
+const ALPHABET_FOR_TEST = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** A deliberately unclever player, so two runs of a code differ in how they go. */
+function firstPlacement(state: ReturnType<typeof createGame>) {
+  for (let slot = 0; slot < state.tray.length; slot++) {
+    const piece = slotPiece(state.tray[slot] ?? null);
+    if (!piece) continue;
+    for (let r = 0; r + piece.radialExtent <= state.spec.rings; r++) {
+      for (let s = 0; s < state.spec.sectors; s++) {
+        if (canPlace(state.board, piece, r, s)) return { type: "place" as const, slot, r, s };
+      }
+    }
+  }
+  return null;
+}
+
+describe("challenge codes", () => {
+  const sample = {
+    seed: 0xdeadbeef,
+    size: "large" as const,
+    pack: "chunks" as const,
+    pieces: CHALLENGE_PIECES,
+    score: 12480,
+  };
+
+  it("survives the round trip exactly", () => {
+    // Not approximately. Two people have to get the identical round, so a code
+    // that decoded to a nearby seed would be worse than one that failed.
+    expect(decodeChallenge(encodeChallenge(sample))).toEqual(sample);
+  });
+
+  it("round trips every disc and pack", () => {
+    for (const size of SIZES) {
+      for (const pack of PACKS) {
+        const one = { ...sample, size: size.id, pack: pack.id };
+        expect(decodeChallenge(encodeChallenge(one))).toEqual(one);
+      }
+    }
+  });
+
+  it("reads a code out of the message it arrived in", () => {
+    const code = encodeChallenge(sample);
+    const message = `I got 12 480 in Shiftle. Beat it:\n\n${formatCode(code)}\n`;
+    expect(decodeChallenge(message)).toEqual(sample);
+  });
+
+  it("survives the characters people get wrong", () => {
+    // Crockford's alphabet has no I, L, O or U precisely so these can be
+    // mapped back rather than rejected.
+    const code = encodeChallenge({ ...sample, seed: 0 });
+    const mangled = code.toLowerCase().replace(/1/g, "l").replace(/0/g, "O");
+    expect(decodeChallenge(mangled)).toEqual({ ...sample, seed: 0 });
+  });
+
+  it("refuses every single-character typo rather than inventing a round", () => {
+    // The worst failure available here is two people believing they played the
+    // same round when they did not, so every one-character slip has to be
+    // caught. The first checksum tried — a digit sum — failed this: it let a
+    // typo through that decoded to a different score on the same seed.
+    const code = encodeChallenge(sample);
+    const slipped: string[] = [];
+
+    for (let i = 0; i < code.length; i++) {
+      for (const swap of ALPHABET_FOR_TEST) {
+        if (code[i] === swap) continue;
+        const typo = code.slice(0, i) + swap + code.slice(i + 1);
+        const decoded = decodeChallenge(typo);
+        if (decoded !== null) slipped.push(`${typo} -> ${JSON.stringify(decoded)}`);
+      }
+    }
+
+    expect(slipped, `codes accepted after one typo: ${slipped.slice(0, 3).join(", ")}`).toEqual([]);
+  });
+
+  it("clamps a score too large to carry instead of wrapping it", () => {
+    const huge = decodeChallenge(encodeChallenge({ ...sample, score: MAX_CODE_SCORE + 5000 }));
+    expect(huge?.score).toBe(MAX_CODE_SCORE);
+  });
+
+  it("rejects rubbish", () => {
+    for (const junk of ["", "hello", "0000", "not a code at all, sorry"]) {
+      expect(decodeChallenge(junk)).toBe(null);
+    }
+  });
+
+  it("hands out a challenge the bot can actually play", () => {
+    // The deal is fixed rather than adaptive, so a bad seed cannot be rescued
+    // mid-round the way free play's is. Sending somebody a round that dies on
+    // piece nine is worse than sending nothing.
+    for (const salt of ["a", "b", "c", "d"]) {
+      const challenge = newChallenge(salt);
+      const game = createGame({
+        seed: challenge.seed,
+        mode: "challenge",
+        spec: sizeById(challenge.size).spec,
+        pack: challenge.pack,
+        fairDeal: false,
+        rules: { pieceLimit: challenge.pieces },
+      });
+      const result = playOut(game, challenge.pieces + 40);
+      expect(result.state.stats.piecesPlaced, `challenge ${salt} died early`).toBeGreaterThanOrEqual(18);
+    }
+  });
+
+  it("gives both players the identical pieces however differently they play", () => {
+    // The entire promise of the feature. Two people play the same code their
+    // own way, and the sequence of pieces they are handed has to match piece
+    // for piece — which is exactly what free play's adaptive deal would break,
+    // since it reads the board before choosing.
+    const challenge = newChallenge("shared");
+    const deal = () =>
+      createGame({
+        seed: challenge.seed,
+        mode: "challenge",
+        spec: sizeById(challenge.size).spec,
+        pack: challenge.pack,
+        fairDeal: false,
+        rules: { pieceLimit: challenge.pieces },
+      });
+
+    /** Every piece this player was dealt, in order, however they played. */
+    const sequence = (pick: "greedy" | "first"): string[] => {
+      let state = deal();
+      const seen: string[] = state.tray.map((slot) => slot!.pieceId);
+
+      for (let i = 0; i < 24 && !state.over; i++) {
+        const move = pick === "greedy" ? chooseMove(state) : firstPlacement(state);
+        if (!move) break;
+        const result = applyMove(state, move);
+        if (!result) break;
+        state = result.state;
+        if (result.events.trayRefilled) {
+          seen.push(...state.tray.map((slot) => slot!.pieceId));
+        }
+      }
+      return seen;
+    };
+
+    const greedy = sequence("greedy");
+    const plain = sequence("first");
+    const shared = Math.min(greedy.length, plain.length);
+    expect(shared).toBeGreaterThan(RULES.traySize * 2);
+    expect(greedy.slice(0, shared)).toEqual(plain.slice(0, shared));
   });
 });

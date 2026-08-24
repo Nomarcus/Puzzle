@@ -61,8 +61,25 @@ const TAKES = [
       ["bonus", 2, 3.2, 4],
     ],
   },
+  { name: "14-stone", seconds: 2.0, events: [["stone", 0, 0, 3]] },
   {
-    name: "14-a-typical-turn",
+    // Stone arrives every few pieces once the ramp is running, so what matters
+    // is not how it sounds once but whether a run of them wears you down.
+    name: "15-stone-run",
+    seconds: 4.0,
+    events: [
+      ["stone", 0, 0, 4],
+      ["place", 0, 0.55, 3],
+      ["stone", 0, 1.0, 2],
+      ["place", 0, 1.5, 4],
+      ["stone", 0, 2.0, 5],
+      ["place", 0, 2.5, 1],
+      ["stone", 0, 3.0, 3],
+    ],
+  },
+  { name: "16-deeper", seconds: 3.0, events: [["deeper", 0, 0, 0]] },
+  {
+    name: "17-a-typical-turn",
     seconds: 5.5,
     // What a good minute of play actually sounds like, back to back.
     events: [

@@ -381,6 +381,91 @@ await page.evaluate(() => window.__shiftle.clearLevels());
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 
+// --- challenges ------------------------------------------------------------
+// The whole feature is "your friend plays exactly the round you played", so the
+// checks that matter are that a code survives the trip out and back, and that
+// a mistyped one is refused rather than quietly becoming a different round.
+await page.locator('[data-action="challenge"]').click();
+await page.waitForTimeout(200);
+check("the challenge screen opens", await page.locator('[data-action="challenge-new"]').isVisible());
+
+await page.locator('[data-action="challenge-code"]').fill("NOT A REAL CODE AT ALL");
+await page.locator('[data-action="challenge-take"]').click();
+await page.waitForTimeout(150);
+check(
+  "rubbish in the code box is refused",
+  await page.locator('[data-action="challenge-new"]').isVisible(),
+);
+
+await page.locator('[data-action="challenge-new"]').click();
+await page.waitForTimeout(400);
+
+const duel = await page.evaluate(() => window.__shiftle.state());
+check("a challenge deals a rationed round", duel?.rules.pieceLimit === 60);
+check("a challenge never ramps", duel?.ramp.piecesPerDepth === 0);
+check("a challenge deals a fixed sequence, not an adaptive one", duel?.fairDeal === false);
+
+// Play it out so the result screen appears with a code on it.
+for (let i = 0; i < 90; i++) {
+  const done = await page.evaluate(() => {
+    const api = window.__shiftle;
+    const state = api.state();
+    if (!state || state.over) return true;
+    return !api.botMove();
+  });
+  if (done) break;
+}
+await page.waitForTimeout(1800);
+
+const code = (await page.evaluate(() => window.__shiftle.challengeCode())) ?? "";
+check("the result hands you a code to send on", /^[0-9A-Z-]{15,}$/.test(code), code);
+
+const decoded = await page.evaluate((value) => window.__shiftle.decodeChallenge(value), code);
+check("that code reads back as a real challenge", decoded !== null && decoded.pieces === 60);
+check(
+  "and it carries the score you just got, so the next player has a target",
+  decoded?.score === Math.round((await page.evaluate(() => window.__shiftle.lastScore())) ?? -1),
+  `${decoded?.score}`,
+);
+
+const opened = await page.evaluate((value) => window.__shiftle.challenge(value), code);
+await page.waitForTimeout(200);
+check("pasting a code offers the round it names", opened === true);
+check(
+  "and shows the number to beat",
+  (await page.locator('[data-action="challenge-play"]').count()) === 1,
+);
+
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
+// --- the free play ramp ----------------------------------------------------
+// Free play used to never end: 0 of 20 bot rounds finished inside 4,000 pieces
+// on curves. These pin the two halves of the fix in the real screen — the depth
+// is visible, and stone actually arrives on the board.
+await page.evaluate(() => window.__shiftle.start("endless"));
+await page.waitForTimeout(400);
+
+const free = await page.evaluate(() => window.__shiftle.state());
+check("free play runs the ramp", (free?.ramp.piecesPerDepth ?? 0) > 0);
+check("free play is not rationed — it ramps instead", free?.rules.pieceLimit === 0);
+
+const ramped = await page.evaluate(async () => {
+  const api = window.__shiftle;
+  for (let i = 0; i < 400; i++) {
+    const state = api.state();
+    if (!state || state.over) break;
+    if (api.stoneOnBoard() > 0 && api.depth() > 0) break;
+    if (!api.botMove()) break;
+  }
+  return { stone: api.stoneOnBoard(), depth: api.depth(), over: api.state()?.over ?? true };
+});
+check("the round goes deeper as it runs", ramped.depth > 0, `depth ${ramped.depth}`);
+check("and the rim turns to stone", ramped.stone > 0, `${ramped.stone} stones`);
+
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
 // --- safe-area insets ------------------------------------------------------
 // Nothing here has a notch, so this drives the insets by hand. The layout used
 // to parse the custom property directly, and whether env() is substituted at

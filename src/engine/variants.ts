@@ -101,6 +101,22 @@ export function bagFor(rings: number, packId: PackId): Bag {
   return bag;
 }
 
+/**
+ * A bag built from weights the ramp has already bent. Cached on the weights
+ * themselves rather than on a depth, so a caller can hand over anything.
+ */
+export function bagFrom(rings: number, weights: Readonly<Record<Family, number>>): Bag {
+  const key = `${rings}:${Object.values(weights)
+    .map((w) => w.toFixed(3))
+    .join(",")}`;
+  const cached = bagCache.get(key);
+  if (cached) return cached;
+
+  const bag = makeBag(rings, (family) => weights[family]);
+  bagCache.set(key, bag);
+  return bag;
+}
+
 export interface Variant {
   readonly size: SizeId;
   readonly pack: PackId;
