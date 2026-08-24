@@ -12,7 +12,7 @@
  * arrives at the same puzzle.
  */
 
-import { playOut } from "./bot.js";
+import { BOT_POLICY_V1, type BotPolicy, playOut } from "./bot.js";
 import { createGame } from "./game.js";
 import { dateKey, dailyNumber, dailySeed, hashSeed } from "./rng.js";
 import { type PackId, type SizeId, dailyVariant, sizeById } from "./variants.js";
@@ -24,6 +24,17 @@ import { type PackId, type SizeId, dailyVariant, sizeById } from "./variants.js"
  * well as the same puzzle.
  */
 export const DAILY_PIECES = 60;
+
+/**
+ * How the vetting bot plays, pinned deliberately.
+ *
+ * The seed for a day is chosen by playing that day through, so which puzzle
+ * every player in the world gets is a function of how this bot plays. Change
+ * it and every past daily silently becomes a different puzzle — including ones
+ * people have already played and posted scores for. So the policy is named and
+ * frozen: improving the bot for balance work is free, repointing this is not.
+ */
+const DAILY_BOT_POLICY: BotPolicy = BOT_POLICY_V1;
 
 /** A day the bot cannot place this many pieces on is not worth playing. */
 const MIN_PLACEMENTS = 18;
@@ -78,6 +89,7 @@ function vetDaily(date: Date): DailyPuzzle {
         rules: { pieceLimit: DAILY_PIECES },
       }),
       DAILY_PIECES + 40,
+      DAILY_BOT_POLICY,
     );
     const placements = result.state.stats.piecesPlaced;
 

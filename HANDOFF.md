@@ -30,6 +30,25 @@ the UTC date so every player in the world gets the identical puzzle, and it is
 rationed to 60 pieces so every attempt is the same length as well as the same
 puzzle. One attempt per day.
 
+### One thing worth deciding before the endless leaderboard goes live
+
+"Runs indefinitely" turns out to be literal. With the bot playing properly,
+`npm run endless` says free play essentially never ends on the default packs:
+0 of 12 rounds finished within 6,000 placements on standard or large *curves*,
+and 1 or 2 of 12 on *mixed*. Only *chunks* reliably kills you (12 of 12 on
+small and standard, median about 770 and 1,700 pieces).
+
+So the three packs are not difficulty settings, they are three different games:
+chunks has an ending, curves does not, mixed is nearly endless. That is fine for
+a relaxing mode, but it means the **endless leaderboard ranks patience rather
+than skill** — the top score belongs to whoever sat there longest.
+
+The daily is unaffected: it is rationed to 60 pieces, so it already measures
+points per piece, which is skill. If the endless board should measure skill too,
+the usual fix is a difficulty ramp — the deal gets meaner the longer a round
+lasts, so every run ends eventually without an arbitrary cap. That is a rules
+change and has not been made; it is Marcus's call.
+
 ## State of the project
 
 | Area | Status |
@@ -37,7 +56,7 @@ puzzle. One attempt per day.
 | Game engine | Done. Pure, deterministic, 68 unit tests. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
-| Balance | Tuned against bot measurements (`npm run balance`). |
+| Balance | Measured with `npm run balance`. Free play does not reliably end — see below. |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
 | Particles and sound | Done. Sound is synthesised, no audio files. |
@@ -180,6 +199,8 @@ src/input/      the two gestures (drag to place, drag on the disc to spin)
 src/ui/         screens, menus, the animation loop
 src/platform/   storage, haptics, share, Game Center — all no-op on the web
 tools/          bot, balance sweeps, browser tests, icon generation
+                `npm run balance` sweeps every disc and pack; `npm run endless`
+                asks whether a round ever ends at all
 ios/            the Xcode project
 ```
 

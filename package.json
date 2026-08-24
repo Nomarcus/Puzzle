@@ -18,7 +18,8 @@
     "economy": "vite-node tools/economy.ts",
     "fairness": "vite-node tools/fairness.ts",
     "ios:sync": "vite build && cap sync ios",
-    "ios:assets": "node tools/assets.mjs && npx @capacitor/assets generate --ios"
+    "ios:assets": "node tools/assets.mjs && npx @capacitor/assets generate --ios",
+    "endless": "vite-node tools/endless.ts"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
