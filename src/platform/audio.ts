@@ -168,11 +168,11 @@ function route(bus: Bus, node: AudioNode, send: number): void {
  * and on a phone speaker that click is louder than the note underneath it.
  */
 /**
- * Nothing may be scheduled before the context started. Voices place their
- * consonants ahead of the vowel, so an utterance right after unlock — when
- * currentTime is still near zero — would otherwise ask for a negative time and
- * throw. The whole line would then be swallowed by the caller's catch and
- * simply never speak.
+ * Nothing may be scheduled before the context started. The swell is placed so
+ * it *lands* on its hit, which means it starts earlier — and a bonus fired
+ * moments after unlock, while currentTime is still near zero, would otherwise
+ * ask for a negative time and throw. The sound would then be swallowed by the
+ * caller's catch and simply never play.
  */
 function safe(when: number): number {
   return Math.max(0, when);
