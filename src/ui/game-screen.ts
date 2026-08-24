@@ -60,8 +60,8 @@ import {
 } from "../render/backdrop.js";
 import { drawPushMeter, drawSpinMeter } from "../render/icons.js";
 import { type Theme, blockColour } from "../render/theme.js";
-import { inEnglish, t } from "./strings.js";
-import { announce, play as playSound, unlock as unlockAudio } from "../platform/audio.js";
+import { t } from "./strings.js";
+import { play as playSound, unlock as unlockAudio } from "../platform/audio.js";
 import { type Box, drawPiece } from "../render/tray.js";
 import {
   angleAt,
@@ -684,22 +684,20 @@ export class GameScreen {
         // one depends on how it was earned.
         const key = events.bullseye ? "bullseye" : "doubleStripe";
         this.effects.push(floatText(cx, cy - 40, t(key), true));
-        // Said out loud, always in English: the banner reads in the player's
-        // language, the announcer is an announcer.
-        announce(inEnglish(key), 4);
+        // The signature, at full size. This is the moment the game is for.
+        playSound("bonus", 2, 4);
         this.effects.push(shake());
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius));
-        playSound("bullseye");
       } else if (events.stripesFired > 0) {
         this.effects.push(floatText(cx, cy - 40, t("stripe"), true));
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
-        announce(inEnglish("stripe"), 3);
+        playSound("bonus", 0, 3);
         // A stripe tears across the board; it should not sound like a chime.
         playSound("stripe", events.combo, events.clears.rings[0] ?? events.clears.spokes[0] ?? 0);
       } else if (events.pureClears > 0) {
         this.effects.push(floatText(cx, cy - 40, t("pure"), true));
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
-        announce(inEnglish("pure"), 2);
+        playSound("bonus", 1, 2);
         playSound("pure", events.combo, events.clears.spokes[0] ?? events.clears.rings[0] ?? 0);
       } else {
         // The pitch says where on the disc it happened. The inner ring is the

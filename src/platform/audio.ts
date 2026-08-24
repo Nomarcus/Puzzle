@@ -42,10 +42,10 @@
 import { readString, writeString } from "./storage.js";
 
 export type Sound =
+  | "bonus"
   | "place"
   | "spoke"
   | "ring"
-  | "bullseye"
   | "pure"
   | "stripe"
   | "spin"
@@ -332,6 +332,47 @@ function ratchet(
   }
 }
 
+/**
+ * A reverse swell: something rushing in and arriving.
+ *
+ * Almost every impact sound in every game falls — in pitch, in brightness, in
+ * level — because that is what real objects do when they are hit. Running one
+ * backwards is immediately unusual, and it turns a hit into an *arrival*. It is
+ * the one thing in here nobody will have heard much of, which is exactly what
+ * a signature moment needs.
+ *
+ * Scheduled so it lands on `when`, not so it starts there.
+ */
+function swell(
+  bus: Bus,
+  when: number,
+  options: { duration: number; from: number; to: number; peak: number; send?: number },
+): void {
+  const start = safe(when - options.duration);
+  const source = bus.ctx.createBufferSource();
+  source.buffer = bus.noise;
+  source.playbackRate.value = 0.85;
+
+  const filter = bus.ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.Q.value = 1.1;
+  filter.frequency.setValueAtTime(options.from, start);
+  filter.frequency.exponentialRampToValueAtTime(options.to, start + options.duration);
+
+  // The inverted envelope. Rising, and steeply, so it reads as approach rather
+  // than as a fade-in.
+  const gain = bus.ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(options.peak, start + options.duration);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + options.duration + 0.05);
+
+  source.connect(filter);
+  filter.connect(gain);
+  route(bus, gain, options.send ?? 0.3);
+  source.start(start, 0.4);
+  source.stop(start + options.duration + 0.07);
+}
+
 // ------------------------------------------------------------- instruments
 
 /** Wood. A kalimba tine, or a block set on a table: warm, short, no shimmer. */
@@ -360,195 +401,6 @@ const GLASS: readonly Partial[] = [
   { ratio: 5.43, gain: 0.06, decay: 0.25 },
 ];
 
-// -------------------------------------------------------------------- voice
-
-/**
- * A voice, without a single recorded sample.
- *
- * The banners the game throws up — FULLTRÄFF, DUBBELRAND, ALL ONE COLOUR —
- * should be said out loud, and recording them would mean audio files, two
- * languages to keep in sync, and a voice to license. So this synthesises one
- * instead, and reads whatever the banner actually says.
- *
- * The trick is formants. A human vowel is not a waveform, it is three
- * resonances: park bandpass filters at the right frequencies over a buzzing
- * source and the ear hears "ah" or "ee" whether or not anything human is
- * involved. Glide those resonances from one vowel to another and you get a
- * diphthong, which is what makes the "eye" in bullseye work.
- *
- * It is not speech and is not trying to be — it is closer to how a cartoon
- * animal talks. But the syllable count, the vowel colours and the rhythm all
- * come from the real string, so it tracks the word on screen, in Swedish or
- * English, and any text added later is spoken without anybody writing a table.
- */
-
-/** F1, F2, F3 in Hz. The three resonances that make a vowel that vowel. */
-const VOWELS: Record<string, readonly [number, number, number]> = {
-  a: [800, 1150, 2800],
-  e: [550, 1770, 2490],
-  i: [300, 2300, 3000],
-  o: [450, 800, 2600],
-  u: [325, 700, 2500],
-  y: [300, 1750, 2200],
-  "\u00e4": [690, 1660, 2490],
-  "\u00f6": [370, 1400, 2200],
-  "\u00e5": [500, 700, 2500],
-};
-
-/** How a consonant is announced before the vowel it leads into. */
-type Onset = "plosive" | "fricative" | "voiced" | "none";
-
-function onsetOf(letter: string): Onset {
-  if ("ptkbdgc".includes(letter)) return "plosive";
-  if ("sfhvzxj".includes(letter)) return "fricative";
-  if ("mnlrw".includes(letter)) return "voiced";
-  return "none";
-}
-
-interface Syllable {
-  readonly onset: Onset;
-  /** The vowel, and the one it glides to if this is a diphthong. */
-  readonly from: readonly [number, number, number];
-  readonly to: readonly [number, number, number];
-  /** True where a word boundary fell, so the voice takes a breath. */
-  readonly breaks: boolean;
-}
-
-/**
- * Chops a string into syllables: a run of consonants, then a run of vowels.
- * Two different vowels in a row become a glide rather than two syllables,
- * which is what stops "BULLSEYE" coming out as three beats instead of two.
- */
-function syllables(text: string): Syllable[] {
-  const letters = text.toLowerCase();
-  const out: Syllable[] = [];
-  let onset: Onset = "none";
-  let broke = false;
-
-  for (let i = 0; i < letters.length && out.length < 5; i++) {
-    const letter = letters[i]!;
-    if (letter === " ") {
-      broke = true;
-      continue;
-    }
-
-    const vowel = VOWELS[letter];
-    if (!vowel) {
-      // Keep the first consonant of a cluster; the rest are swallowed, as
-      // they largely are in speech.
-      if (onset === "none") onset = onsetOf(letter);
-      continue;
-    }
-
-    // A following, different vowel makes this a glide.
-    const next = VOWELS[letters[i + 1] ?? ""];
-    const to = next && next !== vowel ? next : vowel;
-    if (to !== vowel) i++;
-
-    out.push({ onset, from: vowel, to, breaks: broke });
-    onset = "none";
-    broke = false;
-  }
-
-  return out;
-}
-
-interface VoiceOptions {
-  /** Scale degree the utterance starts on. */
-  readonly degree?: number;
-  readonly peak?: number;
-  readonly send?: number;
-}
-
-/** One syllable: a buzzing source shaped by three sliding resonances. */
-function utter(bus: Bus, when: number, syllable: Syllable, freq: number, length: number, options: VoiceOptions): void {
-  const peak = options.peak ?? 0.3;
-  const send = options.send ?? 0.35;
-
-  // The consonant, as a transient in front of the vowel.
-  if (syllable.onset === "plosive") {
-    noiseBurst(bus, when, { at: -0.03, from: 2400, to: 800, peak: peak * 0.5, decay: 0.02 });
-  } else if (syllable.onset === "fricative") {
-    noiseBurst(bus, when, {
-      at: -0.06,
-      type: "bandpass",
-      from: 4500,
-      q: 1.6,
-      peak: peak * 0.4,
-      decay: 0.055,
-    });
-  }
-
-  const osc = bus.ctx.createOscillator();
-  // A sawtooth is the usual stand-in for a glottal pulse: rich enough that the
-  // formants have something to carve out of.
-  osc.type = "sawtooth";
-  osc.frequency.setValueAtTime(freq, safe(when));
-
-  // Vibrato. Small, but a voice without any is unmistakably a machine.
-  const lfo = bus.ctx.createOscillator();
-  const lfoGain = bus.ctx.createGain();
-  lfo.frequency.value = 5.4;
-  lfoGain.gain.value = freq * 0.012;
-  lfo.connect(lfoGain);
-  lfoGain.connect(osc.frequency);
-
-  const body = bus.ctx.createGain();
-  const attack = syllable.onset === "voiced" ? 0.05 : 0.02;
-  const end = shape(body, safe(when), peak, attack, length);
-
-  // Three parallel resonances, sliding from one vowel to the next.
-  const gains = [1, 0.5, 0.2];
-  const qs = [9, 12, 15];
-  for (let i = 0; i < 3; i++) {
-    const filter = bus.ctx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.Q.value = qs[i]!;
-    filter.frequency.setValueAtTime(syllable.from[i]!, safe(when));
-    if (syllable.to !== syllable.from) {
-      filter.frequency.exponentialRampToValueAtTime(syllable.to[i]!, safe(when) + length * 0.8);
-    }
-
-    const level = bus.ctx.createGain();
-    level.gain.value = gains[i]!;
-    osc.connect(filter);
-    filter.connect(level);
-    level.connect(body);
-  }
-
-  route(bus, body, send);
-  osc.start(safe(when - 0.06));
-  osc.stop(end);
-  lfo.start(safe(when - 0.06));
-  lfo.stop(end);
-}
-
-/**
- * Says a line. The melody walks up the scale and lands back on the root, so it
- * reads as an announcement rather than a question.
- */
-export function speak(bus: Bus, text: string, when = 0, options: VoiceOptions = {}): void {
-  const parts = syllables(text);
-  if (parts.length === 0) return;
-
-  const start = options.degree ?? 2;
-  // Consonants are placed ahead of their vowel, so the line starts far enough
-  // in for them to fit rather than being squashed against zero.
-  let at = when + 0.07;
-
-  parts.forEach((syllable, i) => {
-    const last = i === parts.length - 1;
-    // Up through the scale, then home. The last syllable is held longer, which
-    // is most of what makes it sound like an exclamation.
-    const degree = last ? start : start + i + 1;
-    const length = last ? 0.34 : 0.13;
-
-    if (syllable.breaks) at += 0.06;
-    utter(bus, at, syllable, note(degree) / 2, length, options);
-    at += length * (last ? 1 : 0.82);
-  });
-}
-
 // -------------------------------------------------------------- the sounds
 
 /**
@@ -560,6 +412,7 @@ export function speak(bus: Bus, text: string, when = 0, options: VoiceOptions = 
  * bullseye is the ceiling because it happens once a session.
  */
 const TRIM: Record<Sound, number> = {
+  bonus: 1,
   place: 1.07,
   spin: 0.69,
   denied: 1.37,
@@ -568,7 +421,6 @@ const TRIM: Record<Sound, number> = {
   pure: 0.59,
   ring: 0.572,
   gameOver: 0.292,
-  bullseye: 0.63,
 };
 
 /**
@@ -591,6 +443,66 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
   const degree = at + Math.min(level, 7);
 
   switch (sound) {
+    case "bonus": {
+      // The signature. Whatever the banner says, this is what it sounds like.
+      //
+      // Three things nothing else in the game does: a swell running backwards
+      // into the hit, a sub that rises instead of falling, and the whole scale
+      // struck at once as a bloom rather than a chord. Together they are meant
+      // to be recognisable in one second, through a phone speaker, across a
+      // room.
+      //
+      // `level` is how big a moment it is: 0 a stripe, 1 a pure clear, 2 the
+      // bullseye. It buys length, depth and one more note on the bloom.
+      const tier = Math.min(2, Math.max(0, Math.round(level)));
+      // Size buys length, depth and notes — never amplitude. Pushed loud
+      // enough to slam the limiter, the swell and the strike are the first
+      // things flattened, and flattening them is flattening the whole idea.
+      const size = 1 + tier * 0.45;
+
+      swell(bus, when, {
+        duration: 0.16 + tier * 0.07,
+        from: 300,
+        to: 5200,
+        peak: 0.14 + tier * 0.02,
+        send: 0.35,
+      });
+
+      // Rising, not falling. This is the part that sounds wrong in the best way.
+      thump(bus, when, {
+        freq: 52,
+        to: 128 + tier * 24,
+        peak: 0.58,
+        decay: 0.4 + tier * 0.22,
+        send: 0.2,
+      });
+
+      // The bloom: the scale struck together, the top notes barely staggered,
+      // so it arrives as one event and separates as it rings.
+      const notes = [0, 2, 4, 6, 8].slice(0, 3 + tier);
+      notes.forEach((step, i) => {
+        struck(bus, when, PAN, {
+          at: i * 0.014,
+          freq: note(degree + step),
+          peak: 0.21 - i * 0.025,
+          decay: (0.9 + i * 0.25) * size,
+          send: 0.5,
+        });
+      });
+
+      // A glass tail over the top, left hanging after everything else has gone.
+      struck(bus, when, GLASS, {
+        at: 0.1,
+        freq: note(degree + 10),
+        peak: 0.14,
+        decay: 1.4 + tier * 0.6,
+        attack: 0.05,
+        beat: 14,
+        send: 0.65,
+      });
+      break;
+    }
+
     case "place": {
       // A wooden tine, tuned to the ring it landed on, under a soft thock.
       noiseBurst(bus, when, { from: 2000, to: 700, peak: 0.2, decay: 0.026 });
@@ -672,40 +584,6 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
       break;
     }
 
-    case "bullseye": {
-      // Everything went. The instrument gets played: five notes up the scale on
-      // the handpan, glass over the top, and the deepest sub in the game.
-      thump(bus, when, { freq: 78, to: 37, peak: 0.95, decay: 0.7, send: 0.15 });
-      noiseBurst(bus, when, {
-        type: "bandpass",
-        from: 500,
-        to: 8000,
-        q: 0.9,
-        peak: 0.22,
-        decay: 0.4,
-        send: 0.45,
-      });
-      [0, 1, 2, 3, 4].forEach((step, i) => {
-        struck(bus, when, PAN, {
-          at: i * 0.058,
-          freq: note(degree + step),
-          peak: 0.3,
-          decay: 1.1,
-          send: 0.5,
-        });
-      });
-      struck(bus, when, GLASS, {
-        at: 0.29,
-        freq: note(degree + 10),
-        peak: 0.22,
-        decay: 1.6,
-        attack: 0.05,
-        beat: 16,
-        send: 0.65,
-      });
-      break;
-    }
-
     case "spin": {
       // The signature. A mechanism turning, not air moving.
       ratchet(bus, when, { ticks: 11, span: 0.22, freq: 1800, peak: 0.26 });
@@ -783,25 +661,6 @@ export function setMuted(next: boolean): void {
  * ring or sector index; anything out of range wraps into another octave, so no
  * caller can produce a wrong note.
  */
-/**
- * Says a banner out loud. Given the string the player is reading, so it is the
- * same words in the same language, and nothing has to be kept in sync.
- */
-export function announce(text: string, degree = 2): void {
-  if (muted) return;
-  const target = live();
-  if (!target || !ctx) return;
-  if (ctx.state === "suspended") void ctx.resume().catch(() => {});
-
-  try {
-    // A beat behind the impact: the voice reacts to what happened rather than
-    // talking over it.
-    speak(target, text, ctx.currentTime + 0.11, { degree });
-  } catch {
-    // Never worth interrupting a turn for.
-  }
-}
-
 export function play(sound: Sound, level = 0, at = 0): void {
   if (muted) return;
   const target = live();

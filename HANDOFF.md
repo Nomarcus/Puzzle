@@ -117,17 +117,19 @@ so it reads as something being hit rather than switched on. There are no audio
 files; it is all synthesis, and `npm run audio` renders every voice to WAV in
 `tools/out/audio/` so it can be judged without a build.
 
-The bonus banners are **spoken** — BULLSEYE, FULLTRÄFF, ALL ONE COLOUR — by a
-synthesised voice rather than a recording. A vowel is three resonances, so
-parking bandpass filters at the right frequencies over a buzzing source gives
-something the ear reads as speech with no audio file, no licensing and no
-second language to record. It reads the banner string itself rather than a
-per-word table, so text added later is spoken without anybody authoring
-anything — but it always speaks the **English** wording, whatever the menu is
-set to. Arcade voices are English everywhere, and the banner on screen still
-reads in the player's language. It is not real speech and is not trying
-to be — closer to how a cartoon animal talks — but the syllables, the vowel
-colours and the rhythm all come from the real word.
+The bonus moments — a stripe, a single-colour clear, the bullseye — all get the
+same **signature sound**, sized to how big the moment was. It is the one thing
+in the game designed to be recognised in a second through a phone speaker:
+a swell running *backwards* into the hit, a sub that *rises* instead of falling,
+and the whole scale struck at once as a bloom. Almost every impact sound
+anywhere falls in pitch and brightness, because that is what struck objects do;
+running it the other way turns a hit into an arrival.
+
+It is roughly 7 dB above anything else the game plays, which is deliberate.
+
+(An earlier attempt put a synthesised formant voice here, reading the banner
+text aloud. It worked technically — measurably vowel-shaped — and sounded
+wrong, so it is gone.)
 
 Two things matter for writing music against it:
 
