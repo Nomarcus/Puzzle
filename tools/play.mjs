@@ -479,7 +479,7 @@ await page.waitForTimeout(500);
 
 const opening = await page.evaluate(() => window.__shiftle.clock());
 check("a timed round opens with a clock running", opening !== null && opening > 20, `${opening}s`);
-check("and the clock is the tense kind, not a comfortable one", opening !== null && opening <= 35, `${opening}s`);
+check("and the clock is the tense kind, not a comfortable one", opening !== null && opening <= 45, `${opening}s`);
 
 const drained = await page.evaluate(async () => {
   const before = window.__shiftle.clock();

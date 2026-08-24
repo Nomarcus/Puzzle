@@ -48,11 +48,13 @@ export interface ClockSpec {
  * the best and worst, how much of the round is spent under ten seconds, and how
  * many clears paid nothing.
  *
- * Thirty seconds gives rounds of about 35 seconds to two and a half minutes, a
- * fourfold gap between a beginner and an expert, and roughly a third of a good
- * player's round in the red.
+ * Forty seconds, draining slowly, gives rounds of about 50 seconds to three and
+ * a half minutes, the widest gap between a beginner and an expert of anything
+ * tried, and roughly a quarter of a good player's round spent under ten seconds
+ * on the clock. It replaced a thirty-second version that measured slightly
+ * tenser and simply felt mean to open on.
  *
- * That last measurement is why the clock opens at what it caps at. An earlier
+ * The clock opens at what it caps at, and that is not an accident. An earlier
  * version opened at 45 and capped at 25, on the theory that a calm opening you
  * could never return to would be the most tense shape available. It measured
  * well and played terribly: above the cap a clear is worth nothing, so the
@@ -61,9 +63,9 @@ export interface ClockSpec {
  * where clearing buys no time.
  */
 export const TIME_ATTACK: ClockSpec = {
-  seconds: 30,
-  drainEvery: 40,
-  drainStep: 0.18,
+  seconds: 40,
+  drainEvery: 50,
+  drainStep: 0.15,
 };
 
 /**
