@@ -164,15 +164,43 @@ overrides `capacitorDidLoad()` and calls
 at that class instead of `CAPBridgeViewController`.
 
 **Both are now checked.** `npm run ios:sync` ends with `tools/verify-ios.mjs`,
-which reads the Xcode project, the storyboard and the generated config and
-fails the build if an app-local plugin is not registered by anything, if the
-storyboard does not load the class that registers it, if a Swift file is not in
-the Sources phase, or if the entitlements are not wired to both configurations.
+which reads the Xcode project, the storyboard, the platform sources and the
+generated config, and fails if:
+
+- a plugin the web side registers has no native implementation, from either an
+  npm package or the app target — the general form of bug 2, now covering
+  Haptics, Share and Preferences as well as GameConnect;
+- an app-local plugin is registered by nothing;
+- the storyboard does not load the class that does the registering;
+- a Swift file is missing from the Sources build phase;
+- the entitlements are not wired to both build configurations.
+
 None of it needs Xcode. `npm run play` separately pins that the Capacitor
-runtime is loaded at all.
+runtime is loaded at all, and that the safe-area insets reach the canvas
+layout.
 
 Neither bug could be caught by playing the game in a browser, which is why they
 survived two builds.
+
+### Two more of the same shape, found while looking
+
+- **Safe-area insets.** The canvas layout read `--safe-top` off `:root` and
+  parsed it. Whether `env()` inside a custom property is substituted at that
+  point is engine-dependent; Chromium resolves it, and a literal `env(...)`
+  string would parse to `NaN` and quietly become zero — putting the score under
+  the Dynamic Island. It now measures a real element through `var()`, which the
+  cascade resolves everywhere, and `npm run play` drives a fake notch to prove
+  the layout moves by exactly the inset.
+- **The share sheet.** The share button encoded a 1080px PNG and *then* called
+  `navigator.share()`. iOS only opens a share sheet while the tap that asked for
+  it is still live, and waiting on an encode is a good way to spend that. The
+  card is now encoded when the result screen appears — which it was doing
+  anyway for the preview — so the tap shares a blob that is already in hand.
+- **High scores.** `localStorage` in a WKWebView is website data: the system
+  may clear it under pressure and it does not reliably survive a restore. Every
+  write is now mirrored into Capacitor Preferences (NSUserDefaults), and a
+  `hydrate()` at launch puts back anything that has gone missing. Reads stay
+  synchronous; the durable store is the backup, never the fast path.
 
 ## Game Center
 

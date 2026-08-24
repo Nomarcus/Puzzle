@@ -77,6 +77,40 @@ for (const plugin of localPlugins) {
   check(`${plugin.className} declares a jsName`, plugin.jsName !== null, plugin.jsName ?? "");
 }
 
+// --- every plugin the web side registers must exist natively ---------------
+// The generalisation of the bug above: the JS calling registerPlugin("X") is
+// not what makes X exist. If nothing on the native side provides it, the call
+// silently produces a proxy that answers "not available" for ever.
+const platformDir = "src/platform";
+const platformFiles = (await readdir(platformDir)).filter((name) => name.endsWith(".ts"));
+const wanted = new Map();
+
+for (const file of platformFiles) {
+  const text = await readFile(`${platformDir}/${file}`, "utf8");
+  for (const match of text.matchAll(/registerPlugin<[^>]*>\(\s*(?:"([^"]+)"|(\w+))\s*\)/g)) {
+    let name = match[1];
+    if (!name && match[2]) {
+      // Registered through a constant, e.g. registerPlugin<T>(NAME).
+      name = new RegExp(`const\\s+${match[2]}\\s*=\\s*"([^"]+)"`).exec(text)?.[1] ?? null;
+    }
+    if (name) wanted.set(name, file);
+  }
+}
+
+check("the web side registers at least one plugin", wanted.size > 0, [...wanted.keys()].join(", "));
+
+const localJsNames = new Set(localPlugins.map((plugin) => plugin.jsName));
+for (const [name, file] of wanted) {
+  // npm plugins are listed as "<Name>Plugin" in packageClassList.
+  const fromPackage = packageClassList.includes(`${name}Plugin`);
+  const fromApp = localJsNames.has(name);
+  check(
+    `${name} (used by ${file}) has a native implementation`,
+    fromPackage || fromApp,
+    fromPackage ? "npm package" : fromApp ? "app target" : "NOTHING provides it — every call will be a no-op",
+  );
+}
+
 // --- whatever registers them has to be the class the app actually loads ----
 const registrars = sources.filter(({ text }) => text.includes("registerPluginInstance"));
 if (registrars.length > 0) {

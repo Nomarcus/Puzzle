@@ -38,6 +38,7 @@ import {
   useTestDouble as useGameCenterTestDouble,
 } from "./platform/gamecenter.js";
 import {
+  hydrate,
   readJson,
   readNumber,
   readString,
@@ -519,12 +520,29 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   }
   node.append(el("div", "confirm-body", variantLabel(lastVariant.size, lastVariant.pack)));
 
+  // Encoded now, not on the tap. Two reasons: the card has just been drawn for
+  // the preview, so doing it twice is waste — and iOS only lets a share sheet
+  // open while the tap that asked for it is still live. Waiting on a PNG encode
+  // first is exactly how that gets spent.
+  let shareImage: Blob | null = null;
+  const encoding = renderShareImage(state.board, theme, card)
+    .then((blob) => {
+      shareImage = blob;
+    })
+    .catch(() => {
+      // Text is still shareable; the picture is a bonus.
+    });
+
   const share = el("button", "big", t("share"));
   share.dataset.action = "share";
   share.addEventListener("click", () => {
-    void renderShareImage(state.board, theme, card).then((image) =>
-      shareResult(shareLine(result), image),
-    );
+    // Ready by now in every realistic case — the player has to read the card
+    // first. If it somehow is not, the await costs the picture, not the share.
+    if (shareImage) {
+      void shareResult(shareLine(result), shareImage);
+      return;
+    }
+    void encoding.then(() => shareResult(shareLine(result), shareImage));
   });
   node.append(share);
 
@@ -675,6 +693,15 @@ if (import.meta.env.DEV) {
     /** Is the animation loop still running? */
     frameAlive: () => screen?.isRunning() ?? false,
 
+    /** Where the header, tray and disc ended up, for the safe-area checks. */
+    layout: () => screen?.getLayout() ?? null,
+
+    /** Re-measures, so a test can change the insets and see the effect. */
+    remeasure: () => {
+      screen?.resize();
+      return screen?.getLayout() ?? null;
+    },
+
     /**
      * Sets one spoke a single cell short, with a matching piece in the tray,
      * so a spoke clear can be triggered on demand and repeatedly.
@@ -771,4 +798,10 @@ if (import.meta.env.DEV) {
 // Safe on every launch: the system only ever prompts once.
 void signIn();
 
+// The menu goes up straight away rather than waiting on a native round trip —
+// a blank frame at launch is a worse trade than a menu that corrects itself a
+// moment later. It only redraws if something was actually restored.
 showMenu();
+void hydrate().then((restored) => {
+  if (restored && document.querySelector(".overlay.menu")) showMenu();
+});

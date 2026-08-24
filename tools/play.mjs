@@ -323,6 +323,39 @@ check(
 check("there is a share button", (await page.locator('[data-action="share"]').count()) === 1);
 await shot("11-game-over");
 
+// --- safe-area insets ------------------------------------------------------
+// Nothing here has a notch, so this drives the insets by hand. The layout used
+// to parse the custom property directly, and whether env() is substituted at
+// that point is engine-dependent — on WebKit a literal "env(...)" would parse
+// to NaN and silently become zero, putting the score under the Dynamic Island.
+await page.evaluate(() => window.__shiftle.start("endless"));
+await page.waitForTimeout(400);
+
+const flat = await page.evaluate(() => window.__shiftle.layout());
+const inset = await page.evaluate(() => {
+  const root = document.documentElement;
+  root.style.setProperty("--safe-top", "59px");
+  root.style.setProperty("--safe-bottom", "34px");
+  return window.__shiftle.remeasure();
+});
+check(
+  "a top safe-area inset pushes the header down by exactly that much",
+  inset.headerY - flat.headerY === 59,
+  `${flat.headerY} -> ${inset.headerY}`,
+);
+check(
+  "a bottom safe-area inset lifts the tray by exactly that much",
+  flat.trayTop - inset.trayTop === 34,
+  `${flat.trayTop} -> ${inset.trayTop}`,
+);
+await shot("14-safe-area");
+
+await page.evaluate(() => {
+  document.documentElement.style.removeProperty("--safe-top");
+  document.documentElement.style.removeProperty("--safe-bottom");
+  window.__shiftle.remeasure();
+});
+
 // --- Game Center -----------------------------------------------------------
 // There is no native plugin in a browser, so nothing here would ever be
 // exercised until it broke on a device. __shiftle.fakeGameCenter() installs a

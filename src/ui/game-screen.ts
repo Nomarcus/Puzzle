@@ -299,14 +299,26 @@ export class GameScreen {
     this.measure();
   }
 
+  /**
+   * Where the furniture ended up. Only the browser tests read this — it is the
+   * one way to check the safe-area insets landed without a notched device.
+   */
+  getLayout(): { headerY: number; trayTop: number; boardCy: number; boardRadius: number } {
+    return {
+      headerY: this.layout.headerY,
+      trayTop: this.layout.trayTop,
+      boardCy: this.layout.board.cy,
+      boardRadius: this.layout.boardRadius,
+    };
+  }
+
   // ------------------------------------------------------------------ layout
 
   private measure(): void {
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     const { width, height } = fitCanvas(this.canvas, dpr);
 
-    const safeTop = readSafeInset("--safe-top");
-    const safeBottom = readSafeInset("--safe-bottom");
+    const { top: safeTop, bottom: safeBottom } = safeInsets();
 
     // The playable column. A tablet is far wider than anyone wants to drag
     // across, so the game is capped and centred — but capped generously, since
@@ -1123,9 +1135,38 @@ function roundRect(
   ctx.closePath();
 }
 
-/** Reads a safe-area inset that index.html has parked on :root. */
-function readSafeInset(variable: string): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(variable);
-  const value = Number.parseFloat(raw);
-  return Number.isFinite(value) ? value : 0;
+/**
+ * The safe-area insets, in pixels.
+ *
+ * Measured off a real element rather than read off the custom property that
+ * index.html parks on :root. Reading it directly means parsing whatever the
+ * engine hands back for a custom property, and whether `env()` inside one is
+ * substituted at that point is engine-dependent — Chromium resolves it to
+ * "0px", but this ships in WKWebView and a literal "env(...)" string would
+ * parse to NaN and quietly become zero. On a notched phone that is the
+ * difference between the score sitting under the Dynamic Island and not.
+ *
+ * Going through `var()` on a real property is resolved by the normal cascade
+ * everywhere, and it keeps the insets overridable, which is the only way to
+ * test this without a notched device.
+ */
+let insetProbe: HTMLDivElement | null = null;
+
+function safeInsets(): { top: number; bottom: number } {
+  if (!insetProbe) {
+    insetProbe = document.createElement("div");
+    insetProbe.setAttribute("aria-hidden", "true");
+    insetProbe.style.cssText =
+      "position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
+      "padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);";
+    document.body.append(insetProbe);
+  }
+
+  const style = getComputedStyle(insetProbe);
+  const top = Number.parseFloat(style.paddingTop);
+  const bottom = Number.parseFloat(style.paddingBottom);
+  return {
+    top: Number.isFinite(top) ? top : 0,
+    bottom: Number.isFinite(bottom) ? bottom : 0,
+  };
 }
