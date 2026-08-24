@@ -129,6 +129,13 @@ for (const take of TAKES) {
       // short sound in a long take is mostly silence, and averaging that in
       // makes a loud noise look quiet. The loudest window is what the ear
       // actually reports back, and it is comparable between takes.
+      // Energy below ~180 Hz, as a one-pole lowpass over the mix. "More bass"
+      // is a claim that ought to be checkable rather than asserted.
+      const cutoff = 180;
+      const alpha = 1 - Math.exp((-2 * Math.PI * cutoff) / rate);
+      let lp = 0;
+      let lowSum = 0;
+
       const window = Math.floor(rate * 0.3);
       let running = 0;
       let loudest = 0;
@@ -139,6 +146,9 @@ for (const take of TAKES) {
         const r = right[i];
         peak = Math.max(peak, Math.abs(l), Math.abs(r));
         squares[i] = (l * l + r * r) / 2;
+
+        lp += alpha * ((l + r) / 2 - lp);
+        lowSum += lp * lp;
 
         running += squares[i];
         if (i >= window) running -= squares[i - window];
@@ -152,13 +162,23 @@ for (const take of TAKES) {
       const raw = new Uint8Array(bytes);
       for (let i = 0; i < raw.length; i++) binary += String.fromCharCode(raw[i]);
 
-      return { wav: btoa(binary), peak, loudness: Math.sqrt(loudest) };
+      return {
+        wav: btoa(binary),
+        peak,
+        loudness: Math.sqrt(loudest),
+        low: Math.sqrt(lowSum / frames),
+      };
     },
     { take, rate: RATE },
   );
 
   await writeFile(`${OUT}/${take.name}.wav`, Buffer.from(rendered.wav, "base64"));
-  results.push({ name: take.name, peak: rendered.peak, loudness: rendered.loudness });
+  results.push({
+    name: take.name,
+    peak: rendered.peak,
+    loudness: rendered.loudness,
+    low: rendered.low,
+  });
 }
 
 await browser.close();
@@ -166,8 +186,8 @@ await server.close();
 
 const db = (value) => (value <= 0 ? "-inf" : (20 * Math.log10(value)).toFixed(1));
 
-console.log("\ntake                   peak      peak dB   loudest 300ms");
-console.log("-".repeat(58));
+console.log("\ntake                   peak      peak dB   loudest 300ms   below 180Hz");
+console.log("-".repeat(72));
 const problems = [];
 for (const row of results) {
   const flag = row.peak >= 0.999 ? "  CLIPPING" : row.peak < 0.02 ? "  NEARLY SILENT" : "";
@@ -177,6 +197,7 @@ for (const row of results) {
       row.peak.toFixed(3).padStart(6) +
       db(row.peak).padStart(11) +
       db(row.loudness).padStart(15) +
+      db(row.low).padStart(13) +
       flag,
   );
 }

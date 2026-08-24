@@ -90,6 +90,8 @@ export interface Bus {
   readonly noiseShort: AudioBuffer;
   /** One PeriodicWave per duty cycle, made once. */
   readonly pulses: Map<number, PeriodicWave>;
+  /** The stepped triangle. The bass channel, and audible on a phone. */
+  readonly triangle: PeriodicWave;
 }
 
 /**
@@ -131,6 +133,46 @@ function makePulse(ctx: BaseAudioContext, duty: number): PeriodicWave {
     imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * duty);
   }
   return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+}
+
+/**
+ * The chip's triangle, which is not a triangle.
+ *
+ * A real one is a 4-bit counter walking up and down 32 steps, so it is a
+ * staircase, and a staircase has harmonics a smooth ramp does not. That matters
+ * for more than authenticity: WebAudio's built-in "triangle" is mathematically
+ * pure, almost all fundamental, and a 70 Hz fundamental on a phone speaker is
+ * simply not there — the driver cannot move that slowly. The steps put energy
+ * into the harmonics the speaker *can* reproduce, and the ear reconstructs the
+ * missing fundamental from them. That is where the bass comes from on a
+ * device with no bass.
+ *
+ * Built by taking the DFT of the actual step sequence rather than approximating
+ * it, so it is the real waveform and not something that resembles it.
+ */
+function makeStepTriangle(ctx: BaseAudioContext): PeriodicWave {
+  const steps = 32;
+  const table = new Float32Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const counter = i < 16 ? 15 - i : i - 16;
+    table[i] = (counter / 15) * 2 - 1;
+  }
+
+  const harmonics = 32;
+  const real = new Float32Array(harmonics);
+  const imag = new Float32Array(harmonics);
+  for (let n = 1; n < harmonics; n++) {
+    let re = 0;
+    let im = 0;
+    for (let i = 0; i < steps; i++) {
+      const phase = (2 * Math.PI * n * i) / steps;
+      re += table[i]! * Math.cos(phase);
+      im -= table[i]! * Math.sin(phase);
+    }
+    real[n] = (2 * re) / steps;
+    imag[n] = (2 * im) / steps;
+  }
+  return ctx.createPeriodicWave(real, imag);
 }
 
 export function createBus(ctx: BaseAudioContext, destination: AudioNode): Bus {
@@ -181,6 +223,7 @@ export function createBus(ctx: BaseAudioContext, destination: AudioNode): Bus {
     noiseLong: makeLfsr(ctx, false),
     noiseShort: makeLfsr(ctx, true),
     pulses,
+    triangle: makeStepTriangle(ctx),
   };
 }
 
@@ -280,32 +323,64 @@ function pulse(bus: Bus, when: number, options: PulseOptions): void {
 }
 
 /**
- * The triangle channel: the bass. On the real chip it has no volume control at
- * all — it is on or it is off — so this only steps it coarsely, which keeps
- * that flat, boxy low end.
+ * The bass channel, in two layers.
+ *
+ * The stepped triangle is the character, and its steps put energy into
+ * harmonics a phone speaker can actually move — but that is energy taken *out*
+ * of the fundamental, which is what a pair of headphones reproduces and what
+ * anybody means by "more bass". Measured below 180 Hz, the authentic waveform
+ * on its own is quieter than the pure one it replaced.
+ *
+ * So both: the staircase for the tone, and a sine underneath holding the
+ * fundamental up. One chip channel became two oscillators, which is the one
+ * liberty taken with the hardware here, and it is the difference between bass
+ * that is technically present and bass that is felt.
+ *
+ * On the real chip the triangle has no volume control at all — it is on or it
+ * is off — so this only steps it coarsely, which keeps the flat, boxy low end.
  */
 function tri(
   bus: Bus,
   when: number,
-  options: { at?: number; freq: number; peak: number; decay: number; bend?: number; send?: number },
+  options: {
+    at?: number;
+    freq: number;
+    peak: number;
+    decay: number;
+    bend?: number;
+    send?: number;
+    /** How much pure fundamental sits under the staircase. */
+    sub?: number;
+  },
 ): void {
   const start = safe(when + (options.at ?? 0));
-  const osc = bus.ctx.createOscillator();
-  osc.type = "triangle";
-
   const gain = bus.ctx.createGain();
   const end = stair(gain, start, options.peak, options.decay, 0.6);
-
   const frames = Math.max(1, Math.round((end - start) / FRAME));
+
+  const shaped = bus.ctx.createOscillator();
+  shaped.setPeriodicWave(bus.triangle);
+
+  const sub = bus.ctx.createOscillator();
+  sub.type = "sine";
+  const subGain = bus.ctx.createGain();
+  subGain.gain.value = options.sub ?? 1.5;
+
   for (let i = 0; i < frames; i++) {
-    const semitones = (options.bend ?? 0) * (i / frames);
-    osc.frequency.setValueAtTime(options.freq * Math.pow(2, semitones / 12), start + i * FRAME);
+    const freq = options.freq * Math.pow(2, ((options.bend ?? 0) * (i / frames)) / 12);
+    shaped.frequency.setValueAtTime(freq, start + i * FRAME);
+    sub.frequency.setValueAtTime(freq, start + i * FRAME);
   }
 
-  osc.connect(gain);
+  shaped.connect(gain);
+  sub.connect(subGain);
+  subGain.connect(gain);
   route(bus, gain, options.send ?? 0);
-  osc.start(start);
-  osc.stop(end);
+
+  shaped.start(start);
+  shaped.stop(end);
+  sub.start(start);
+  sub.stop(end);
 }
 
 interface NoiseOptions {
@@ -358,16 +433,16 @@ function noise(bus: Bus, when: number, options: NoiseOptions): void {
  * constantly; the bonus is the ceiling because it is the moment the game is for.
  */
 const TRIM: Record<Sound, number> = {
-  start: 0.62,
-  bonus: 0.72,
-  place: 0.72,
-  spoke: 0.45,
-  stripe: 0.378,
-  pure: 0.45,
-  ring: 0.49,
-  gameOver: 0.36,
-  denied: 0.76,
-  spin: 1.32,
+  start: 0.156,
+  bonus: 0.239,
+  place: 0.185,
+  spoke: 0.089,
+  stripe: 0.102,
+  pure: 0.118,
+  ring: 0.116,
+  gameOver: 0.093,
+  denied: 0.09,
+  spin: 0.157,
 };
 
 export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): void {
@@ -397,7 +472,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
       // little to sing.
       const shade = at % 5;
       noise(bus, when, { peak: 0.34, decay: 0.028, rate: 1.35 + shade * 0.11, curve: 2.8 });
-      tri(bus, when, { freq: 104 + shade * 7, peak: 0.42, decay: 0.042 });
+      tri(bus, when, { freq: 88 + shade * 6, peak: 0.72, decay: 0.085 });
       break;
     }
 
@@ -413,7 +488,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         arpRate: 2,
         send: 0.25,
       });
-      tri(bus, when, { freq: note(degree - 10), peak: 0.4, decay: 0.16 });
+      tri(bus, when, { freq: note(degree - 12), peak: 0.78, decay: 0.26 });
       noise(bus, when, { peak: 0.14, decay: 0.04, rate: 3.4, curve: 2.2 });
       break;
     }
@@ -440,7 +515,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         arpRate: 3,
         send: 0.4,
       });
-      tri(bus, when, { freq: note(degree - 12), peak: 0.55, decay: 0.4, bend: -5 });
+      tri(bus, when, { freq: note(degree - 14), peak: 1.05, decay: 0.55, bend: -5 });
       noise(bus, when, { peak: 0.2, decay: 0.07, rate: 3.8, rateTo: 1.4, curve: 2 });
       break;
     }
@@ -458,7 +533,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         vibrato: 22,
         send: 0.45,
       });
-      tri(bus, when, { freq: note(degree - 7), peak: 0.42, decay: 0.44 });
+      tri(bus, when, { freq: note(degree - 12), peak: 0.82, decay: 0.55 });
       break;
     }
 
@@ -482,7 +557,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         bend: -18,
         curve: 1.2,
       });
-      tri(bus, when, { freq: note(degree - 12), peak: 0.5, decay: 0.26, bend: -7 });
+      tri(bus, when, { freq: note(degree - 14), peak: 1.0, decay: 0.36, bend: -7 });
       break;
     }
 
@@ -497,6 +572,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         curve: 1.1,
       });
       noise(bus, when, { peak: 0.13, decay: 0.06, rate: 1.6, rateTo: 3.2, curve: 1.8 });
+      tri(bus, when, { freq: note(at - 14), peak: 0.6, decay: 0.12 });
       break;
     }
 
@@ -510,6 +586,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         bend: -3,
         curve: 0.9,
       });
+      tri(bus, when, { freq: note(-16), peak: 0.75, decay: 0.16, bend: -3 });
       break;
     }
 
@@ -535,7 +612,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         vibrato: 18,
         send: 0.4,
       });
-      tri(bus, when, { at: 0.225, freq: note(degree - 5), peak: 0.5, decay: 0.36 });
+      tri(bus, when, { at: 0.225, freq: note(degree - 12), peak: 0.95, decay: 0.5 });
       noise(bus, when, { at: 0.225, peak: 0.16, decay: 0.05, rate: 3.2, curve: 2 });
       break;
     }
@@ -574,9 +651,9 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
       });
       tri(bus, when, {
         at: land,
-        freq: note(degree - 12),
-        peak: 0.6,
-        decay: 0.5 + tier * 0.2,
+        freq: note(degree - 14),
+        peak: 1.15,
+        decay: 0.65 + tier * 0.25,
         bend: 7,
       });
       noise(bus, when, {
@@ -614,7 +691,7 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
         curve: 1.1,
         send: 0.45,
       });
-      tri(bus, when, { at: 0.48, freq: note(degree - 19), peak: 0.5, decay: 0.5, bend: -7 });
+      tri(bus, when, { at: 0.48, freq: note(degree - 19), peak: 1.0, decay: 0.68, bend: -7 });
       break;
     }
   }
