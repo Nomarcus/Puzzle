@@ -57,7 +57,38 @@ const TAKES = [
   { name: "11-denied", seconds: 1.2, events: [["denied", 0, 0, 0]] },
   { name: "12-game-over", seconds: 4.0, events: [["gameOver", 0, 0, 0]] },
   {
-    name: "13-a-typical-turn",
+    name: "13-voice-english",
+    seconds: 6.0,
+    // Exactly what the banners say, read by the formant voice.
+    events: [
+      ["say:BULLSEYE!", 0, 0, 4],
+      ["say:STRIPE!", 0, 1.5, 3],
+      ["say:ALL ONE COLOUR!", 0, 2.7, 2],
+      ["say:DOUBLE STRIPE!", 0, 4.4, 3],
+    ],
+  },
+  {
+    name: "14-voice-swedish",
+    seconds: 6.0,
+    // The same code, the Swedish strings. Nothing is hand-authored per word.
+    events: [
+      ["say:FULLTR\u00c4FF!", 0, 0, 4],
+      ["say:RAND!", 0, 1.4, 3],
+      ["say:ENF\u00c4RGAT!", 0, 2.4, 2],
+      ["say:DUBBELRAND!", 0, 4.0, 3],
+    ],
+  },
+  {
+    name: "15-bullseye-with-voice",
+    seconds: 4.5,
+    // How it actually lands: the sweep, then the voice a beat behind it.
+    events: [
+      ["bullseye", 0, 0, 0],
+      ["say:BULLSEYE!", 0, 0.11, 4],
+    ],
+  },
+  {
+    name: "16-a-typical-turn",
     seconds: 5.5,
     // What a good minute of play actually sounds like, back to back.
     events: [
@@ -90,7 +121,11 @@ for (const take of TAKES) {
       const bus = audio.createBus(ctx, ctx.destination);
 
       for (const [sound, level, at, degree] of take.events) {
-        audio.schedule(bus, sound, level, at, degree ?? 0);
+        if (sound.startsWith("say:")) {
+          audio.speak(bus, sound.slice(4), at, { degree: degree ?? 2 });
+        } else {
+          audio.schedule(bus, sound, level, at, degree ?? 0);
+        }
       }
 
       const buffer = await ctx.startRendering();
@@ -155,8 +190,64 @@ for (const take of TAKES) {
   results.push({ name: take.name, peak: rendered.peak, loudness: rendered.loudness });
 }
 
+// --- do the formants actually make vowels? ---------------------------------
+// The voice claims to be vowel-shaped, and I cannot hear it. What can be
+// checked is the physics: an "ah" should carry more energy around 1150 Hz than
+// around 2300 Hz, and an "ee" the other way round. If that holds, the
+// resonances are where they were put and the vowels are distinguishable.
+const vowelCheck = await page.evaluate(async ({ rate }) => {
+  const audio = await import("/src/platform/audio.ts");
+
+  const energyAt = (samples, freq) => {
+    // One Goertzel-ish bin: correlate against a sine and a cosine at freq.
+    let re = 0;
+    let im = 0;
+    const step = (2 * Math.PI * freq) / rate;
+    for (let i = 0; i < samples.length; i++) {
+      re += samples[i] * Math.cos(step * i);
+      im += samples[i] * Math.sin(step * i);
+    }
+    return Math.hypot(re, im) / samples.length;
+  };
+
+  const band = (samples, centre) => {
+    // A little either side, so a harmonic landing off-centre still counts.
+    let total = 0;
+    for (let f = centre * 0.85; f <= centre * 1.15; f += 25) total += energyAt(samples, f);
+    return total;
+  };
+
+  const render = async (text) => {
+    const ctx = new OfflineAudioContext(1, Math.ceil(rate * 0.8), rate);
+    const bus = audio.createBus(ctx, ctx.destination);
+    audio.speak(bus, text, 0, { degree: 2 });
+    const buffer = await ctx.startRendering();
+    // The sustained middle of the syllable, past the consonant transient.
+    return buffer.getChannelData(0).slice(Math.floor(rate * 0.12), Math.floor(rate * 0.32));
+  };
+
+  const ah = await render("MA");
+  const ee = await render("MI");
+
+  return {
+    ahLow: band(ah, 1150),
+    ahHigh: band(ah, 2300),
+    eeLow: band(ee, 1150),
+    eeHigh: band(ee, 2300),
+  };
+}, { rate: RATE });
+
 await browser.close();
 await server.close();
+
+const ratio = (a, b) => (b === 0 ? Infinity : a / b);
+const ahIsOpen = ratio(vowelCheck.ahLow, vowelCheck.ahHigh);
+const eeIsClosed = ratio(vowelCheck.eeHigh, vowelCheck.eeLow);
+
+console.log("\nvowel check");
+console.log("-".repeat(54));
+console.log(`  "ah" energy at 1150 Hz vs 2300 Hz   ${ahIsOpen.toFixed(1)}x`);
+console.log(`  "ee" energy at 2300 Hz vs 1150 Hz   ${eeIsClosed.toFixed(1)}x`);
 
 const db = (value) => (value <= 0 ? "-inf" : (20 * Math.log10(value)).toFixed(1));
 
@@ -175,6 +266,9 @@ for (const row of results) {
   );
 }
 
+if (ahIsOpen < 1.5) problems.push('the "ah" vowel is not open — F2 is in the wrong place');
+if (eeIsClosed < 1.5) problems.push('the "ee" vowel is not closed — F2 is in the wrong place');
+
 console.log(`\n${results.length} takes written to ${OUT}/`);
-console.log(problems.length ? `problems: ${problems.join(", ")}` : "no clipping, nothing silent");
+console.log(problems.length ? `problems: ${problems.join(", ")}` : "no clipping, nothing silent, vowels distinguishable");
 process.exit(problems.length ? 1 : 0);

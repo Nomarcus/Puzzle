@@ -166,6 +166,17 @@ function route(bus: Bus, node: AudioNode, send: number): void {
  * attack matters more than it looks: a gain that jumps straight to full clicks,
  * and on a phone speaker that click is louder than the note underneath it.
  */
+/**
+ * Nothing may be scheduled before the context started. Voices place their
+ * consonants ahead of the vowel, so an utterance right after unlock — when
+ * currentTime is still near zero — would otherwise ask for a negative time and
+ * throw. The whole line would then be swallowed by the caller's catch and
+ * simply never speak.
+ */
+function safe(when: number): number {
+  return Math.max(0, when);
+}
+
 function shape(gain: GainNode, when: number, peak: number, attack: number, decay: number): number {
   gain.gain.setValueAtTime(0.0001, when);
   gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), when + attack);
@@ -202,7 +213,7 @@ interface StruckOptions {
  * these get shorter decays the higher they go.
  */
 function struck(bus: Bus, when: number, partials: readonly Partial[], options: StruckOptions): void {
-  const start = when + (options.at ?? 0);
+  const start = safe(when + (options.at ?? 0));
   const attack = options.attack ?? 0.003;
 
   for (const partial of partials) {
@@ -245,7 +256,7 @@ interface NoiseOptions {
 
 /** The strike itself. Short, filtered, and the reason a note sounds hit. */
 function noiseBurst(bus: Bus, when: number, options: NoiseOptions): void {
-  const start = when + (options.at ?? 0);
+  const start = safe(when + (options.at ?? 0));
   const source = bus.ctx.createBufferSource();
   source.buffer = bus.noise;
   source.playbackRate.value = 0.9 + ((start * 7.3) % 1) * 0.3;
@@ -274,7 +285,7 @@ function thump(
   when: number,
   options: { at?: number; freq: number; to: number; peak: number; decay: number; send?: number },
 ): void {
-  const start = when + (options.at ?? 0);
+  const start = safe(when + (options.at ?? 0));
   const osc = bus.ctx.createOscillator();
   const gain = bus.ctx.createGain();
   osc.type = "sine";
@@ -348,6 +359,195 @@ const GLASS: readonly Partial[] = [
   { ratio: 2, gain: 0.32, decay: 0.65 },
   { ratio: 5.43, gain: 0.06, decay: 0.25 },
 ];
+
+// -------------------------------------------------------------------- voice
+
+/**
+ * A voice, without a single recorded sample.
+ *
+ * The banners the game throws up — FULLTRÄFF, DUBBELRAND, ALL ONE COLOUR —
+ * should be said out loud, and recording them would mean audio files, two
+ * languages to keep in sync, and a voice to license. So this synthesises one
+ * instead, and reads whatever the banner actually says.
+ *
+ * The trick is formants. A human vowel is not a waveform, it is three
+ * resonances: park bandpass filters at the right frequencies over a buzzing
+ * source and the ear hears "ah" or "ee" whether or not anything human is
+ * involved. Glide those resonances from one vowel to another and you get a
+ * diphthong, which is what makes the "eye" in bullseye work.
+ *
+ * It is not speech and is not trying to be — it is closer to how a cartoon
+ * animal talks. But the syllable count, the vowel colours and the rhythm all
+ * come from the real string, so it tracks the word on screen, in Swedish or
+ * English, and any text added later is spoken without anybody writing a table.
+ */
+
+/** F1, F2, F3 in Hz. The three resonances that make a vowel that vowel. */
+const VOWELS: Record<string, readonly [number, number, number]> = {
+  a: [800, 1150, 2800],
+  e: [550, 1770, 2490],
+  i: [300, 2300, 3000],
+  o: [450, 800, 2600],
+  u: [325, 700, 2500],
+  y: [300, 1750, 2200],
+  "\u00e4": [690, 1660, 2490],
+  "\u00f6": [370, 1400, 2200],
+  "\u00e5": [500, 700, 2500],
+};
+
+/** How a consonant is announced before the vowel it leads into. */
+type Onset = "plosive" | "fricative" | "voiced" | "none";
+
+function onsetOf(letter: string): Onset {
+  if ("ptkbdgc".includes(letter)) return "plosive";
+  if ("sfhvzxj".includes(letter)) return "fricative";
+  if ("mnlrw".includes(letter)) return "voiced";
+  return "none";
+}
+
+interface Syllable {
+  readonly onset: Onset;
+  /** The vowel, and the one it glides to if this is a diphthong. */
+  readonly from: readonly [number, number, number];
+  readonly to: readonly [number, number, number];
+  /** True where a word boundary fell, so the voice takes a breath. */
+  readonly breaks: boolean;
+}
+
+/**
+ * Chops a string into syllables: a run of consonants, then a run of vowels.
+ * Two different vowels in a row become a glide rather than two syllables,
+ * which is what stops "BULLSEYE" coming out as three beats instead of two.
+ */
+function syllables(text: string): Syllable[] {
+  const letters = text.toLowerCase();
+  const out: Syllable[] = [];
+  let onset: Onset = "none";
+  let broke = false;
+
+  for (let i = 0; i < letters.length && out.length < 5; i++) {
+    const letter = letters[i]!;
+    if (letter === " ") {
+      broke = true;
+      continue;
+    }
+
+    const vowel = VOWELS[letter];
+    if (!vowel) {
+      // Keep the first consonant of a cluster; the rest are swallowed, as
+      // they largely are in speech.
+      if (onset === "none") onset = onsetOf(letter);
+      continue;
+    }
+
+    // A following, different vowel makes this a glide.
+    const next = VOWELS[letters[i + 1] ?? ""];
+    const to = next && next !== vowel ? next : vowel;
+    if (to !== vowel) i++;
+
+    out.push({ onset, from: vowel, to, breaks: broke });
+    onset = "none";
+    broke = false;
+  }
+
+  return out;
+}
+
+interface VoiceOptions {
+  /** Scale degree the utterance starts on. */
+  readonly degree?: number;
+  readonly peak?: number;
+  readonly send?: number;
+}
+
+/** One syllable: a buzzing source shaped by three sliding resonances. */
+function utter(bus: Bus, when: number, syllable: Syllable, freq: number, length: number, options: VoiceOptions): void {
+  const peak = options.peak ?? 0.3;
+  const send = options.send ?? 0.35;
+
+  // The consonant, as a transient in front of the vowel.
+  if (syllable.onset === "plosive") {
+    noiseBurst(bus, when, { at: -0.03, from: 2400, to: 800, peak: peak * 0.5, decay: 0.02 });
+  } else if (syllable.onset === "fricative") {
+    noiseBurst(bus, when, {
+      at: -0.06,
+      type: "bandpass",
+      from: 4500,
+      q: 1.6,
+      peak: peak * 0.4,
+      decay: 0.055,
+    });
+  }
+
+  const osc = bus.ctx.createOscillator();
+  // A sawtooth is the usual stand-in for a glottal pulse: rich enough that the
+  // formants have something to carve out of.
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(freq, safe(when));
+
+  // Vibrato. Small, but a voice without any is unmistakably a machine.
+  const lfo = bus.ctx.createOscillator();
+  const lfoGain = bus.ctx.createGain();
+  lfo.frequency.value = 5.4;
+  lfoGain.gain.value = freq * 0.012;
+  lfo.connect(lfoGain);
+  lfoGain.connect(osc.frequency);
+
+  const body = bus.ctx.createGain();
+  const attack = syllable.onset === "voiced" ? 0.05 : 0.02;
+  const end = shape(body, safe(when), peak, attack, length);
+
+  // Three parallel resonances, sliding from one vowel to the next.
+  const gains = [1, 0.5, 0.2];
+  const qs = [9, 12, 15];
+  for (let i = 0; i < 3; i++) {
+    const filter = bus.ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.Q.value = qs[i]!;
+    filter.frequency.setValueAtTime(syllable.from[i]!, safe(when));
+    if (syllable.to !== syllable.from) {
+      filter.frequency.exponentialRampToValueAtTime(syllable.to[i]!, safe(when) + length * 0.8);
+    }
+
+    const level = bus.ctx.createGain();
+    level.gain.value = gains[i]!;
+    osc.connect(filter);
+    filter.connect(level);
+    level.connect(body);
+  }
+
+  route(bus, body, send);
+  osc.start(safe(when - 0.06));
+  osc.stop(end);
+  lfo.start(safe(when - 0.06));
+  lfo.stop(end);
+}
+
+/**
+ * Says a line. The melody walks up the scale and lands back on the root, so it
+ * reads as an announcement rather than a question.
+ */
+export function speak(bus: Bus, text: string, when = 0, options: VoiceOptions = {}): void {
+  const parts = syllables(text);
+  if (parts.length === 0) return;
+
+  const start = options.degree ?? 2;
+  // Consonants are placed ahead of their vowel, so the line starts far enough
+  // in for them to fit rather than being squashed against zero.
+  let at = when + 0.07;
+
+  parts.forEach((syllable, i) => {
+    const last = i === parts.length - 1;
+    // Up through the scale, then home. The last syllable is held longer, which
+    // is most of what makes it sound like an exclamation.
+    const degree = last ? start : start + i + 1;
+    const length = last ? 0.34 : 0.13;
+
+    if (syllable.breaks) at += 0.06;
+    utter(bus, at, syllable, note(degree) / 2, length, options);
+    at += length * (last ? 1 : 0.82);
+  });
+}
 
 // -------------------------------------------------------------- the sounds
 
@@ -583,6 +783,25 @@ export function setMuted(next: boolean): void {
  * ring or sector index; anything out of range wraps into another octave, so no
  * caller can produce a wrong note.
  */
+/**
+ * Says a banner out loud. Given the string the player is reading, so it is the
+ * same words in the same language, and nothing has to be kept in sync.
+ */
+export function announce(text: string, degree = 2): void {
+  if (muted) return;
+  const target = live();
+  if (!target || !ctx) return;
+  if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+
+  try {
+    // A beat behind the impact: the voice reacts to what happened rather than
+    // talking over it.
+    speak(target, text, ctx.currentTime + 0.11, { degree });
+  } catch {
+    // Never worth interrupting a turn for.
+  }
+}
+
 export function play(sound: Sound, level = 0, at = 0): void {
   if (muted) return;
   const target = live();

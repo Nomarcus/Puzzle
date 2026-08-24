@@ -117,6 +117,16 @@ so it reads as something being hit rather than switched on. There are no audio
 files; it is all synthesis, and `npm run audio` renders every voice to WAV in
 `tools/out/audio/` so it can be judged without a build.
 
+The bonus banners are **spoken** — BULLSEYE, FULLTRÄFF, ALL ONE COLOUR — by a
+synthesised voice rather than a recording. A vowel is three resonances, so
+parking bandpass filters at the right frequencies over a buzzing source gives
+something the ear reads as speech with no audio file, no licensing and no
+second language to record. It reads the banner string itself, so it says
+whatever is on screen in whichever language is set, and any text added later is
+spoken without anybody writing a table. It is not real speech and is not trying
+to be — closer to how a cartoon animal talks — but the syllables, the vowel
+colours and the rhythm all come from the real word.
+
 Two things matter for writing music against it:
 
 - **The scale is D major pentatonic** — D, E, F#, A, B, with D4 at 293.66 Hz.
