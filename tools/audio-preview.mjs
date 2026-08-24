@@ -22,38 +22,52 @@ const RATE = 48000;
 
 /** Single hits, and the sequences that show whether they sit together. */
 const TAKES = [
-  { name: "01-place", seconds: 1.2, events: [["place", 0, 0]] },
+  { name: "01-place", seconds: 1.6, events: [["place", 0, 0, 3]] },
   {
     name: "02-place-run",
-    seconds: 2.2,
-    // Four in a row: this is where a machine-gun sound would give itself away.
-    events: [["place", 0, 0], ["place", 0, 0.28], ["place", 0, 0.56], ["place", 0, 0.84]],
+    seconds: 2.6,
+    // Four placements at different radii. The disc is the keyboard, so this is
+    // what filling it in actually sounds like.
+    events: [
+      ["place", 0, 0, 5],
+      ["place", 0, 0.28, 3],
+      ["place", 0, 0.56, 4],
+      ["place", 0, 0.84, 1],
+    ],
   },
-  { name: "03-spoke", seconds: 1.6, events: [["spoke", 0, 0]] },
+  { name: "03-spoke", seconds: 2.0, events: [["spoke", 0, 0, 2]] },
   {
     name: "04-spoke-combo",
-    seconds: 3.4,
-    events: [0, 1, 2, 3, 4, 5].map((level) => ["spoke", level, level * 0.42]),
+    seconds: 4.0,
+    // A six-clear run. The combo walks up the scale, so this is a melody.
+    events: [0, 1, 2, 3, 4, 5].map((level) => ["spoke", level, level * 0.42, 0]),
   },
-  { name: "05-ring", seconds: 2.2, events: [["ring", 0, 0]] },
-  { name: "06-pure", seconds: 2.4, events: [["pure", 0, 0]] },
-  { name: "07-stripe", seconds: 2.0, events: [["stripe", 0, 0]] },
-  { name: "08-bullseye", seconds: 3.0, events: [["bullseye", 0, 0]] },
-  { name: "09-spin", seconds: 1.4, events: [["spin", 0, 0]] },
-  { name: "10-denied", seconds: 1.0, events: [["denied", 0, 0]] },
-  { name: "11-game-over", seconds: 3.0, events: [["gameOver", 0, 0]] },
+  { name: "05-ring", seconds: 3.0, events: [["ring", 0, 0, 2]] },
   {
-    name: "12-a-typical-turn",
-    seconds: 4.5,
+    name: "06-ring-inner-to-outer",
+    seconds: 4.2,
+    // The same clear on six different rings: inner is the smallest circle and
+    // rings highest, outer is the lowest.
+    events: [5, 4, 3, 2, 1, 0].map((degree, i) => ["ring", 0, i * 0.6, degree]),
+  },
+  { name: "07-pure", seconds: 3.4, events: [["pure", 0, 0, 2]] },
+  { name: "08-stripe", seconds: 2.6, events: [["stripe", 0, 0, 2]] },
+  { name: "09-bullseye", seconds: 4.0, events: [["bullseye", 0, 0, 0]] },
+  { name: "10-spin", seconds: 1.8, events: [["spin", 0, 0, 3]] },
+  { name: "11-denied", seconds: 1.2, events: [["denied", 0, 0, 0]] },
+  { name: "12-game-over", seconds: 4.0, events: [["gameOver", 0, 0, 0]] },
+  {
+    name: "13-a-typical-turn",
+    seconds: 5.5,
     // What a good minute of play actually sounds like, back to back.
     events: [
-      ["place", 0, 0],
-      ["place", 0, 0.5],
-      ["spoke", 0, 1.0],
-      ["place", 0, 1.6],
-      ["spin", 0, 2.1],
-      ["ring", 1, 2.5],
-      ["pure", 2, 3.1],
+      ["place", 0, 0, 4],
+      ["place", 0, 0.5, 2],
+      ["spoke", 0, 1.0, 3],
+      ["place", 0, 1.7, 5],
+      ["spin", 0, 2.2, 2],
+      ["ring", 1, 2.7, 4],
+      ["pure", 2, 3.4, 1],
     ],
   },
 ];
@@ -75,8 +89,8 @@ for (const take of TAKES) {
       const ctx = new OfflineAudioContext(2, Math.ceil(rate * take.seconds), rate);
       const bus = audio.createBus(ctx, ctx.destination);
 
-      for (const [sound, level, at] of take.events) {
-        audio.schedule(bus, sound, level, at);
+      for (const [sound, level, at, degree] of take.events) {
+        audio.schedule(bus, sound, level, at, degree ?? 0);
       }
 
       const buffer = await ctx.startRendering();

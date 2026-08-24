@@ -584,7 +584,7 @@ export class GameScreen {
       }
       const carry = pointer.delta - dir * width;
       this.effects.push(pushSettle(pointer.sector, carry));
-      playSound("spin");
+      playSound("spin", 0, pointer.sector);
       this.commit({ type: "push", sector: pointer.sector, dir: dir as SpinDirection }, null, null);
       return;
     }
@@ -600,7 +600,7 @@ export class GameScreen {
     // that sector and eases to zero — the ring appears to carry on turning.
     const carry = pointer.delta - dir * sectorAngle;
     this.effects.push(spinSettle(pointer.ring, carry));
-    playSound("spin");
+    playSound("spin", 0, this.state.spec.rings - 1 - pointer.ring);
     this.commit({ type: "spin", ring: pointer.ring, dir: dir as SpinDirection }, null, null);
     void event;
   });
@@ -691,13 +691,21 @@ export class GameScreen {
         this.effects.push(floatText(cx, cy - 40, t("stripe"), true));
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
         // A stripe tears across the board; it should not sound like a chime.
-        playSound("stripe");
+        playSound("stripe", events.combo, events.clears.rings[0] ?? events.clears.spokes[0] ?? 0);
       } else if (events.pureClears > 0) {
         this.effects.push(floatText(cx, cy - 40, t("pure"), true));
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
-        playSound("pure");
+        playSound("pure", events.combo, events.clears.spokes[0] ?? events.clears.rings[0] ?? 0);
       } else {
-        playSound(events.clears.rings.length > 0 ? "ring" : "spoke", events.combo);
+        // The pitch says where on the disc it happened. The inner ring is the
+        // smallest circle so it rings highest; spokes walk round the dial a
+        // scale degree at a time.
+        if (events.clears.rings.length > 0) {
+          const ring = events.clears.rings[0]!;
+          playSound("ring", events.combo, this.state.spec.rings - 1 - ring);
+        } else {
+          playSound("spoke", events.combo, events.clears.spokes[0] ?? 0);
+        }
       }
       this.effects.push(
         floatText(cx, cy, `+${events.scoreDelta}`, events.sweep || events.clears.rings.length > 0),
@@ -710,7 +718,7 @@ export class GameScreen {
       );
     } else if (move.type === "place") {
       this.options.haptic?.("light");
-      playSound("place");
+      playSound("place", 0, this.state.spec.rings - 1 - move.r);
     }
 
     if (events.spinsGained > 0 || events.pushesGained > 0) this.options.haptic?.("success");

@@ -59,7 +59,7 @@ change and has not been made; it is Marcus's call.
 | Balance | Measured with `npm run balance`. Free play does not reliably end — see below. |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
-| Particles and sound | Done. Sound is synthesised — no audio files, but layered rather than beeped. `npm run audio` renders every voice to WAV. |
+| Particles and sound | Done. Sound is one synthesised instrument, tuned to a D major pentatonic; pitch follows the disc. `npm run audio` renders every voice to WAV. |
 | Game Center | Native plugin written and committed. Needs two leaderboards created in App Store Connect. |
 | Share image | Done. The final disc renders to a 1080px card. |
 
@@ -108,6 +108,26 @@ disc, and the share button hands that PNG to the system share sheet through the
 Web Share API. WKWebView has supported sharing files that way since iOS 15, so
 no Filesystem plugin is needed. If the sheet refuses the image the code falls
 back to sharing text, then to the clipboard.
+
+## The sound, and what the music has to fit
+
+The whole palette is one made-up instrument — somewhere between a kalimba, a
+handpan and a glass bowl — built from struck partials rather than oscillators,
+so it reads as something being hit rather than switched on. There are no audio
+files; it is all synthesis, and `npm run audio` renders every voice to WAV in
+`tools/out/audio/` so it can be judged without a build.
+
+Two things matter for writing music against it:
+
+- **The scale is D major pentatonic** — D, E, F#, A, B, with D4 at 293.66 Hz.
+  Everything the game plays is quantised to it. A pentatonic has no semitone in
+  it, so nothing the player does can produce a clash, and anything written in D
+  will sit on top of it.
+- **Pitch comes from the board.** The inner ring is the smallest circle so it
+  rings highest, the outer ring lowest; spokes walk round the dial one scale
+  degree per sector. A combo walks up the scale, so a run of clears is a
+  melody. This is why the game sounds like itself: the disc is the keyboard,
+  and a square-grid game cannot do it.
 
 ## One native detail worth knowing: the silent switch
 
