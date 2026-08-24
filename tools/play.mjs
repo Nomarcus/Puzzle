@@ -521,6 +521,50 @@ check("and the result says time, not game over", ended.title === "Time!" || ende
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 
+// --- the core --------------------------------------------------------------
+// The hub charges from clears and sweeps the disc when tapped. The tap has to
+// be checked before the spin gesture, since the hub sits inside the disc.
+await page.evaluate(() => window.__shiftle.start("endless"));
+await page.waitForTimeout(400);
+
+const charged = await page.evaluate(async () => {
+  const api = window.__shiftle;
+  for (let i = 0; i < 500; i++) {
+    const state = api.state();
+    if (!state || state.over) break;
+    if (api.coreReady()) break;
+    if (!api.botMove()) break;
+  }
+  // The move that fills the core is often a big clear, which leaves nothing to
+  // sweep — the engine refuses to fire on an empty board rather than wasting
+  // the charge, so lay some pieces back down before firing.
+  for (let i = 0; i < 40 && api.filledCells() < 10; i++) {
+    if (!api.botMove()) break;
+    if (!api.coreReady()) break;
+  }
+  return { ready: api.coreReady(), charge: api.charge(), filled: api.filledCells() };
+});
+check("clearing charges the core until it is full", charged.ready === true, `charge ${charged.charge}`);
+check("and there is a board to sweep when it fires", charged.filled > 0, `${charged.filled} cells`);
+
+// Fired by tapping the middle of the disc, exactly as a player would.
+const swept = await page.evaluate(async () => {
+  const api = window.__shiftle;
+  const before = { score: api.state().score, filled: api.filledCells() };
+  api.tapCentre();
+  await new Promise((done) => setTimeout(done, 700));
+  return { before, after: { score: api.state().score, filled: api.filledCells(), charge: api.charge() } };
+});
+check("tapping the middle fires it and sweeps the disc",
+  swept.after.filled < swept.before.filled,
+  `${swept.before.filled} -> ${swept.after.filled} cells`);
+check("the sweep scores", swept.after.score > swept.before.score,
+  `+${swept.after.score - swept.before.score}`);
+check("and the core empties", swept.after.charge === 0);
+
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
 // --- the level grid --------------------------------------------------------
 // Quitting a level used to come back here without stopping the round, so the
 // abandoned board carried on animating behind a translucent list.

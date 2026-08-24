@@ -7,7 +7,8 @@
  */
 
 import { type GameState, createGame, depthOf, isGameOver } from "./engine/game.js";
-import { stoneCount } from "./engine/board.js";
+import { filledCount, stoneCount } from "./engine/board.js";
+import { coreReady } from "./engine/core.js";
 import { chooseMove } from "./engine/bot.js";
 import { applyMove } from "./engine/game.js";
 import { FREE_PLAY_RAMP } from "./engine/ramp.js";
@@ -572,6 +573,7 @@ function showHowTo(): void {
       ["◆", t("how5")],
       ["▣", t("how6")],
       ["⏱", t("how7")],
+      ["◉", t("how8")],
     ] as Array<[string, string]>
   ).forEach(
     ([num, text]) => {
@@ -1174,6 +1176,19 @@ if (import.meta.env.DEV) {
       const digits = shown.replace(/[^0-9]/g, "");
       return digits ? Number(digits) : null;
     },
+
+    /** The core, for the browser tests. */
+    charge: () => screen?.getState()?.charge ?? 0,
+    coreReady: () => {
+      const state = screen?.getState();
+      return state ? coreReady(state.core, state.charge) : false;
+    },
+    filledCells: () => {
+      const state = screen?.getState();
+      return state ? filledCount(state.board) : 0;
+    },
+    /** Taps the middle of the disc, the way a player fires the core. */
+    tapCentre: () => screen?.tapCentre() ?? false,
 
     /** The ramp, for the browser tests. */
     depth: () => {

@@ -19,6 +19,7 @@ import {
   slotPiece,
 } from "../engine/game.js";
 import { rampActive } from "../engine/ramp.js";
+import { coreFraction, coreReady } from "../engine/core.js";
 import { type ClockSpec, addTime, drainRate, timeBonus } from "../engine/timeattack.js";
 import type { Piece } from "../engine/pieces.js";
 import type { SpinDirection } from "../engine/rotate.js";
@@ -509,6 +510,22 @@ export class GameScreen {
     }
   }
 
+  /**
+   * Fires the core the way a tap in the middle does. Only the browser test
+   * uses it — synthesising a pointer event at the exact centre of a canvas is
+   * more fragile than asking the screen to do what that event would do.
+   */
+  tapCentre(): boolean {
+    if (!this.coreReadyNow()) return false;
+    this.commit({ type: "core" }, null, null);
+    return true;
+  }
+
+  /** Whether the hub is full and waiting to be tapped. */
+  private coreReadyNow(): boolean {
+    return !this.state.over && coreReady(this.state.core, this.state.charge);
+  }
+
   /** The board layout with any in-flight spin offset folded in. */
   private liveBoardLayout(): BoardLayout {
     let layout = this.layout.board;
@@ -591,6 +608,18 @@ export class GameScreen {
       this.canvas.setPointerCapture(event.pointerId);
     } catch {
       /* carry on without capture */
+    }
+
+    // A tap in the middle fires a full core. Checked before anything else,
+    // because the hub sits inside the disc and a gesture starting there would
+    // otherwise be read as a spin on the innermost ring.
+    if (this.coreReadyNow()) {
+      const board = this.liveBoardLayout();
+      const reach = board.innerRadius - board.pad;
+      if (Math.hypot(x - board.cx, y - board.cy) <= reach) {
+        this.commit({ type: "core" }, null, null);
+        return;
+      }
     }
 
     // A drag that starts in the tray is a placement...
@@ -867,6 +896,20 @@ export class GameScreen {
       }
     }
 
+    // The core.
+    if (events.coreFired) {
+      const { cx, cy } = this.layout.board;
+      playSound("coreFire", 2, 4);
+      this.effects.push(floatText(cx, cy - 40, t("coreFired"), true));
+      this.effects.push(shockwave(cx, cy, this.layout.boardRadius));
+      this.effects.push(shake());
+      this.options.haptic?.("heavy");
+    } else if (events.coreFilled) {
+      playSound("coreReady", 1, 3);
+      this.effects.push(shockwave(this.layout.board.cx, this.layout.board.cy, this.layout.board.innerRadius * 2.2));
+      this.options.haptic?.("success");
+    }
+
     // The ramp. All of it announces itself: stone lands where you can watch it
     // land and the depth says its own name. A game that gets harder quietly is
     // the thing this one is arguing against.
@@ -957,7 +1000,14 @@ export class GameScreen {
       }
 
       this.drawHeader(ctx);
-      drawBoard(ctx, this.state.board, board, this.theme);
+      drawBoard(
+        ctx,
+        this.state.board,
+        board,
+        this.theme,
+        coreFraction(this.state.core, this.state.charge),
+        this.clock,
+      );
 
       // Decoration, in its own pass. If any of it throws, the player still gets
       // a board and a tray they can act on.

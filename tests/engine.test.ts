@@ -38,6 +38,13 @@ import {
 } from "../src/engine/ramp.js";
 import { TIME_ATTACK, addTime, drainRate, timeBonus } from "../src/engine/timeattack.js";
 import {
+  DEFAULT_CORE,
+  NO_CORE,
+  chargeFrom,
+  coreActive,
+  coreReady,
+} from "../src/engine/core.js";
+import {
   CHALLENGE_PIECES,
   MAX_CODE_SCORE,
   decodeChallenge,
@@ -45,7 +52,7 @@ import {
   formatCode,
   newChallenge,
 } from "../src/engine/challenge.js";
-import { chooseMove, playOut } from "../src/engine/bot.js";
+import { BOT_POLICY_V2, chooseMove, playOut } from "../src/engine/bot.js";
 import { LEVELS, goalProgress, levelBoard, levelSeed } from "../src/engine/levels.js";
 import { PACKS, SIZES, bagFor, dailyVariant, sizeById } from "../src/engine/variants.js";
 import { pushSpoke, spinRing } from "../src/engine/rotate.js";
@@ -1161,6 +1168,137 @@ function firstPlacement(state: ReturnType<typeof createGame>) {
   }
   return null;
 }
+
+describe("the core", () => {
+  const spec = sizeById("standard").spec;
+
+  const fill = (n: number) => {
+    let state = createGame({ seed: 5, spec, core: DEFAULT_CORE });
+    return { ...state, charge: n };
+  };
+
+  it("is off unless a round asks for it", () => {
+    const bare = createGame({ seed: 1, spec, core: NO_CORE });
+    expect(coreActive(bare.core)).toBe(false);
+    expect(coreReady(bare.core, 999)).toBe(false);
+    expect(applyMove({ ...bare, charge: 999 }, { type: "core" })).toBe(null);
+  });
+
+  it("charges from clears and from nothing else", () => {
+    const none = { rings: [], spokes: [] };
+    expect(chargeFrom(DEFAULT_CORE, none, 0, 0, false)).toBe(0);
+
+    const spoke = chargeFrom(DEFAULT_CORE, { rings: [], spokes: [1] }, 0, 0, false);
+    const ring = chargeFrom(DEFAULT_CORE, { rings: [1], spokes: [] }, 0, 0, false);
+    expect(spoke).toBeGreaterThan(0);
+    expect(ring).toBeGreaterThan(spoke);
+    // A single-colour line pays on top of the line itself.
+    expect(chargeFrom(DEFAULT_CORE, { rings: [], spokes: [1] }, 1, 0, false)).toBeGreaterThan(spoke);
+  });
+
+  it("pays a sweep a fraction rather than a refill", () => {
+    // A full core for a bullseye would let one sweep chain straight into the
+    // next, which is the shape of every runaway mechanic.
+    const sweep = chargeFrom(DEFAULT_CORE, { rings: [1], spokes: [1] }, 0, 0, true);
+    expect(sweep).toBeLessThan(DEFAULT_CORE.capacity);
+  });
+
+  it("refuses to fire below full, and fires exactly at full", () => {
+    expect(applyMove(fill(DEFAULT_CORE.capacity - 1), { type: "core" })).toBe(null);
+
+    let ready = fill(DEFAULT_CORE.capacity);
+    // Something has to be on the board or there is nothing to sweep.
+    ready = applyMove(ready, { type: "place", slot: 0, r: 0, s: 0 })!.state;
+    const fired = applyMove({ ...ready, charge: DEFAULT_CORE.capacity }, { type: "core" });
+    expect(fired).not.toBe(null);
+    expect(fired!.events.coreFired).toBe(true);
+    expect(fired!.state.charge).toBe(0);
+    expect(filledCount(fired!.state.board)).toBe(0);
+  });
+
+  it("sweeps stone as well as blocks", () => {
+    // Stone is otherwise only shifted by a stripe or a bullseye, so the core
+    // being able to take it is most of what makes it worth holding deep in a
+    // ramped round.
+    let state = createGame({ seed: 9, spec, core: DEFAULT_CORE });
+    const board = state.board;
+    board.cells[cellIndex(spec, spec.rings - 1, 2)] = STONE;
+    board.cells[cellIndex(spec, 0, 0)] = 4;
+    state = { ...state, board, charge: DEFAULT_CORE.capacity };
+
+    const fired = applyMove(state, { type: "core" })!;
+    expect(stoneCount(fired.state.board)).toBe(0);
+    expect(filledCount(fired.state.board)).toBe(0);
+  });
+
+  it("never charges past its capacity", () => {
+    // A core that could overfill would let one huge move pay for the next.
+    let state = createGame({ seed: 11, spec, core: DEFAULT_CORE });
+    const result = playOut(state, 400, BOT_POLICY_V2);
+    expect(result.state.charge).toBeLessThanOrEqual(DEFAULT_CORE.capacity);
+  });
+
+  it("announces the move that fills it, once", () => {
+    let state = createGame({ seed: 3, spec, core: DEFAULT_CORE });
+    let fills = 0;
+    let sawReady = false;
+
+    for (let i = 0; i < 200 && !state.over; i++) {
+      const move = chooseMove(state, { pushes: true, colour: true, core: false });
+      if (!move) break;
+      const result = applyMove(state, move);
+      if (!result) break;
+      if (result.events.coreFilled) fills++;
+      state = result.state;
+      if (coreReady(state.core, state.charge)) {
+        // Once full it stays full until fired, and must not re-announce.
+        if (sawReady) expect(result.events.coreFilled).toBe(false);
+        sawReady = true;
+      } else {
+        sawReady = false;
+      }
+    }
+    expect(fills, "the core never filled in 200 moves").toBeGreaterThan(0);
+  });
+
+  /** Fires a core on a board filled to roughly this fraction. */
+  const fireOnBoard = (fraction: number): number => {
+    const state = createGame({ seed: 21, spec, core: DEFAULT_CORE });
+    const board = state.board;
+    const total = spec.rings * spec.sectors;
+    let placed = 0;
+    for (let r = 0; r < spec.rings && placed < total * fraction; r++) {
+      for (let sct = 0; sct < spec.sectors && placed < total * fraction; sct++) {
+        board.cells[cellIndex(spec, r, sct)] = 1 + ((r + sct) % 8);
+        placed++;
+      }
+    }
+    const fired = applyMove({ ...state, board, charge: DEFAULT_CORE.capacity }, { type: "core" });
+    return fired?.events.scoreDelta ?? 0;
+  };
+
+  it("pays for what it sweeps, so a fuller board is worth more", () => {
+    // The whole decision the core exists to create: hold it while the disc
+    // fills, cash it before it strangles you. If firing early paid the same,
+    // there would be nothing to decide.
+    const quarter = fireOnBoard(0.25);
+    const half = fireOnBoard(0.5);
+    const packed = fireOnBoard(1);
+
+    expect(quarter).toBeGreaterThan(0);
+    expect(half).toBeGreaterThan(quarter * 1.6);
+    expect(packed).toBeGreaterThan(half * 1.6);
+  });
+
+  it("is worth less than a bullseye even on a full board", () => {
+    // Scoring it through clearScore paid it 33,660 on a standard disc — three
+    // times a bullseye — because every ring and spoke counted as a
+    // simultaneous line. A move that needs no setup must not out-earn the one
+    // that needs the most.
+    const bullseye = clearScore({ rings: [0], spokes: [0] }, 0, false, 0, true);
+    expect(fireOnBoard(1)).toBeLessThan(bullseye);
+  });
+});
 
 describe("time attack", () => {
   const noClears = {

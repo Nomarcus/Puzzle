@@ -354,17 +354,100 @@ export function drawPlate(ctx: CanvasRenderingContext2D, layout: BoardLayout, th
   ctx.stroke();
 }
 
-export function drawHub(ctx: CanvasRenderingContext2D, layout: BoardLayout, theme: Theme): void {
+/**
+ * The hub, and the charge it holds.
+ *
+ * Drawn as a level rising in a well rather than as a ring or an arc, because a
+ * filling vessel needs no legend — everyone has watched a glass fill. The
+ * surface catches a highlight and wobbles slightly so it reads as liquid and
+ * not as a bar chart, and once it is full the whole thing pulses and gains a
+ * ring of light, which is the only invitation to tap it anybody needs.
+ *
+ * `charge` is 0 to 1. `clock` is seconds since the screen opened, for the
+ * wobble and the pulse.
+ */
+export function drawHub(
+  ctx: CanvasRenderingContext2D,
+  layout: BoardLayout,
+  theme: Theme,
+  charge = 0,
+  clock = 0,
+): void {
   const radius = layout.innerRadius - layout.pad * 2;
   if (radius <= 0) return;
 
-  ctx.beginPath();
-  ctx.arc(layout.cx, layout.cy, radius, 0, Math.PI * 2);
-  ctx.fillStyle = theme.empty;
-  ctx.fill();
-  ctx.strokeStyle = theme.emptyEdge;
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  const full = charge >= 1;
+  const beat = full ? 1 + Math.sin(clock * 6) * 0.05 : 1;
+
+  ctx.save();
+  try {
+    ctx.translate(layout.cx, layout.cy);
+    ctx.scale(beat, beat);
+
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fillStyle = theme.empty;
+    ctx.fill();
+
+    if (charge > 0) {
+      ctx.save();
+      try {
+        // Clipped to the well, so the surface can be drawn as a simple shape
+        // and still come out as a disc segment.
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.clip();
+
+        const level = radius - charge * radius * 2;
+        const wobble = full ? 0 : Math.sin(clock * 2.2) * radius * 0.035;
+
+        ctx.beginPath();
+        ctx.moveTo(-radius, radius);
+        ctx.lineTo(-radius, level + wobble);
+        // Two arcs the opposite way round make the meniscus, which is most of
+        // what stops this reading as a progress bar in a circle.
+        ctx.quadraticCurveTo(-radius / 2, level - wobble, 0, level);
+        ctx.quadraticCurveTo(radius / 2, level + wobble, radius, level - wobble);
+        ctx.lineTo(radius, radius);
+        ctx.closePath();
+
+        const fill = ctx.createLinearGradient(0, level, 0, radius);
+        fill.addColorStop(0, full ? "#FFDC4D" : theme.charge.light);
+        fill.addColorStop(1, full ? "#FF7A00" : theme.charge.base);
+        ctx.fillStyle = fill;
+        ctx.fill();
+
+        // A brighter lip along the surface.
+        ctx.strokeStyle = full ? "#FFFFFF" : theme.charge.light;
+        ctx.lineWidth = Math.max(1.5, radius * 0.07);
+        ctx.beginPath();
+        ctx.moveTo(-radius, level + wobble);
+        ctx.quadraticCurveTo(-radius / 2, level - wobble, 0, level);
+        ctx.quadraticCurveTo(radius / 2, level + wobble, radius, level - wobble);
+        ctx.stroke();
+      } finally {
+        ctx.restore();
+      }
+    }
+
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = full ? "#FFC400" : theme.emptyEdge;
+    ctx.lineWidth = full ? 4 : 2;
+    ctx.stroke();
+
+    if (full) {
+      // A halo, so a full core is unmistakable at a glance across the disc.
+      ctx.globalAlpha = 0.35 + Math.sin(clock * 6) * 0.18;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius + 6, 0, Math.PI * 2);
+      ctx.strokeStyle = "#FFDC4D";
+      ctx.lineWidth = 5;
+      ctx.stroke();
+    }
+  } finally {
+    ctx.restore();
+  }
 }
 
 export function drawBoard(
@@ -372,6 +455,8 @@ export function drawBoard(
   board: Board,
   layout: BoardLayout,
   theme: Theme,
+  charge = 0,
+  clock = 0,
 ): void {
   drawPlate(ctx, layout, theme);
 
@@ -385,7 +470,7 @@ export function drawBoard(
     }
   }
 
-  drawHub(ctx, layout, theme);
+  drawHub(ctx, layout, theme, charge, clock);
 }
 
 /** Translucent preview of where the dragged piece would land. */

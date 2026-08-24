@@ -22,6 +22,7 @@
     "endless": "vite-node tools/endless.ts",
     "levels": "vite-node tools/levels.ts",
     "ramp": "vite-node tools/ramp.ts",
+    "core": "vite-node tools/core.ts",
     "verify:ios": "node tools/verify-ios.mjs",
     "audio": "node tools/audio-preview.mjs"
   },

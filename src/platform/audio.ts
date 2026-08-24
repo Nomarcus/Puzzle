@@ -62,7 +62,11 @@ export type Sound =
   /** The countdown, in the last seconds of a timed round. */
   | "tick"
   /** Seconds bought back by a clear. */
-  | "gainTime";
+  | "gainTime"
+  /** The hub reaching full charge. */
+  | "coreReady"
+  /** The hub going off. The biggest thing the chip does. */
+  | "coreFire";
 
 // -------------------------------------------------------------------- scale
 
@@ -465,6 +469,11 @@ const TRIM: Record<Sound, number> = {
   // cut through it.
   tick: 0.1,
   gainTime: 0.085,
+  // The core is the loudest thing in the game, above even the bonus signature,
+  // because it is the rarest and the biggest. Set against the same
+  // loudest-300ms measurement as everything else.
+  coreReady: 0.115,
+  coreFire: 0.2,
 };
 
 export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): void {
@@ -495,6 +504,66 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
       const shade = at % 5;
       noise(bus, when, { peak: 0.34, decay: 0.028, rate: 1.35 + shade * 0.11, curve: 2.8 });
       tri(bus, when, { freq: 88 + shade * 6, peak: 0.72, decay: 0.085 });
+      break;
+    }
+
+    case "coreReady": {
+      // The hub filling. A rising arpeggio that resolves upward and *stays*
+      // there, ringing, rather than decaying like every other cue — a sound
+      // that has not finished is what makes a player look for the thing that
+      // is now waiting for them.
+      pulse(bus, when, {
+        freq: note(degree),
+        duty: 0.25,
+        peak: 0.4,
+        decay: 0.28,
+        arp: [0, 4, 7, 12],
+        arpRate: 2,
+        send: 0.45,
+      });
+      pulse(bus, when, {
+        at: 0.24,
+        freq: note(degree + 12),
+        duty: 0.125,
+        peak: 0.36,
+        decay: 0.75,
+        vibrato: 26,
+        send: 0.6,
+      });
+      tri(bus, when, { at: 0.24, freq: note(degree - 5), peak: 0.9, decay: 0.7, sub: 2 });
+      break;
+    }
+
+    case "coreFire": {
+      // The disc going up. A downward noise sweep for the detonation, then the
+      // whole scale flung upward on both pulse channels over a bass that bends
+      // up under it — the one cue allowed to be longer than the animation.
+      noise(bus, when, { peak: 0.85, decay: 0.34, rate: 3.6, rateTo: 0.28, curve: 1.6, send: 0.4 });
+      noise(bus, when, { at: 0.02, peak: 0.4, decay: 0.12, rate: 1.4, short: true });
+
+      [0, 2, 4, 5, 7].forEach((step, i) => {
+        pulse(bus, when, {
+          at: 0.06 + i * 0.045,
+          freq: note(degree + step),
+          duty: 0.25,
+          peak: 0.42,
+          decay: 0.1,
+          curve: 1,
+          send: 0.35,
+        });
+      });
+      pulse(bus, when, {
+        at: 0.29,
+        freq: note(degree + 9),
+        duty: 0.5,
+        peak: 0.46,
+        decay: 0.6,
+        arp: [0, 4, 7],
+        arpRate: 2,
+        vibrato: 20,
+        send: 0.55,
+      });
+      tri(bus, when, { freq: note(degree - 17), peak: 1.1, decay: 0.75, bend: 7, sub: 2.4 });
       break;
     }
 

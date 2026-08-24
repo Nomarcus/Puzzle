@@ -38,9 +38,10 @@ import {
   rampedWeights,
   stoneDue,
 } from "./ramp.js";
+import { type CoreSpec, DEFAULT_CORE, chargeFrom, coreReady } from "./core.js";
 import { nextInt, nextRandom } from "./rng.js";
 import { type SpinDirection, pushSpoke, spinRing } from "./rotate.js";
-import { clearScore, placementScore } from "./scoring.js";
+import { clearScore, comboMultiplier, placementScore } from "./scoring.js";
 
 export const RULES = {
   traySize: 3,
@@ -103,7 +104,9 @@ export interface TraySlot {
 export type Move =
   | { readonly type: "place"; readonly slot: number; readonly r: number; readonly s: number }
   | { readonly type: "spin"; readonly ring: number; readonly dir: SpinDirection }
-  | { readonly type: "push"; readonly sector: number; readonly dir: SpinDirection };
+  | { readonly type: "push"; readonly sector: number; readonly dir: SpinDirection }
+  /** Fire a full core: sweeps the disc. Legal only when the charge is full. */
+  | { readonly type: "core" };
 
 export interface GameStats {
   piecesPlaced: number;
@@ -117,6 +120,7 @@ export interface GameStats {
   bullseyes: number;
   bestCombo: number;
   bestClear: number;
+  coresFired: number;
 }
 
 export interface GameState {
@@ -131,6 +135,8 @@ export interface GameState {
    * levels, both of which must stay the same puzzle for everybody.
    */
   readonly ramp: RampSpec;
+  /** How the hub charges, and what it costs to fire. */
+  readonly core: CoreSpec;
   /** Whether the deal avoids handing out pieces with nowhere to go. */
   readonly fairDeal: boolean;
   readonly board: Board;
@@ -142,6 +148,8 @@ export interface GameState {
   readonly spins: number;
   readonly pushes: number;
   readonly clearsTowardSpin: number;
+  /** What the hub holds. Clamped at the core's capacity. */
+  readonly charge: number;
   readonly over: boolean;
   readonly stats: Readonly<GameStats>;
   readonly moves: readonly Move[];
@@ -171,6 +179,12 @@ export interface MoveEvents {
   readonly stoneDropped: Cell | null;
   /** Set on the move that takes the round one depth deeper. */
   readonly depthReached: number | null;
+  /** Charge this move fed the hub. */
+  readonly chargeGained: number;
+  /** True on the move that filled the core, so the screen can announce it. */
+  readonly coreFilled: boolean;
+  /** True on the move that was the core going off. */
+  readonly coreFired: boolean;
 }
 
 export interface MoveResult {
@@ -191,6 +205,7 @@ function emptyStats(): GameStats {
     bullseyes: 0,
     bestCombo: 0,
     bestClear: 0,
+    coresFired: 0,
   };
 }
 
@@ -293,6 +308,7 @@ export function createGame(options: {
    */
   board?: Board;
   ramp?: RampSpec;
+  core?: CoreSpec;
 }): GameState {
   const spec = options.spec ?? DEFAULT_SPEC;
   const pack = options.pack ?? DEFAULT_PACK;
@@ -302,6 +318,7 @@ export function createGame(options: {
   // Never on by default. The daily and the levels are the same puzzle for
   // everybody, and a ramp would make two players' boards diverge.
   const ramp = options.ramp ?? NO_RAMP;
+  const core = options.core ?? DEFAULT_CORE;
   // The daily must deal the same pieces to everyone, so it never adapts.
   // A level deals from a fixed sequence for the same reason the daily does:
   // it is the same puzzle for everybody, so the deal must not adapt to how
@@ -323,6 +340,7 @@ export function createGame(options: {
     spokeClears,
     rules,
     ramp,
+    core,
     fairDeal,
     board,
     tray,
@@ -332,6 +350,7 @@ export function createGame(options: {
     spins: rules.startingSpins,
     pushes: 0,
     clearsTowardSpin: 0,
+    charge: 0,
     over: false,
     stats: emptyStats(),
     moves: [],
@@ -479,8 +498,89 @@ export function applyMove(state: GameState, move: Move): MoveResult | null {
   if (state.over) return null;
   if (move.type === "place") return applyPlace(state, move);
   if (move.type === "spin") return applySpin(state, move);
+  if (move.type === "core") return applyCore(state);
   return applyPush(state, move);
 }
+
+/**
+ * Firing the core. Sweeps the disc — every block and every stone — and empties
+ * the hub.
+ *
+ * It does not end the round and it does not cost a spin: the charge was the
+ * cost, and it was paid over the twenty or so lines it took to fill. It scores
+ * as a sweep, which is what makes holding a full core on a filling board the
+ * decision the mechanic is actually about.
+ */
+function applyCore(state: GameState): MoveResult | null {
+  if (!coreReady(state.core, state.charge)) return null;
+
+  const everything: Clears = {
+    rings: Array.from({ length: state.spec.rings }, (_, r) => r),
+    spokes: Array.from({ length: state.spec.sectors }, (_, s) => s),
+  };
+  const cleared = applyClears(state.board, everything, true);
+  if (cleared.cells.length === 0) return null;
+
+  // Paid per cell swept, not per line.
+  //
+  // Running it through clearScore was measurably wrong: every ring and every
+  // spoke counts as a simultaneous line, so a standard disc handed the core a
+  // 16-line multiplier and 33,660 points — three times a bullseye, for a move
+  // that needs no setup at all. Per cell is both fairer and truer to what the
+  // move is: it pays for exactly as much board as it took, so holding a full
+  // core while the disc fills is worth real points, and firing it on an empty
+  // board is worth almost none. That is the whole decision the mechanic exists
+  // to create, and now the scoring states it.
+  const gained = Math.round(
+    cleared.cells.length * state.core.perCellScore * comboMultiplier(state.combo),
+  );
+
+  const board = cleared.board;
+  const over = isGameOver(board, state.tray, state.spins, state.pushes);
+
+  return {
+    state: {
+      ...state,
+      board,
+      score: state.score + gained,
+      // A core is not a clearing *turn* — it is the cashing-in of the ones
+      // already made — so it neither extends a combo nor breaks one.
+      charge: 0,
+      over,
+      stats: {
+        ...state.stats,
+        coresFired: state.stats.coresFired + 1,
+        bestClear: Math.max(state.stats.bestClear, gained),
+      },
+      moves: [...state.moves, { type: "core" }],
+    },
+    events: {
+      kind: "place",
+      placedCells: [],
+      colour: 0,
+      spin: null,
+      clears: everything,
+      clearedCells: cleared.cells,
+      scoreDelta: gained,
+      combo: state.combo,
+      spinsGained: 0,
+      pushesGained: 0,
+      pureClears: 0,
+      bullseye: false,
+      stripesFired: 0,
+      sweep: true,
+      trayRefilled: false,
+      gameOver: over,
+      stoneDropped: null,
+      depthReached: null,
+      chargeGained: 0,
+      coreFilled: false,
+      coreFired: true,
+    },
+  };
+}
+
+
 
 function applyPlace(
   state: GameState,
@@ -507,6 +607,13 @@ function applyPlace(
     ? grantSpins(rules, state.spins, state.clearsTowardSpin, clears)
     : [state.spins, state.clearsTowardSpin, 0];
   const [pushes, pushesGained] = grantPushes(rules, state.pushes, pure, sweep);
+
+  // The hub takes a cut of every clear. Clamped rather than banked: a core
+  // that could overfill would let one huge move pay for the next one too.
+  const chargeGained = chargeFrom(state.core, clears, pure, stripes, sweep);
+  const charge = Math.min(state.core.capacity, state.charge + chargeGained);
+  const coreFilled = !coreReady(state.core, state.charge) && coreReady(state.core, charge);
+
 
   const piecesPlaced = state.stats.piecesPlaced + 1;
   let rngState = state.rngState;
@@ -571,6 +678,7 @@ function applyPlace(
       spins,
       pushes,
       clearsTowardSpin,
+      charge,
       over,
       stats,
       moves: [...state.moves, move],
@@ -594,6 +702,9 @@ function applyPlace(
       gameOver: over,
       stoneDropped,
       depthReached: depth > depthAt(state.ramp, state.stats.piecesPlaced) ? depth : null,
+      chargeGained,
+      coreFilled,
+      coreFired: false,
     },
   };
 }
@@ -619,6 +730,13 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
     : [spentSpins, state.clearsTowardSpin, 0];
   const [pushes, pushesGained] = grantPushes(rules, state.pushes, pure, sweep);
 
+  // The hub takes a cut of every clear. Clamped rather than banked: a core
+  // that could overfill would let one huge move pay for the next one too.
+  const chargeGained = chargeFrom(state.core, clears, pure, stripes, sweep);
+  const charge = Math.min(state.core.capacity, state.charge + chargeGained);
+  const coreFilled = !coreReady(state.core, state.charge) && coreReady(state.core, charge);
+
+
   const stats: GameStats = {
     ...state.stats,
     ringsCleared: state.stats.ringsCleared + clears.rings.length,
@@ -642,6 +760,7 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
       spins,
       pushes,
       clearsTowardSpin,
+      charge,
       over,
       stats,
       moves: [...state.moves, move],
@@ -665,6 +784,9 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
       gameOver: over,
       stoneDropped: null,
       depthReached: null,
+      chargeGained,
+      coreFilled,
+      coreFired: false,
     },
   };
 }
@@ -693,6 +815,13 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
     : [state.spins, state.clearsTowardSpin, 0];
   const [pushes, pushesGained] = grantPushes(rules, state.pushes - 1, pure, sweep);
 
+  // The hub takes a cut of every clear. Clamped rather than banked: a core
+  // that could overfill would let one huge move pay for the next one too.
+  const chargeGained = chargeFrom(state.core, clears, pure, stripes, sweep);
+  const charge = Math.min(state.core.capacity, state.charge + chargeGained);
+  const coreFilled = !coreReady(state.core, state.charge) && coreReady(state.core, charge);
+
+
   const stats: GameStats = {
     ...state.stats,
     ringsCleared: state.stats.ringsCleared + clears.rings.length,
@@ -716,6 +845,7 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
       spins,
       pushes,
       clearsTowardSpin,
+      charge,
       over,
       stats,
       moves: [...state.moves, move],
@@ -739,6 +869,9 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
       gameOver: over,
       stoneDropped: null,
       depthReached: null,
+      chargeGained,
+      coreFilled,
+      coreFired: false,
     },
   };
 }

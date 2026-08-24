@@ -15,7 +15,7 @@
 
 import { createGame } from "../src/engine/game.js";
 import { type RampSpec, FREE_PLAY_RAMP, NO_RAMP, depthAt } from "../src/engine/ramp.js";
-import { playOut } from "../src/engine/bot.js";
+import { BOT_POLICY_V2, playOut } from "../src/engine/bot.js";
 import { stoneCount } from "../src/engine/board.js";
 import { PACKS, SIZES, sizeById } from "../src/engine/variants.js";
 import { hashSeed } from "../src/engine/rng.js";
@@ -31,6 +31,7 @@ interface Outcome {
   readonly scores: number[];
   readonly depths: number[];
   readonly stone: number[];
+  readonly cores: number[];
   readonly unfinished: number;
   readonly stalled: number;
 }
@@ -46,6 +47,7 @@ function measure(size: string, pack: string, ramp: RampSpec, runs = RUNS): Outco
   const scores: number[] = [];
   const depths: number[] = [];
   const stone: number[] = [];
+  const cores: number[] = [];
   let unfinished = 0;
   let stalled = 0;
 
@@ -57,7 +59,7 @@ function measure(size: string, pack: string, ramp: RampSpec, runs = RUNS): Outco
       pack: pack as never,
       ramp,
     });
-    const result = playOut(game, CEILING);
+    const result = playOut(game, CEILING, BOT_POLICY_V2);
     if (result.stalled) stalled++;
     if (!result.state.over) unfinished++;
 
@@ -65,19 +67,21 @@ function measure(size: string, pack: string, ramp: RampSpec, runs = RUNS): Outco
     scores.push(result.state.score);
     depths.push(depthAt(ramp, result.state.stats.piecesPlaced));
     stone.push(stoneCount(result.state.board));
+    cores.push(result.state.stats.coresFired);
   }
 
   pieces.sort((a, b) => a - b);
   scores.sort((a, b) => a - b);
   depths.sort((a, b) => a - b);
   stone.sort((a, b) => a - b);
-  return { pieces, scores, depths, stone, unfinished, stalled };
+  cores.sort((a, b) => a - b);
+  return { pieces, scores, depths, stone, cores, unfinished, stalled };
 }
 
 function report(): void {
   console.log(`\nShiftle free play — ${RUNS} bot runs per setup, ceiling ${CEILING} pieces\n`);
   console.log(
-    "disc      pack    ramp   ends   pieces p10/p50/p90        score p10/p50/p90            depth  stone",
+    "disc      pack    ramp   ends   pieces p10/p50/p90        score p10/p50/p90            depth  stone  cores",
   );
   console.log("-".repeat(112));
 
@@ -99,7 +103,8 @@ function report(): void {
             p(o.pieces).padStart(22) +
             p(o.scores).padStart(28) +
             String(percentile(o.depths, 0.5)).padStart(7) +
-            String(percentile(o.stone, 0.5)).padStart(7),
+            String(percentile(o.stone, 0.5)).padStart(7) +
+            String(percentile(o.cores, 0.5)).padStart(7),
         );
       }
     }

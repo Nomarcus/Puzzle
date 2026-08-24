@@ -98,6 +98,45 @@ everybody, so a ramp reacting to how far you got would make two players' boards
 diverge. `createGame` defaults to no ramp; free play is the only caller that
 passes one.
 
+## The core
+
+The hub in the middle was a hole the rings were drawn around. It is now the
+game's battery, and it is the thing the whole board points at.
+
+Every cleared line feeds it — a spoke 1, a ring 3, a single-colour line 2 more,
+a striped block 2. At **34** it fills, glows and pulses. **Tap it** and the
+whole disc is swept: every block, and every stone the free-play ramp has
+crusted the rim with, which is the only reliable answer to a stoned board.
+
+What makes it more than a bomb is *when* you fire it. It pays **per cell it
+takes**, so a full core is worth more the longer you hold it, and holding it
+means playing on a board you are deliberately letting fill. That is the whole
+decision, it needs no explanation, and it is the same decision at every level
+of play.
+
+### Two corrections from measurement
+
+**Scoring it as a clear paid it three times a bullseye.** Running a sweep
+through `clearScore` counts every ring and every spoke as a simultaneous line,
+so a standard disc handed the core a sixteen-line multiplier — 33,660 points
+for a move that needs no setup. It now pays per cell swept, which is both fairer
+and truer to what the move is.
+
+**A generous core flattened the leaderboard.** At capacity 12 it fired every
+forty pieces and free play's score spread collapsed from four- to eightfold down
+to **1.5x** — everybody fires roughly the same number of cores, so everybody
+scores roughly the same. A mechanic that homogenises outcomes is worse than no
+mechanic on a game whose point is a leaderboard.
+
+At capacity 34 it fires about every eighty pieces, and the spread comes back to
+**5.6x — wider than with no core at all (3.7x)**, because a core you only get a
+few times is worth holding for a packed board, and knowing when to do that is a
+real difference between players. `npm run core` is the tool.
+
+Rounds are longer with it: free play's bot median went from about 230 pieces to
+330. Worth watching, but the spread is what the leaderboard needs and the spread
+improved.
+
 ## Time attack
 
 The other modes run out of space; this one runs out of time, and it is the most
@@ -285,10 +324,11 @@ Game Center boards stay for the daily and free play.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 101 unit tests. |
+| Game engine | Done. Pure, deterministic, 110 unit tests. |
 | Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
 | Time attack | Done. Clock tuned against five modelled standards of play. |
+| The core | Done. Charge, tap-to-sweep, tuned with `npm run core`. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |

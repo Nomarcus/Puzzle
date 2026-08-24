@@ -45,6 +45,8 @@ const TABLE = {
   goalBullseye: { sv: "Landa en fullträff", en: "Land a bullseye" },
   goalCombo: { sv: "Nå kombo x%n", en: "Reach a combo of %n" },
   depth: { sv: "DJUP", en: "DEPTH" },
+  coreFired: { sv: "KÄRNAN!", en: "CORE!" },
+  coreReadyHint: { sv: "Tryck i mitten", en: "Tap the middle" },
   time: { sv: "TID", en: "TIME" },
   timeAttack: { sv: "Mot klockan", en: "Time attack" },
   timeBlurb: {
@@ -129,6 +131,10 @@ const TABLE = {
   how7: {
     sv: "Mot klockan är kort och stressigt. Klockan går hela tiden och går snabbare ju längre du håller dig kvar — bara rensningar ger sekunder tillbaka.",
     en: "Time attack is short and stressful. The clock is always running and runs faster the longer you last — only clears buy seconds back.",
+  },
+  how8: {
+    sv: "Varje rensning fyller kärnan i mitten. När den är full — tryck på den, så sopas hela skivan. Ju fullare bräde, desto mer ger den.",
+    en: "Every clear fills the core in the middle. When it is full, tap it and the whole disc is swept. The fuller the board, the more it pays.",
   },
   gotIt: { sv: "Kör!", en: "Got it!" },
   how: { sv: "Så spelar du", en: "How to play" },

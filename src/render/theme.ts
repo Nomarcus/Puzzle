@@ -35,6 +35,8 @@ export interface Theme {
   readonly muted: BlockColour;
   /** Index 0 is unused — colour ids start at 1 to keep 0 meaning "empty". */
   readonly blocks: readonly BlockColour[];
+  /** What the core fills with. Warm, so a full hub reads as heat. */
+  readonly charge: BlockColour;
   /** The ramp's blockage. Deliberately outside the candy palette. */
   readonly stone: BlockColour;
 }
@@ -66,6 +68,11 @@ const CANDY_BLOCKS: readonly BlockColour[] = [
  * from the eight colours that carry meaning.
  */
 const STONE = candy("#94A0AC", "#BAC4CE", "#6E7A87");
+/**
+ * The core's charge. Orange rather than one of the eight block colours: the
+ * hub is not a cell and must never look like one that happens to be full.
+ */
+const CHARGE = candy("#FF9A2E", "#FFC46B", "#E06A00");
 
 /** Bright sky. Reads instantly as a mobile puzzle game. */
 export const SKY: Theme = {
@@ -81,6 +88,7 @@ export const SKY: Theme = {
   text: "#12384F",
   textSoft: "#5B8AA6",
   blocks: CANDY_BLOCKS,
+  charge: CHARGE,
   stone: STONE,
 };
 
@@ -98,6 +106,7 @@ export const CREAM: Theme = {
   text: "#5A3B14",
   textSoft: "#A5824F",
   blocks: CANDY_BLOCKS,
+  charge: CHARGE,
   stone: STONE,
 };
 
@@ -115,6 +124,7 @@ export const MINT: Theme = {
   text: "#14513A",
   textSoft: "#579B7C",
   blocks: CANDY_BLOCKS,
+  charge: CHARGE,
   stone: STONE,
 };
 

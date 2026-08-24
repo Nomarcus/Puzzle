@@ -11,9 +11,11 @@
  * want: if the bot can survive a board, a person certainly can.
  */
 
+import { coreReady } from "./core.js";
 import {
   type Board,
   applyClears,
+  filledCount,
   canPlace,
   detonate,
   findClears,
@@ -54,9 +56,21 @@ export interface BotPolicy {
   readonly pushes: boolean;
   /** Value single-colour lines and detonations, rather than only counting lines. */
   readonly colour: boolean;
+  /**
+   * Fire a full core. Off in V1 so the daily's vetting is unchanged by the
+   * core existing at all — see DAILY_BOT_POLICY in daily.ts for why that
+   * matters.
+   */
+  readonly core: boolean;
 }
 
-export const BOT_POLICY_V1: BotPolicy = { pushes: true, colour: true };
+export const BOT_POLICY_V1: BotPolicy = { pushes: true, colour: true, core: false };
+
+/**
+ * The bot as it plays now, core included. Used for balance work, never for
+ * vetting the daily.
+ */
+export const BOT_POLICY_V2: BotPolicy = { pushes: true, colour: true, core: true };
 
 function lineValue(filled: number, length: number): number {
   const fraction = filled / length;
@@ -188,6 +202,16 @@ export function chooseMove(state: GameState, policy: BotPolicy = BOT_POLICY_V1):
         }
       }
     }
+  }
+
+  // A full core on a board this crowded is worth more than any placement: it
+  // takes the whole disc. The bot fires at three-quarters full-ish boards,
+  // which is a crude version of the decision a person makes — hold it while
+  // the board is still growing, cash it before it strangles you.
+  if (policy.core && coreReady(state.core, state.charge)) {
+    const filled = filledCount(state.board);
+    const capacity = state.spec.rings * state.spec.sectors;
+    if (filled / capacity >= 0.55 || !best) return { type: "core" };
   }
 
   if (best) return best;
