@@ -360,7 +360,7 @@ function noise(bus: Bus, when: number, options: NoiseOptions): void {
 const TRIM: Record<Sound, number> = {
   start: 0.62,
   bonus: 0.72,
-  place: 1.91,
+  place: 0.72,
   spoke: 0.45,
   stripe: 0.378,
   pure: 0.45,
@@ -384,17 +384,20 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
 
   switch (sound) {
     case "place": {
-      // A blip. Thin duty, a fast drop, gone in a few frames — the sound of
-      // something being put down in every game of the era.
-      pulse(bus, when, {
-        freq: note(at - 3),
-        duty: 0.125,
-        peak: 0.5,
-        decay: 0.07,
-        bend: -4,
-        curve: 1.2,
-      });
-      noise(bus, when, { peak: 0.16, decay: 0.035, rate: 2.6, curve: 2.4 });
+      // The sound heard most, so the only one that has to survive its own
+      // hundredth repeat. It used to be a 12.5% pulse with a bend on it: the
+      // thin nasal lead, playing a different note every time, sliding as it
+      // went. Fine once, exhausting over a round — a gesture where a tick was
+      // wanted.
+      //
+      // No pulse channel at all now. A dull noise tick and a short low knock:
+      // an event, not a note. The ring still colours it, but as brightness
+      // rather than melody — the inner rings tick a shade sharper, the outer
+      // duller. Enough that a run of placements is not a metronome, far too
+      // little to sing.
+      const shade = at % 5;
+      noise(bus, when, { peak: 0.34, decay: 0.028, rate: 1.35 + shade * 0.11, curve: 2.8 });
+      tri(bus, when, { freq: 104 + shade * 7, peak: 0.42, decay: 0.042 });
       break;
     }
 

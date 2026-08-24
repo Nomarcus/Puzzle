@@ -26,15 +26,10 @@ const TAKES = [
   { name: "02-place", seconds: 1.6, events: [["place", 0, 0, 3]] },
   {
     name: "03-place-run",
-    seconds: 2.6,
-    // Four placements at different radii. The disc is the keyboard, so this is
-    // what filling it in actually sounds like.
-    events: [
-      ["place", 0, 0, 5],
-      ["place", 0, 0.28, 3],
-      ["place", 0, 0.56, 4],
-      ["place", 0, 0.84, 1],
-    ],
+    seconds: 4.0,
+    // Eight in a row at the pace someone actually plays. This is the take that
+    // matters: a placement sound is judged by the hundredth one, not the first.
+    events: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ["place", 0, i * 0.42, [5, 3, 4, 1, 2, 5, 0, 3][i]]),
   },
   { name: "04-spoke", seconds: 2.0, events: [["spoke", 0, 0, 2]] },
   {
