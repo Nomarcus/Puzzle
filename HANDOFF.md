@@ -27,7 +27,8 @@ ends only when nothing fits *and* neither power remains.
 Four modes on the menu. **Daily** derives its board, piece pack and sequence
 from the UTC date so every player in the world gets the identical puzzle,
 rationed to 60 pieces, one attempt per day. **Levels** is twenty hand-built
-puzzles, each a fixed board, a fixed goal and a fixed number of pieces. **Free
+puzzles in two sets of twenty, each a fixed board, a fixed goal and a fixed
+number of pieces. **Free
 play** is the high-score chase; it gets harder the longer it lasts and every
 round ends. **Time attack** is the short, stressful one — the clock never stops
 and only clearing lines buys seconds back. All four are described below.
@@ -270,7 +271,7 @@ Details worth knowing:
   and an apple-app-site-association file behind it. Worth doing later if Shiftle
   gets a domain.
 
-## The twenty levels
+## The forty levels
 
 Free play and the daily are both the same game with the difficulty left to
 chance. Levels are the opposite: a fixed board, a fixed goal and a fixed number
@@ -336,6 +337,38 @@ room rather than out of pieces. That is the one loss that teaches nothing, and
 it is what re-shaped two levels — the `checker` pattern was originally on every
 other sector and strangled half of all runs, and level 20 opens with three spins
 in hand for the same reason.
+
+### The second twenty
+
+Levels 1–20 teach the board. Levels 21–40 teach what is built on top of it, and
+they are longer and less forgiving.
+
+- **The core** gets four levels, with the capacity lowered to 8–9 so the puzzle
+  is the *decision* — hold it or fire it — rather than the grind of charging.
+  Free play's core needs 34, which is more than any level's whole budget: asked
+  for two firings at full capacity, the bot won 0% of the time. That is not a
+  hard level, it is an impossible one.
+- **Prism blocks** get three, with the wild rate raised, so a level about
+  single-colour clears actually has the tool for it.
+- **Stone** appears as a *starting condition* in five. Two cells of the rim,
+  never more: stone that arrives gradually is a clock, stone sitting there from
+  the first move is far harsher, and at four the bot ended out of room rather
+  than out of pieces in 43–65% of runs. Two, plus a raised stripe rate to dig
+  with, is a puzzle instead of a wall.
+
+### The bug the level tool was hiding
+
+`npm run levels` nudges the bot onto different seeds, to see whether a level
+survives more than one line of play. That is the right question for a *pattern*
+and the wrong one for a shipped level, because **a level ships exactly one
+deal**. Level 26's real deal died on piece **eight of forty-two** while the tool
+reported it playing the full budget.
+
+Two fixes. `levelSeed()` now **vets its seed the way the daily does** — the bot
+plays the level through, and a deal it cannot get three-quarters of the way down
+is rejected and reseeded, cached per launch. And the tool has a `shipped`
+column reporting what the real seed does, so the average can never hide it
+again. All forty now play their full budget on the deal players get.
 
 ### In the app
 

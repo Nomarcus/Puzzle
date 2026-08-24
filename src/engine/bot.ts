@@ -62,15 +62,33 @@ export interface BotPolicy {
    * matters.
    */
   readonly core: boolean;
+  /**
+   * How full the board has to be before the bot spends a full core.
+   *
+   * A dial rather than a constant because it decides what is being measured.
+   * At 0.55 the bot hoards, which is roughly how a good player treats a core
+   * in free play and is what free play's balance was tuned against. But a
+   * *level* that asks for two firings is telling the player to fire them, and
+   * measuring it with a hoarding bot measures the bot: at 0.55 those levels
+   * came out winnable 0% of the time with the bot charging plenty of cores and
+   * simply never spending them.
+   */
+  readonly coreAt: number;
 }
 
-export const BOT_POLICY_V1: BotPolicy = { pushes: true, colour: true, core: false };
+export const BOT_POLICY_V1: BotPolicy = { pushes: true, colour: true, core: false, coreAt: 0.55 };
 
 /**
  * The bot as it plays now, core included. Used for balance work, never for
  * vetting the daily.
  */
-export const BOT_POLICY_V2: BotPolicy = { pushes: true, colour: true, core: true };
+export const BOT_POLICY_V2: BotPolicy = { pushes: true, colour: true, core: true, coreAt: 0.55 };
+
+/**
+ * For levels. Fires a core as soon as there is a worthwhile board under it,
+ * because a level asking for cores is asking the player to spend them.
+ */
+export const BOT_POLICY_LEVELS: BotPolicy = { pushes: true, colour: true, core: true, coreAt: 0.2 };
 
 function lineValue(filled: number, length: number): number {
   const fraction = filled / length;
@@ -211,7 +229,7 @@ export function chooseMove(state: GameState, policy: BotPolicy = BOT_POLICY_V1):
   if (policy.core && coreReady(state.core, state.charge)) {
     const filled = filledCount(state.board);
     const capacity = state.spec.rings * state.spec.sectors;
-    if (filled / capacity >= 0.55 || !best) return { type: "core" };
+    if (filled / capacity >= policy.coreAt || !best) return { type: "core" };
   }
 
   if (best) return best;

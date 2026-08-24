@@ -30,11 +30,14 @@
  * can reach is one a person will find fair — that is the point of using it.
  */
 
-import { type Board, createBoard } from "./board.js";
+import { type Board, STONE, createBoard } from "./board.js";
 import type { BoardSpec } from "./geometry.js";
 import { cellIndex } from "./geometry.js";
 import type { RuleSet } from "./game.js";
+import { type CoreSpec, DEFAULT_CORE } from "./core.js";
 import { hashSeed } from "./rng.js";
+import { BOT_POLICY_LEVELS, playOut } from "./bot.js";
+import { createGame } from "./game.js";
 import { type PackId, type SizeId, sizeById } from "./variants.js";
 
 // --------------------------------------------------------------- the goals
@@ -52,6 +55,8 @@ export type Goal =
   | { readonly kind: "stripes"; readonly target: number }
   /** A ring and a spoke in one move. The big one. */
   | { readonly kind: "bullseye"; readonly target: number }
+  /** Charge and fire the core. Teaches the hold-or-fire decision. */
+  | { readonly kind: "cores"; readonly target: number }
   /** Chain clears without a break. */
   | { readonly kind: "combo"; readonly target: number };
 
@@ -232,6 +237,15 @@ export function buildPattern(id: PatternId, spec: BoardSpec, colours = 8): Board
 
 // --------------------------------------------------------------- the levels
 
+/**
+ * How much of the rim a level starts stoned.
+ *
+ * Stone is free play's mechanic, but as a *starting condition* it is a puzzle
+ * in its own right: a stoned line cannot clear, and only a stripe or a sweep
+ * shifts one, so a level that opens with four stones in the outer ring is
+ * asking a specific question — dig them out, or work around them and win on
+ * the rings you can still reach.
+ */
 export interface Level {
   /** 1-based, and the order they are played in. */
   readonly number: number;
@@ -242,6 +256,27 @@ export interface Level {
   /** Pieces you get. Running out is how a level is lost. */
   readonly budget: number;
   readonly rules?: Partial<RuleSet>;
+  /**
+   * Core tuning for this level.
+   *
+   * Free play's core needs 34 charge, which is about eighty placements — more
+   * than any level's whole budget. Measured, a level asking for two firings on
+   * a 56-piece budget was won 0% of the time, which is not a hard level, it is
+   * an impossible one. A level about the core lowers the capacity so the puzzle
+   * is the *decision* — hold it or fire it — rather than the grind of charging.
+   */
+  readonly core?: Partial<CoreSpec>;
+  /**
+   * Cells of the rim that start as stone.
+   *
+   * Kept to two. Stone arriving gradually, as it does in free play, is a clock;
+   * stone sitting there from the first move is far harsher, because it shuts a
+   * ring *and* a spoke with no ordinary way to open either. Measured, four
+   * stones left the bot out of room rather than out of pieces in 43-65% of
+   * runs — the one kind of loss that teaches nothing. Two, plus a raised stripe
+   * rate so there is a tool to dig with, is a puzzle instead of a wall.
+   */
+  readonly stone?: number;
 }
 
 /**
@@ -288,6 +323,57 @@ export const LEVELS: readonly Level[] = [
   // out of pieces in a fifth of its runs, and losing to a board with no room
   // left is the one failure that teaches nothing.
   { number: 20, size: "large", pack: "mixed", pattern: "checker", goal: { kind: "score", target: 9000 }, budget: 48, rules: { startingSpins: 3 } },
+
+  // --- the second twenty ------------------------------------------------
+  //
+  // The first twenty teach the board. These teach the things built on top of
+  // it: the core in the middle, the prism block, and stone as a puzzle rather
+  // than as free play's clock. Budgets are larger throughout, because every
+  // one of these needs setting up before it can be cashed.
+
+  // Meeting the core. A generous budget on a small disc: the point is to
+  // charge one and see what firing it does, not to be pressed for time.
+  { number: 21, size: "small", pack: "mixed", pattern: "empty", goal: { kind: "cores", target: 3 }, budget: 40, core: { capacity: 8 } },
+  // The same, on a board that is already half in the way — so the core is
+  // worth more when fired, which is the whole hold-or-fire decision.
+  { number: 22, size: "small", pack: "mixed", pattern: "speckle", goal: { kind: "score", target: 11000 }, budget: 40 },
+  // Prisms. A cross of one colour is two pushes waiting; a prism turns any
+  // line into a third.
+  { number: 23, size: "small", pack: "curves", pattern: "cross", goal: { kind: "pure", target: 5 }, budget: 36, rules: { wildChance: 0.14 } },
+  { number: 24, size: "standard", pack: "mixed", pattern: "empty", goal: { kind: "pure", target: 5 }, budget: 44, rules: { wildChance: 0.12 } },
+
+  // Stone as a puzzle. Four cells of the rim are shut and no ordinary clear
+  // will open them — the level is what you do about that.
+  { number: 25, size: "standard", pack: "mixed", pattern: "empty", goal: { kind: "spokes", target: 15 }, budget: 40, stone: 2, rules: { stripeChance: 0.16 } },
+  { number: 26, size: "standard", pack: "mixed", pattern: "empty", goal: { kind: "stripes", target: 8 }, budget: 42, stone: 2, rules: { stripeChance: 0.2 } },
+  // A ring with stone in it cannot clear. This one asks for rings anyway.
+  { number: 27, size: "standard", pack: "curves", pattern: "ringShort", goal: { kind: "rings", target: 8 }, budget: 44, stone: 2, rules: { stripeChance: 0.16 } },
+
+  // Two cores. Charging one is a lesson; charging two inside a budget is a
+  // plan.
+  { number: 28, size: "standard", pack: "mixed", pattern: "empty", goal: { kind: "cores", target: 3 }, budget: 56, core: { capacity: 8 } },
+  { number: 29, size: "standard", pack: "chunks", pattern: "rim", goal: { kind: "score", target: 12000 }, budget: 48 },
+  { number: 30, size: "standard", pack: "mixed", pattern: "spiral", goal: { kind: "combo", target: 4 }, budget: 46 },
+
+  // --- the long ones ----------------------------------------------------
+  { number: 31, size: "large", pack: "mixed", pattern: "empty", goal: { kind: "cores", target: 3 }, budget: 62, core: { capacity: 9 } },
+  { number: 32, size: "large", pack: "curves", pattern: "chorus", goal: { kind: "pure", target: 5 }, budget: 54, rules: { wildChance: 0.1 } },
+  { number: 33, size: "large", pack: "mixed", pattern: "empty", goal: { kind: "rings", target: 8 }, budget: 56, stone: 2, rules: { stripeChance: 0.16 } },
+  { number: 34, size: "large", pack: "chunks", pattern: "speckle", goal: { kind: "spokes", target: 20 }, budget: 54 },
+  { number: 35, size: "large", pack: "mixed", pattern: "quarter", goal: { kind: "score", target: 12500 }, budget: 56 },
+
+  // --- the last five ----------------------------------------------------
+  // The other bullseye level, and deliberately not the same puzzle as 16: that
+  // one hands you a nearly finished *middle* ring, this one the rim — the
+  // longest line on the disc, and the one a spoke has to reach all the way out
+  // to cross.
+  { number: 36, size: "standard", pack: "mixed", pattern: "rim", goal: { kind: "bullseye", target: 1 }, budget: 58, rules: { startingSpins: 3 } },
+  { number: 37, size: "large", pack: "mixed", pattern: "checker", goal: { kind: "cores", target: 3 }, budget: 60, core: { capacity: 9 }, rules: { startingSpins: 3 } },
+  { number: 38, size: "large", pack: "mixed", pattern: "rim", goal: { kind: "score", target: 32000 }, budget: 60, stone: 2, rules: { stripeChance: 0.16 } },
+  { number: 39, size: "large", pack: "chunks", pattern: "spiral", goal: { kind: "combo", target: 6 }, budget: 58 },
+  // The last one. Everything at once, on the biggest disc, with the rim
+  // already crusting over.
+  { number: 40, size: "large", pack: "mixed", pattern: "checker", goal: { kind: "score", target: 34000 }, budget: 66, stone: 2, rules: { startingSpins: 3, stripeChance: 0.14 } },
 ];
 
 export function levelByNumber(number: number): Level | null {
@@ -296,14 +382,87 @@ export function levelByNumber(number: number): Level | null {
 
 /**
  * Every level's pieces come from its own fixed seed, so a level is the same
- * puzzle for everybody, every attempt — the daily's promise, twenty times over.
+ * puzzle for everybody, every attempt — the daily's promise, forty times over.
+ *
+ * And, like the daily, that seed is **vetted before anyone sees it**: the bot
+ * plays the level through, and a deal it cannot get most of the way down is
+ * rejected and reseeded.
+ *
+ * This is not theoretical. Level 26's first seed died on piece **eight of
+ * forty-two** — its whole opening was pieces that would not fit around the
+ * stone — while `npm run levels` reported it playing the full budget, because
+ * the tool nudges the bot onto different seeds to see whether a level survives
+ * more than one line of play. Averaging across seeds is the right question for
+ * a *pattern* and the wrong one for a shipped deal: a level ships exactly one.
+ * So the level's own seed is now vetted here, and the tool reports it in its
+ * own column.
  */
 export function levelSeed(level: Level): number {
-  return hashSeed(`shiftle:level:${level.number}`);
+  const known = vettedSeeds.get(level.number);
+  if (known !== undefined) return known;
+  const seed = vetLevelSeed(level);
+  vettedSeeds.set(level.number, seed);
+  return seed;
+}
+
+/**
+ * Vetting costs a handful of bot playouts and the answer never changes, so it
+ * is done once per level per launch and remembered. A level is opened from a
+ * menu tap, which is exactly the wrong moment to spend a hundred milliseconds.
+ */
+const vettedSeeds = new Map<number, number>();
+
+/** A deal the bot cannot get this far through is not the same puzzle for everyone. */
+const MIN_BUDGET_FRACTION = 0.75;
+const MAX_SEED_ATTEMPTS = 8;
+
+function vetLevelSeed(level: Level): number {
+  const base = hashSeed(`shiftle:level:${level.number}`);
+  const spec = sizeById(level.size).spec;
+  let seed = base;
+  let best = { seed: base, placed: -1 };
+
+  for (let attempt = 0; attempt < MAX_SEED_ATTEMPTS; attempt++) {
+    const result = playOut(
+      createGame({
+        seed,
+        mode: "level",
+        spec,
+        pack: level.pack,
+        board: levelBoard(level),
+        core: levelCore(level),
+        rules: { ...level.rules, pieceLimit: level.budget },
+      }),
+      level.budget * 3,
+      BOT_POLICY_LEVELS,
+    );
+    const placed = result.state.stats.piecesPlaced;
+    if (placed > best.placed) best = { seed, placed };
+    if (placed >= level.budget * MIN_BUDGET_FRACTION) break;
+    seed = hashSeed(`shiftle:level:reseed:${level.number}:${attempt}`);
+  }
+
+  return best.seed;
+}
+
+/** The core a level plays with, which is usually a smaller one. */
+export function levelCore(level: Level): CoreSpec {
+  return { ...DEFAULT_CORE, ...level.core };
 }
 
 export function levelBoard(level: Level): Board {
-  return buildPattern(level.pattern, sizeById(level.size).spec);
+  const spec = sizeById(level.size).spec;
+  const board = buildPattern(level.pattern, spec);
+  if (!level.stone) return board;
+
+  // Spread around the rim rather than clustered, so the level poses "these
+  // lines are shut" and not "this quarter is shut".
+  const step = Math.max(1, Math.floor(spec.sectors / level.stone));
+  for (let i = 0; i < level.stone; i++) {
+    const sector = (i * step) % spec.sectors;
+    board.cells[cellIndex(spec, spec.rings - 1, sector)] = STONE;
+  }
+  return board;
 }
 
 // -------------------------------------------------------------- the scoring
@@ -329,6 +488,8 @@ export function goalProgress(
         return state.stats.bullseyes ?? 0;
       case "combo":
         return state.stats.bestCombo ?? 0;
+      case "cores":
+        return state.stats.coresFired ?? 0;
     }
   })();
 

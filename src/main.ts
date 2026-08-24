@@ -27,6 +27,7 @@ import {
   type Level,
   goalProgress,
   levelBoard,
+  levelCore,
   levelByNumber,
   levelSeed,
 } from "./engine/levels.js";
@@ -181,6 +182,7 @@ function goalText(level: Level): string {
       pure: "goalPure",
       stripes: "goalStripes",
       bullseye: "goalBullseye",
+      cores: "goalCores",
       combo: "goalCombo",
     } as const
   )[level.goal.kind];
@@ -927,6 +929,7 @@ function startLevel(level: Level): void {
     spec: sizeById(level.size).spec,
     pack: level.pack,
     board: levelBoard(level),
+    core: levelCore(level),
     rules: { ...level.rules, pieceLimit: level.budget },
   });
 
@@ -1148,6 +1151,7 @@ if (import.meta.env.DEV) {
       if (!state || !level) return null;
       return { level: level.number, ...goalProgress(level.goal, state) };
     },
+    levelCount: () => LEVELS.length,
     levelsDone,
     clearLevels: () => writeJson("levels", []),
 

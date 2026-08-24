@@ -332,7 +332,11 @@ await page.waitForTimeout(300);
 await page.locator('[data-action="levels"]').click();
 await page.waitForTimeout(300);
 
-check("the level grid opens", (await page.locator(".level-tile").count()) === 20);
+{
+  const tiles = await page.locator(".level-tile").count();
+  const expected = await page.evaluate(() => window.__shiftle.levelCount());
+  check("the level grid opens with a tile per level", tiles === expected && tiles >= 40, `${tiles} tiles`);
+}
 check(
   "only the first level is open to begin with",
   (await page.locator(".level-tile:not(.locked)").count()) === 1,

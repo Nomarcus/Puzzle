@@ -14,9 +14,10 @@
  * Run: npx vite-node tools/levels.ts [runs]
  */
 
-import { playOut } from "../src/engine/bot.js";
+import { BOT_POLICY_LEVELS, playOut } from "../src/engine/bot.js";
 import { createGame } from "../src/engine/game.js";
-import { LEVELS, type Level, goalProgress, levelBoard, levelSeed } from "../src/engine/levels.js";
+import { LEVELS, type Level, goalProgress, levelBoard,
+  levelCore, levelSeed } from "../src/engine/levels.js";
 import { hashSeed } from "../src/engine/rng.js";
 import { sizeById } from "../src/engine/variants.js";
 
@@ -25,6 +26,8 @@ const RUNS = Number(process.argv[2] ?? 200);
 interface Outcome {
   readonly level: Level;
   /** How often the bot met the goal. */
+  /** Pieces the bot placed on the level's own seed — the deal players get. */
+  readonly shipped: number;
   readonly winRate: number;
   /** The spread of what it reached. Targets are placed against these. */
   readonly p10: number;
@@ -51,6 +54,7 @@ function measure(level: Level): Outcome {
   const pieces: number[] = [];
   let wins = 0;
   let stuck = 0;
+  let shipped = 0;
 
   for (let run = 0; run < RUNS; run++) {
     // The level's own seed decides the sequence, but a level is only worth
@@ -62,19 +66,26 @@ function measure(level: Level): Outcome {
       spec,
       pack: level.pack,
       board: levelBoard(level),
+      core: levelCore(level),
       rules: { ...level.rules, pieceLimit: level.budget },
     });
 
-    const result = playOut(state, level.budget * 4);
+    const result = playOut(state, level.budget * 4, BOT_POLICY_LEVELS);
     const progress = goalProgress(level.goal, result.state);
     reached.push(progress.done);
     pieces.push(result.state.stats.piecesPlaced);
     if (progress.met) wins++;
     if (result.state.stats.piecesPlaced < level.budget) stuck++;
+    // Run zero is the deal every player actually gets. Averaging across seeds
+    // is the right question for a pattern and the wrong one for a shipped
+    // level, and this column exists because that difference hid a level whose
+    // real deal died on piece eight of forty-two.
+    if (run === 0) shipped = result.state.stats.piecesPlaced;
   }
 
   return {
     level,
+    shipped,
     winRate: wins / RUNS,
     p10: quantile(reached, 0.1),
     median: median(reached),
@@ -88,7 +99,7 @@ function measure(level: Level): Outcome {
 
 console.log(`Shiftle levels — ${RUNS} bot runs each\n`);
 console.log(
-  "lvl  disc      pack    pattern     goal          target    bot p10   bot p50   bot p75   best   win%   pieces  stuck%",
+  "lvl  disc      pack    pattern     goal          target    bot p10   bot p50   bot p75   best   win%   pieces  stuck%   shipped",
 );
 console.log("-".repeat(120));
 
@@ -110,7 +121,8 @@ for (const o of outcomes) {
       String(o.best).padStart(7) +
       `${Math.round(o.winRate * 100)}%`.padStart(7) +
       `${o.medianPieces}/${l.budget}`.padStart(9) +
-      `${Math.round(o.stuckRate * 100)}%`.padStart(8),
+      `${Math.round(o.stuckRate * 100)}%`.padStart(8) +
+      `${o.shipped}/${l.budget}`.padStart(10),
   );
 }
 
@@ -118,6 +130,13 @@ for (const o of outcomes) {
 const notes: string[] = [];
 for (const o of outcomes) {
   const n = o.level.number;
+  // The deal every player actually gets, checked on its own. levelSeed() vets
+  // it, so this failing means the vetting could not find a workable seed.
+  if (o.shipped < o.level.budget * 0.7) {
+    notes.push(
+      `L${n}: the shipped seed only reaches ${o.shipped}/${o.level.budget} pieces — that deal is broken for everyone`,
+    );
+  }
   // Goals that need planning ahead. The bot is one move deep and does not set
   // anything up, so a low win rate on these says more about the bot than the
   // level — what matters is whether it ever gets there at all.

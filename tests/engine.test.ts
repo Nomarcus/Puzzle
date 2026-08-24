@@ -53,8 +53,9 @@ import {
   formatCode,
   newChallenge,
 } from "../src/engine/challenge.js";
-import { BOT_POLICY_V2, chooseMove, playOut } from "../src/engine/bot.js";
-import { LEVELS, goalProgress, levelBoard, levelSeed } from "../src/engine/levels.js";
+import { BOT_POLICY_LEVELS, BOT_POLICY_V2, chooseMove, playOut } from "../src/engine/bot.js";
+import { LEVELS, goalProgress, levelBoard,
+  levelCore, levelSeed } from "../src/engine/levels.js";
 import { PACKS, SIZES, bagFor, dailyVariant, sizeById } from "../src/engine/variants.js";
 import { pushSpoke, spinRing } from "../src/engine/rotate.js";
 import { pureLines } from "../src/engine/board.js";
@@ -944,9 +945,11 @@ describe("cleared cells carry their own colour", () => {
  * to play, and that a goal counts what it says it counts.
  */
 describe("levels", () => {
-  it("are numbered 1..20, in order, with no gaps", () => {
+  it("are numbered from one, in order, with no gaps", () => {
+    // Unlocking walks backwards from a level to the one before it, so a gap
+    // would leave everything after it permanently locked.
     expect(LEVELS.map((level) => level.number)).toEqual(
-      Array.from({ length: 20 }, (_, i) => i + 1),
+      Array.from({ length: LEVELS.length }, (_, i) => i + 1),
     );
   });
 
@@ -990,6 +993,7 @@ describe("levels", () => {
         spec: sizeById(level.size).spec,
         pack: level.pack,
         board: levelBoard(level),
+        core: levelCore(level),
         rules: { ...level.rules, pieceLimit: level.budget },
       });
     expect(make().tray).toEqual(make().tray);
@@ -1023,9 +1027,14 @@ describe("levels", () => {
         spec: sizeById(level.size).spec,
         pack: level.pack,
         board: levelBoard(level),
+        core: levelCore(level),
         rules: { ...level.rules, pieceLimit: level.budget },
       });
-      const result = playOut(state, level.budget * 4);
+      // Played with the core, like `npm run levels` and like a person. A
+      // core-free bot dies on piece eight of the stone levels, which measures
+      // a player refusing to use a mechanic the game always gives them rather
+      // than measuring the level.
+      const result = playOut(state, level.budget * 4, BOT_POLICY_LEVELS);
       expect(result.stalled, `level ${level.number} stalled`).toBe(false);
       expect(
         result.state.stats.piecesPlaced,
@@ -1340,7 +1349,7 @@ describe("the core", () => {
     let sawReady = false;
 
     for (let i = 0; i < 200 && !state.over; i++) {
-      const move = chooseMove(state, { pushes: true, colour: true, core: false });
+      const move = chooseMove(state, { pushes: true, colour: true, core: false, coreAt: 1 });
       if (!move) break;
       const result = applyMove(state, move);
       if (!result) break;

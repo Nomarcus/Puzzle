@@ -44,6 +44,8 @@ const TABLE = {
   goalStripes1: { sv: "Utlös 1 randigt block", en: "Set off 1 striped block" },
   goalBullseye: { sv: "Landa en fullträff", en: "Land a bullseye" },
   goalCombo: { sv: "Nå kombo x%n", en: "Reach a combo of %n" },
+  goalCores: { sv: "Ladda och avfyra kärnan %n gånger", en: "Charge and fire the core %n times" },
+  goalCores1: { sv: "Ladda och avfyra kärnan", en: "Charge and fire the core" },
   depth: { sv: "DJUP", en: "DEPTH" },
   coreFired: { sv: "KÄRNAN!", en: "CORE!" },
   coreReadyHint: { sv: "Tryck i mitten", en: "Tap the middle" },
