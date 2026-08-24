@@ -59,7 +59,7 @@ change and has not been made; it is Marcus's call.
 | Balance | Measured with `npm run balance`. Free play does not reliably end — see below. |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
-| Particles and sound | Done. Sound is synthesised, no audio files. |
+| Particles and sound | Done. Sound is synthesised — no audio files, but layered rather than beeped. `npm run audio` renders every voice to WAV. |
 | Game Center | Native plugin written and committed. Needs two leaderboards created in App Store Connect. |
 | Share image | Done. The final disc renders to a 1080px card. |
 

@@ -690,7 +690,8 @@ export class GameScreen {
       } else if (events.stripesFired > 0) {
         this.effects.push(floatText(cx, cy - 40, t("stripe"), true));
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
-        playSound("pure");
+        // A stripe tears across the board; it should not sound like a chime.
+        playSound("stripe");
       } else if (events.pureClears > 0) {
         this.effects.push(floatText(cx, cy - 40, t("pure"), true));
         this.effects.push(shockwave(cx, cy, this.layout.boardRadius * 0.8));
