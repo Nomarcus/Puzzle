@@ -25,7 +25,7 @@ import { GameScreen } from "./ui/game-screen.js";
 import { MenuScene } from "./ui/menu-scene.js";
 import { type Lang, type StringKey, lang, setLang, t } from "./ui/strings.js";
 import { haptic } from "./platform/haptics.js";
-import { isMuted, setMuted, unlock as unlockAudio } from "./platform/audio.js";
+import { isMuted, play as playSound, setMuted, unlock as unlockAudio } from "./platform/audio.js";
 import { shareResult } from "./platform/share.js";
 import { type ShareCard, renderShareDataUrl, renderShareImage } from "./render/share-card.js";
 import {
@@ -434,6 +434,9 @@ function showHowTo(): void {
 // --------------------------------------------------------------------- game
 
 function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: PackId }): void {
+  // Here rather than on each button: every way into a round goes through this,
+  // so daily, free play, play again and restart all get the same send-off.
+  playSound("start", 0, 2);
   document.querySelectorAll(".overlay").forEach((node) => node.remove());
   stopEverything();
   applyThemeChrome();

@@ -127,6 +127,10 @@ running it the other way turns a hit into an arrival.
 
 It is roughly 7 dB above anything else the game plays, which is deliberate.
 
+Pressing play has its own sound: a flick of the ratchet, then a phrase climbing
+the scale and settling on a note left ringing under the first board. The exact
+opposite of game over, which walks down the scale and stops.
+
 (An earlier attempt put a synthesised formant voice here, reading the banner
 text aloud. It worked technically — measurably vowel-shaped — and sounded
 wrong, so it is gone.)

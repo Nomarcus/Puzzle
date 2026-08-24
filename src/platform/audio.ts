@@ -42,6 +42,7 @@
 import { readString, writeString } from "./storage.js";
 
 export type Sound =
+  | "start"
   | "bonus"
   | "place"
   | "spoke"
@@ -412,6 +413,7 @@ const GLASS: readonly Partial[] = [
  * bullseye is the ceiling because it happens once a session.
  */
 const TRIM: Record<Sound, number> = {
+  start: 0.63,
   bonus: 1,
   place: 1.07,
   spin: 0.69,
@@ -443,6 +445,39 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
   const degree = at + Math.min(level, 7);
 
   switch (sound) {
+    case "start": {
+      // Pressing play sets the wheel going. A flick of the ratchet, then a
+      // phrase climbing the scale — the exact opposite of game over, which
+      // walks down it and stops.
+      ratchet(bus, when, { ticks: 7, span: 0.16, freq: 2200, peak: 0.19, send: 0.2 });
+
+      [0, 2, 4].forEach((step, i) => {
+        struck(bus, when, PAN, {
+          at: 0.06 + i * 0.075,
+          freq: note(degree + step),
+          peak: 0.26,
+          decay: 0.7 + i * 0.2,
+          send: 0.4,
+        });
+      });
+
+      // The note it settles on, left ringing under the first board. This is
+      // the "ready" — everything before it is the run-up.
+      struck(bus, when, GLASS, {
+        at: 0.29,
+        freq: note(degree + 7),
+        peak: 0.2,
+        decay: 1.5,
+        attack: 0.04,
+        beat: 11,
+        send: 0.6,
+      });
+
+      // Rising, like the bonus: this family lifts rather than lands.
+      thump(bus, when, { at: 0.05, freq: 62, to: 124, peak: 0.42, decay: 0.4, send: 0.15 });
+      break;
+    }
+
     case "bonus": {
       // The signature. Whatever the banner says, this is what it sounds like.
       //
