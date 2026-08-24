@@ -525,6 +525,36 @@ check("and the result says time, not game over", ended.title === "Time!" || ende
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 
+// --- progression -----------------------------------------------------------
+await page.evaluate(() => window.__shiftle.setLifetime(0));
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+{
+  const total = await page.locator(".swatch").count();
+  const locked = await page.locator(".swatch.locked").count();
+  check("the menu shows every theme, earned or not", total === 7, `${total} swatches`);
+  check("and locks the earned ones to begin with", locked === 4, `${locked} locked`);
+  check("but never the first three — the opening choice is a real one",
+    total - locked === 3);
+  check("with one thing named to play toward",
+    (await page.locator(".unlock-line").count()) === 1);
+}
+
+// A lifetime total past the first threshold opens exactly one more.
+await page.evaluate(() => window.__shiftle.setLifetime(200000));
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+check("scoring enough unlocks one",
+  (await page.locator(".swatch.locked").count()) === 3);
+
+await page.evaluate(() => window.__shiftle.setLifetime(9000000));
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+check("and everything eventually", (await page.locator(".swatch.locked").count()) === 0);
+check("with nothing left to chase", (await page.locator(".unlock-line").count()) === 0);
+
+await page.evaluate(() => window.__shiftle.setLifetime(0));
+
 // --- the daily streak ------------------------------------------------------
 // Retention lives or dies on this being visible and correct across midnight,
 // so both the badge and the fortnight strip are driven with a planted history.

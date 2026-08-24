@@ -42,6 +42,14 @@ import {
   sizeById,
 } from "./engine/variants.js";
 import { THEMES } from "./render/theme.js";
+import {
+  type Unlock,
+  UNLOCKS,
+  isUnlocked,
+  nextUnlock,
+  unlockProgress,
+  unlockedBetween,
+} from "./engine/progress.js";
 import { GameScreen } from "./ui/game-screen.js";
 import { MenuScene } from "./ui/menu-scene.js";
 import { type Lang, type StringKey, hasString, lang, setLang, t } from "./ui/strings.js";
@@ -158,6 +166,33 @@ function localeNumber(value: number): string {
 /** Both ids double as string keys, so the labels come straight from the table. */
 function variantLabel(size: SizeId, pack: PackId): string {
   return `${t(size as StringKey)} · ${t(pack as StringKey)}`;
+}
+
+/**
+ * Every point ever scored, in any mode. The one progression currency.
+ *
+ * Banked wherever a round ends, and the return value is what was crossed by
+ * doing so — a round big enough to cross two thresholds must announce both.
+ */
+function bankLifetime(score: number): Unlock[] {
+  const before = readNumber("lifetime", 0);
+  const after = before + Math.max(0, Math.round(score));
+  writeNumber("lifetime", after);
+  return unlockedBetween(before, after);
+}
+
+function lifetime(): number {
+  return readNumber("lifetime", 0);
+}
+
+/** Tells the player what they just earned, and switches to it. */
+function announceUnlocks(unlocks: Unlock[]): void {
+  if (unlocks.length === 0) return;
+  const last = unlocks[unlocks.length - 1]!;
+  const earned = THEMES.find((option) => option.id === last.theme);
+  if (!earned) return;
+  playSound("coreReady", 2, 4);
+  notice(t("unlocked"), `${earned.label} — ${t("unlockedBody")}`);
 }
 
 function savedSize(): SizeId {
@@ -408,13 +443,33 @@ function showMenu(): void {
   const timeBest = readNumber("bestTime", 0);
   if (timeBest > 0) node.append(el("div", "best", `${t("timeBest")} ${localeNumber(timeBest)}`));
 
+  // The themes, earned and unearned. Locked ones are shown rather than hidden:
+  // a reward nobody knows about is not a reward, and the row is the only place
+  // the lifetime total means anything.
+  const total = lifetime();
   const row = el("div", "swatches");
   for (const option of THEMES) {
-    const swatch = el("button", "swatch");
+    const open = isUnlocked(option.id, total);
+    const swatch = el("button", `swatch${open ? "" : " locked"}`);
     swatch.style.background = `linear-gradient(${option.backdrop[0]}, ${option.backdrop[1]})`;
     swatch.setAttribute("aria-pressed", String(option.id === theme.id));
-    swatch.setAttribute("aria-label", option.label);
+    swatch.setAttribute(
+      "aria-label",
+      open ? option.label : `${option.label} — ${t("lockedAt").replace("%n", localeNumber(UNLOCKS.find((u) => u.theme === option.id)!.at))}`,
+    );
+    swatch.dataset.theme = option.id;
     swatch.addEventListener("click", () => {
+      if (!open) {
+        playSound("denied");
+        notice(
+          option.label,
+          t("lockedAt").replace(
+            "%n",
+            localeNumber(UNLOCKS.find((u) => u.theme === option.id)!.at),
+          ),
+        );
+        return;
+      }
       theme = option;
       writeString("theme", option.id);
       showMenu();
@@ -422,6 +477,24 @@ function showMenu(): void {
     row.append(swatch);
   }
   node.append(row);
+
+  const next = nextUnlock(total);
+  if (next) {
+    const line = el("div", "unlock-line");
+    const bar = el("div", "unlock-bar");
+    const fill = el("i");
+    fill.style.width = `${Math.round(unlockProgress(total) * 100)}%`;
+    bar.append(fill);
+    line.append(bar);
+    line.append(
+      el(
+        "span",
+        undefined,
+        `${THEMES.find((o) => o.id === next.theme)?.label ?? next.theme} · ${localeNumber(total)} / ${localeNumber(next.at)}`,
+      ),
+    );
+    node.append(line);
+  }
 
   const langs = el("div", "langs");
   for (const code of ["sv", "en"] as Lang[]) {
@@ -750,6 +823,7 @@ function showTimeResult(state: GameState): void {
 
   const beat = state.score > readNumber("bestTime", 0);
   if (beat) writeNumber("bestTime", state.score);
+  const earnedByTime = bankLifetime(state.score);
   if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
   void submitScore(LEADERBOARDS.time, state.score);
 
@@ -791,6 +865,7 @@ function showTimeResult(state: GameState): void {
   back.dataset.action = "menu";
   back.addEventListener("click", showMenu);
   node.append(back);
+  announceUnlocks(earnedByTime);
 }
 
 // ----------------------------------------------------------------- challenges
@@ -1101,6 +1176,7 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
     spinsLeft: state.spins,
   };
   if (mode === "daily") writeJson("daily", result);
+  const earned = bankLifetime(state.score);
 
   const node = overlay("result");
   const card = shareCardFor(state, mode, result.puzzle);
@@ -1184,6 +1260,9 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   const back = el("button", "big alt", t("menu"));
   back.addEventListener("click", showMenu);
   node.append(back);
+  // Last, so it lands on top of the finished screen rather than under it —
+  // earning something is the one thing here worth interrupting for.
+  announceUnlocks(earned);
 }
 
 // --------------------------------------------------------------------- boot
@@ -1258,6 +1337,13 @@ if (import.meta.env.DEV) {
       const digits = shown.replace(/[^0-9]/g, "");
       return digits ? Number(digits) : null;
     },
+
+    /** Progression, for the browser tests. */
+    setLifetime: (total: number) => {
+      writeNumber("lifetime", total);
+      return true;
+    },
+    lifetime,
 
     /** The daily streak, for the browser tests. */
     setHistory: (history: Record<string, number>) => {

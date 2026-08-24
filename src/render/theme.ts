@@ -128,7 +128,90 @@ export const MINT: Theme = {
   stone: STONE,
 };
 
-export const THEMES: readonly Theme[] = [SKY, CREAM, MINT];
+/**
+ * Earned themes.
+ *
+ * Cosmetic and nothing else — progression that changes how the game *plays*
+ * turns a puzzle into a treadmill, and the whole appeal of this one is that
+ * everybody's board is the same board. What a player earns is how it looks.
+ *
+ * All four obey the same rule the first three do: bright, saturated, toy-like.
+ * No dark ground, no gradient into violet, nothing that reads as a dashboard.
+ */
+
+/** Bright pink. The loudest of them, and the one people play toward. */
+export const BUBBLEGUM: Theme = {
+  id: "bubblegum",
+  label: "Bubblegum",
+  backdrop: ["#FFB3DA", "#FF6FB5"],
+  plate: "#FFF5FA",
+  plateEdge: "#F7CFE4",
+  empty: "#F4CFE2",
+  emptyEdge: "#E3AECB",
+  blockOutline: "rgba(96, 24, 62, 0.20)",
+  muted: candy("#D4B3C4", "#E8D2DE", "#B593A4"),
+  text: "#7A1244",
+  textSoft: "#C2568F",
+  blocks: CANDY_BLOCKS,
+  charge: CHARGE,
+  stone: STONE,
+};
+
+/** Warm coral. Sunset without the gradient cliché. */
+export const SHERBET: Theme = {
+  id: "sherbet",
+  label: "Sherbet",
+  backdrop: ["#FFC9A3", "#FF8E63"],
+  plate: "#FFF7F1",
+  plateEdge: "#F5D9C6",
+  empty: "#F2D4C0",
+  emptyEdge: "#DDB89F",
+  blockOutline: "rgba(102, 44, 16, 0.20)",
+  muted: candy("#D3BCAC", "#E7D6CA", "#B39C8C"),
+  text: "#7A3312",
+  textSoft: "#C4744A",
+  blocks: CANDY_BLOCKS,
+  charge: CHARGE,
+  stone: STONE,
+};
+
+/** Deep teal. The coolest one, and still nowhere near a dark theme. */
+export const LAGOON: Theme = {
+  id: "lagoon",
+  label: "Lagoon",
+  backdrop: ["#7FE3DC", "#1FB9B2"],
+  plate: "#F2FEFD",
+  plateEdge: "#BEE9E6",
+  empty: "#C3E4E1",
+  emptyEdge: "#A2CBC7",
+  blockOutline: "rgba(10, 62, 60, 0.20)",
+  muted: candy("#A9C4C2", "#C7DBD9", "#8AA6A4"),
+  text: "#0B4B48",
+  textSoft: "#3F9A94",
+  blocks: CANDY_BLOCKS,
+  charge: CHARGE,
+  stone: STONE,
+};
+
+/** Lemonade. The last one, and deliberately the brightest thing in the game. */
+export const LEMONADE: Theme = {
+  id: "lemonade",
+  label: "Lemonade",
+  backdrop: ["#FFE884", "#FFC61F"],
+  plate: "#FFFDF0",
+  plateEdge: "#F2E1AE",
+  empty: "#EFDFA8",
+  emptyEdge: "#D8C48A",
+  blockOutline: "rgba(92, 68, 6, 0.20)",
+  muted: candy("#CFC7A4", "#E4DDC4", "#ADA484"),
+  text: "#6B5000",
+  textSoft: "#B99417",
+  blocks: CANDY_BLOCKS,
+  charge: CHARGE,
+  stone: STONE,
+};
+
+export const THEMES: readonly Theme[] = [SKY, CREAM, MINT, LAGOON, SHERBET, BUBBLEGUM, LEMONADE];
 
 /**
  * Colour ids run 1..8 and every caller is supposed to hold one. The wrap is

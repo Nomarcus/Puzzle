@@ -99,6 +99,36 @@ everybody, so a ramp reacting to how far you got would make two players' boards
 diverge. `createGame` defaults to no ramp; free play is the only caller that
 passes one.
 
+## Progression
+
+Every mode ends in a number, and until now that number went into a high score
+and nowhere else. A player who has beaten their record has nothing left to be
+moving toward, which is the point at which people stop.
+
+So every point ever scored, in any mode, adds to one lifetime total, and the
+total unlocks **four new themes** — Lagoon, Sherbet, Bubblegum, Lemonade — at
+150k, 500k, 1.5M and 4M. Measured against play: a free-play round is worth
+roughly 100,000, so the first is about two rounds and the last about forty.
+Someone who only plays the daily gets there eventually too, which is the point
+of counting every mode.
+
+Two deliberate constraints:
+
+- **One currency.** Two would need explaining, and a player would have to work
+  out which one they were earning.
+- **Cosmetic only, always.** Progression that changes how the game plays turns
+  a puzzle into a treadmill, and the appeal of this one is that everybody's
+  board is the same board. A theme you earned changes nothing about a
+  leaderboard and is still worth having.
+
+Locked themes are **shown, not hidden** — dimmed with a padlock and the colour
+they will be still visible, because a reward nobody knows about is not a
+reward. The first three stay free: a game that opens with one option and a row
+of padlocks looks mean, and the first choice a player makes should be a real
+one. A bar under the swatches names the next one and how far off it is,
+measured from the *previous* unlock rather than from zero — from zero it would
+sit near full for the whole last stretch and look broken.
+
 ## The daily streak
 
 Levels give a player somewhere to get to and free play gives them a number to
@@ -410,15 +440,16 @@ Game Center boards stay for the daily and free play.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 126 unit tests. |
+| Game engine | Done. Pure, deterministic, 134 unit tests. |
 | Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
 | Time attack | Done. Clock tuned against five modelled standards of play. |
 | The core | Done. Charge, tap-to-sweep, tuned with `npm run core`. |
 | Wild blocks | Done. Frequency measured against the pure-clear rate. |
 | Daily streak | Done. Badge, fortnight strip, and it survives midnight correctly. |
+| Progression | Done. Seven themes, four of them earned. Cosmetic only. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
-| Rendering, input, UI | Done. Swedish and English, three themes. |
+| Rendering, input, UI | Done. Swedish and English, seven themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance` and `npm run ramp`. |
 | iOS project | Generated and committed at `ios/`. |

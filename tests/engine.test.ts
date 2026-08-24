@@ -5,6 +5,14 @@ import { DEFAULT_RULES } from "../src/engine/game.js";
 import { dailyNumber, dailySeed, hashSeed, nextRandom } from "../src/engine/rng.js";
 import { bestStreakOf, recentDays, streakOf } from "../src/engine/streak.js";
 import {
+  UNLOCKS,
+  isUnlocked,
+  nextUnlock,
+  unlockProgress,
+  unlockedBetween,
+} from "../src/engine/progress.js";
+import { THEMES, blockColour } from "../src/render/theme.js";
+import {
   applyClears,
   canPlace,
   createBoard,
@@ -1182,6 +1190,76 @@ function firstPlacement(state: ReturnType<typeof createGame>) {
   }
   return null;
 }
+
+describe("progression", () => {
+  it("opens with real choices rather than a row of padlocks", () => {
+    // The first themes are not earned. A game that starts with one option and
+    // three locks looks mean, and the first choice a player makes should be a
+    // real one.
+    for (const theme of ["sky", "cream", "mint"]) {
+      expect(isUnlocked(theme, 0), theme).toBe(true);
+    }
+    expect(UNLOCKS.some((u) => u.theme === "sky")).toBe(false);
+  });
+
+  it("locks the earned ones until they are earned", () => {
+    const first = UNLOCKS[0]!;
+    expect(isUnlocked(first.theme, first.at - 1)).toBe(false);
+    expect(isUnlocked(first.theme, first.at)).toBe(true);
+  });
+
+  it("gets steadily more expensive, with no gaps or repeats", () => {
+    const ats = UNLOCKS.map((u) => u.at);
+    expect([...ats].sort((a, b) => a - b)).toEqual(ats);
+    expect(new Set(UNLOCKS.map((u) => u.theme)).size).toBe(UNLOCKS.length);
+  });
+
+  it("names one thing to play toward, until there is nothing left", () => {
+    expect(nextUnlock(0)?.theme).toBe(UNLOCKS[0]!.theme);
+    const last = UNLOCKS[UNLOCKS.length - 1]!;
+    expect(nextUnlock(last.at)).toBe(null);
+  });
+
+  it("announces every threshold a single round crossed, not just the last", () => {
+    // One enormous round can cross two. Swallowing the first would lose the
+    // one moment the whole system exists to produce.
+    const a = UNLOCKS[0]!;
+    const b = UNLOCKS[1]!;
+    expect(unlockedBetween(0, b.at).map((u) => u.theme)).toEqual([a.theme, b.theme]);
+    expect(unlockedBetween(a.at, a.at)).toEqual([]);
+  });
+
+  it("measures progress from the previous unlock, not from zero", () => {
+    // Measured from zero, the bar would sit near full for the whole of the
+    // last stretch and look broken.
+    const a = UNLOCKS[0]!;
+    const b = UNLOCKS[1]!;
+    expect(unlockProgress(0)).toBe(0);
+    expect(unlockProgress(a.at)).toBeCloseTo(0, 5);
+    expect(unlockProgress((a.at + b.at) / 2)).toBeCloseTo(0.5, 1);
+    expect(unlockProgress(Number.MAX_SAFE_INTEGER)).toBe(1);
+  });
+
+  it("every unlock names a theme that exists", () => {
+    const ids = new Set(THEMES.map((theme) => theme.id));
+    for (const unlock of UNLOCKS) {
+      expect(ids.has(unlock.theme), `no theme called ${unlock.theme}`).toBe(true);
+    }
+  });
+
+  it("every theme can draw every colour, stone and charge included", () => {
+    // The white-screen crash was a theme lookup returning undefined mid-draw.
+    // Four new palettes is four new chances at it.
+    for (const theme of THEMES) {
+      expect(theme.blocks.length).toBe(RULES.colours);
+      expect(theme.stone.base).toMatch(/^#/);
+      expect(theme.charge.base).toMatch(/^#/);
+      for (let id = 0; id <= RULES.colours + 1; id++) {
+        expect(blockColour(theme, id).base, `${theme.id} colour ${id}`).toMatch(/^#/);
+      }
+    }
+  });
+});
 
 describe("the daily streak", () => {
   const day = (iso: string) => new Date(`${iso}T12:00:00Z`);

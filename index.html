@@ -207,6 +207,50 @@
         box-shadow: 0 3px 0 rgba(0, 0, 0, 0.16);
       }
 
+      /* A locked theme is shown, not hidden: a reward nobody knows about is
+         not a reward. Dimmed and padlocked rather than greyed to nothing, so
+         the colour it will be is still the thing you are playing toward. */
+      .swatch.locked {
+        opacity: 0.4;
+        border-color: rgba(255, 255, 255, 0.4);
+        position: relative;
+      }
+
+      .swatch.locked::after {
+        content: "🔒";
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-size: 16px;
+      }
+
+      .unlock-line {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        font-weight: 800;
+        color: #fff;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      }
+
+      .unlock-bar {
+        width: 190px;
+        height: 6px;
+        border-radius: 3px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.35);
+      }
+
+      .unlock-bar i {
+        display: block;
+        height: 100%;
+        border-radius: 3px;
+        background: #ffc400;
+      }
+
       .swatch[aria-pressed="true"] {
         border-color: #fff;
         transform: scale(1.16);

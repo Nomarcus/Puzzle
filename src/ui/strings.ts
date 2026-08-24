@@ -81,6 +81,12 @@ const TABLE = {
     sv: "Ju djupare du kommer, desto tyngre bitar, dyrare snurr och mer sten på kanten.",
     en: "The deeper you get, the heavier the pieces, the dearer the spins, and the more stone on the rim.",
   },
+  unlocked: { sv: "Nytt tema upplåst!", en: "New theme unlocked!" },
+  unlockedBody: {
+    sv: "Byt tema i menyn när du vill.",
+    en: "Switch to it from the menu whenever you like.",
+  },
+  lockedAt: { sv: "Låses upp vid %n poäng totalt", en: "Unlocks at %n points in total" },
   streakDays: { sv: "dagar i rad", en: "day streak" },
   streakKeep: { sv: "dagar — spela idag!", en: "days — play today!" },
   streakBest: { sv: "LÄNGSTA SVITEN", en: "LONGEST STREAK" },
