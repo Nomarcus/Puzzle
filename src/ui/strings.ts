@@ -128,4 +128,16 @@ export function t(key: StringKey): string {
   return TABLE[key][current];
 }
 
+/**
+ * The English wording, whatever language the menu is in.
+ *
+ * Only the announcer uses this. Arcade voices are English everywhere — nobody
+ * expects Tetris to shout in Swedish — and the banner on screen stays in the
+ * player's language, so the reading and the hearing agree without the voice
+ * having to attempt "FULLTRÄFF".
+ */
+export function inEnglish(key: StringKey): string {
+  return TABLE[key].en;
+}
+
 document.documentElement.lang = current;

@@ -121,9 +121,11 @@ The bonus banners are **spoken** — BULLSEYE, FULLTRÄFF, ALL ONE COLOUR — by
 synthesised voice rather than a recording. A vowel is three resonances, so
 parking bandpass filters at the right frequencies over a buzzing source gives
 something the ear reads as speech with no audio file, no licensing and no
-second language to record. It reads the banner string itself, so it says
-whatever is on screen in whichever language is set, and any text added later is
-spoken without anybody writing a table. It is not real speech and is not trying
+second language to record. It reads the banner string itself rather than a
+per-word table, so text added later is spoken without anybody authoring
+anything — but it always speaks the **English** wording, whatever the menu is
+set to. Arcade voices are English everywhere, and the banner on screen still
+reads in the player's language. It is not real speech and is not trying
 to be — closer to how a cartoon animal talks — but the syllables, the vowel
 colours and the rhythm all come from the real word.
 

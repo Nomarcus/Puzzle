@@ -57,9 +57,10 @@ const TAKES = [
   { name: "11-denied", seconds: 1.2, events: [["denied", 0, 0, 0]] },
   { name: "12-game-over", seconds: 4.0, events: [["gameOver", 0, 0, 0]] },
   {
-    name: "13-voice-english",
+    name: "13-voice",
     seconds: 6.0,
-    // Exactly what the banners say, read by the formant voice.
+    // Exactly what the banners say. Always English, whatever the menu is set
+    // to — the arcade convention, and it keeps the voice off "FULLTRÄFF".
     events: [
       ["say:BULLSEYE!", 0, 0, 4],
       ["say:STRIPE!", 0, 1.5, 3],
@@ -68,18 +69,7 @@ const TAKES = [
     ],
   },
   {
-    name: "14-voice-swedish",
-    seconds: 6.0,
-    // The same code, the Swedish strings. Nothing is hand-authored per word.
-    events: [
-      ["say:FULLTR\u00c4FF!", 0, 0, 4],
-      ["say:RAND!", 0, 1.4, 3],
-      ["say:ENF\u00c4RGAT!", 0, 2.4, 2],
-      ["say:DUBBELRAND!", 0, 4.0, 3],
-    ],
-  },
-  {
-    name: "15-bullseye-with-voice",
+    name: "14-bullseye-with-voice",
     seconds: 4.5,
     // How it actually lands: the sweep, then the voice a beat behind it.
     events: [
@@ -88,7 +78,7 @@ const TAKES = [
     ],
   },
   {
-    name: "16-a-typical-turn",
+    name: "15-a-typical-turn",
     seconds: 5.5,
     // What a good minute of play actually sounds like, back to back.
     events: [
