@@ -40,7 +40,7 @@ import {
 import { THEMES } from "./render/theme.js";
 import { GameScreen } from "./ui/game-screen.js";
 import { MenuScene } from "./ui/menu-scene.js";
-import { type Lang, type StringKey, lang, setLang, t } from "./ui/strings.js";
+import { type Lang, type StringKey, hasString, lang, setLang, t } from "./ui/strings.js";
 import { haptic } from "./platform/haptics.js";
 import { isMuted, play as playSound, setMuted, unlock as unlockAudio } from "./platform/audio.js";
 import { shareResult } from "./platform/share.js";
@@ -182,6 +182,13 @@ function goalText(level: Level): string {
       combo: "goalCombo",
     } as const
   )[level.goal.kind];
+
+  // "Rensa 1 ringar" is wrong in both languages, and neither can be fixed by
+  // bolting an (s) on the end — Swedish inflects the adjective as well. The
+  // four goals that count things carry a written-out singular.
+  const single = `${key}1` as StringKey;
+  if (level.goal.target === 1 && hasString(single)) return t(single);
+
   return t(key).replace("%n", localeNumber(level.goal.target));
 }
 

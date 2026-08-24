@@ -35,6 +35,13 @@ const TABLE = {
   goalSpokes: { sv: "Rensa %n ekar", en: "Clear %n spokes" },
   goalPure: { sv: "Gör %n enfärgade rensningar", en: "Make %n single-colour clears" },
   goalStripes: { sv: "Utlös %n randiga block", en: "Set off %n striped blocks" },
+  // Singulars. Both languages inflect the noun and Swedish inflects the
+  // adjective too, so "1 ringar" and "1 enfärgade rensningar" cannot be
+  // patched with a trailing (s) the way some UIs try to.
+  goalRings1: { sv: "Rensa 1 ring", en: "Clear 1 ring" },
+  goalSpokes1: { sv: "Rensa 1 eke", en: "Clear 1 spoke" },
+  goalPure1: { sv: "Gör 1 enfärgad rensning", en: "Make 1 single-colour clear" },
+  goalStripes1: { sv: "Utlös 1 randigt block", en: "Set off 1 striped block" },
   goalBullseye: { sv: "Landa en fullträff", en: "Land a bullseye" },
   goalCombo: { sv: "Nå kombo x%n", en: "Reach a combo of %n" },
   depth: { sv: "DJUP", en: "DEPTH" },
@@ -169,6 +176,11 @@ export function setLang(next: Lang): void {
   current = next;
   writeString("lang", next);
   document.documentElement.lang = next;
+}
+
+/** Whether the table carries this key. Used for the goals that have a singular. */
+export function hasString(key: string): key is StringKey {
+  return key in TABLE;
 }
 
 export function t(key: StringKey): string {

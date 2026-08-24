@@ -345,6 +345,32 @@ await page.evaluate(() => window.__shiftle.level(1));
 await page.waitForTimeout(500);
 check("the goal is on screen while playing", await page.locator(".goal-strip").isVisible());
 
+// The strip is DOM and the header is canvas, so nothing stops them overlapping
+// except the row the layout reserves. It shipped once sitting straight through
+// the piece counter.
+{
+  const strip = await page.locator(".goal-strip").boundingBox();
+  const { headerY } = await page.evaluate(() => window.__shiftle.layout());
+  // The header's lowest text is the push label, drawn at headerY + 78.
+  check(
+    "the goal strip clears the header instead of sitting on it",
+    strip !== null && strip.y > headerY + 78,
+    `strip top ${strip?.y}, header bottom ${headerY + 78}`,
+  );
+  check(
+    "and stays on one line",
+    strip !== null && strip.height < 40,
+    `${strip?.height}px tall`,
+  );
+  check(
+    "and above the board rather than over it",
+    strip !== null &&
+      strip.y + strip.height <
+        (await page.evaluate(() => window.__shiftle.layout())).boardCy -
+          (await page.evaluate(() => window.__shiftle.layout())).boardRadius,
+  );
+}
+
 const startProgress = await page.evaluate(() => window.__shiftle.levelProgress());
 check(
   "the goal starts at nothing",

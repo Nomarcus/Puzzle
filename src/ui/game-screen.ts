@@ -88,6 +88,13 @@ const DRAG_LIFT = 76;
 /** How long the dead board is left on screen before the result card. */
 const DEATH_BEAT = 1250;
 
+/**
+ * Height reserved under the header for a level's goal strip. The strip is DOM
+ * and the header is canvas, so nothing stops them overlapping except this.
+ * Must match `.goal-strip`'s `top` in index.html.
+ */
+const GOAL_STRIP_ROW = 46;
+
 export type HapticKind = "light" | "medium" | "heavy" | "success";
 
 export interface GameScreenOptions {
@@ -340,8 +347,11 @@ export class GameScreen {
     // score and spin meter sit on row two.
     const headerY = safeTop + 74;
     // Two meter rows on the right, always reserved: the board must not jump
-    // the moment a push is earned.
-    const headerBottom = headerY + 82;
+    // the moment a push is earned. A level adds a row for the goal strip —
+    // reserved rather than overlaid, because the strip is a DOM element and
+    // floating it over the header put it straight through the piece counter.
+    const goalRow = this.state.mode === "level" ? GOAL_STRIP_ROW : 0;
+    const headerBottom = headerY + 82 + goalRow;
     // A generous tray: these pieces are the thing you grab, so they get room
     // to be drawn fat rather than dainty.
     const trayHeight = Math.round(168 * scale);
@@ -401,6 +411,17 @@ export class GameScreen {
       // The tray is something you aim at.
       { x: 0, y: trayTop - 12, width, height: height - trayTop + 12 },
     ];
+
+    if (goalRow > 0) {
+      // The goal strip is translucent, so a sweet drifting behind it turns the
+      // one line telling you what the level wants into mush.
+      this.quiet.push({
+        x: contentLeft + contentWidth * 0.06,
+        y: headerY + 84,
+        width: contentWidth * 0.88,
+        height: goalRow,
+      });
+    }
   }
 
   /** The board layout with any in-flight spin offset folded in. */

@@ -376,27 +376,39 @@
       }
 
       /* The objective, pinned under the score for the whole level. */
+      /*
+       * Sits in a row the canvas reserves for it (GOAL_STRIP_ROW in
+       * game-screen.ts) rather than floating over the header — overlaid, it ran
+       * straight through the piece counter drawn in the middle of the header.
+       * The two numbers must be changed together.
+       */
       .goal-strip {
         position: absolute;
         left: 50%;
         transform: translateX(-50%);
-        top: calc(var(--safe-top) + 64px);
+        top: calc(var(--safe-top) + 160px);
         display: flex;
-        align-items: baseline;
-        gap: 9px;
-        max-width: 92vw;
+        align-items: center;
+        gap: 10px;
+        max-width: min(92vw, 560px);
         padding: 7px 15px;
         border-radius: 16px;
-        background: rgba(255, 255, 255, 0.74);
+        background: rgba(255, 255, 255, 0.8);
         color: #12384f;
         font-size: 12px;
         font-weight: 800;
+        /* One line, always. Wrapped, it grew into the board below it. */
+        white-space: nowrap;
         pointer-events: none;
       }
 
       .goal-strip b { font-size: 13px; }
-      .goal-text { opacity: 0.78; }
-      .goal-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+      .goal-text {
+        opacity: 0.78;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .goal-count { font-variant-numeric: tabular-nums; }
 
       .goal-strip.met {
         background: #4fd31a;
