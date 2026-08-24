@@ -98,6 +98,35 @@ everybody, so a ramp reacting to how far you got would make two players' boards
 diverge. `createGame` defaults to no ramp; free play is the only caller that
 passes one.
 
+## Wild blocks
+
+Colour was the thinnest system in the game. It has exactly one job — a line
+cleared in a single colour pays a **push** — and with eight colours falling at
+random, a pure line was mostly luck. The bot managed **1.0 a round**.
+
+Now a piece occasionally carries a **prism block**, painted as the whole
+palette swept across one cell. A line containing one counts as single-colour
+whatever else is in it, so the decision is *where to spend it*: hold it for a
+line you are about to complete.
+
+It arrives the way a stripe does — one cell of one piece, about every
+twenty-five placements — and the two are mutually exclusive, because two
+readable marks on a fingernail-sized cell is one too many.
+
+**The first version was inert and the measurement said so.** It only let a wild
+*agree* with an already-uniform line, and pure clears went from 1.0 a round to
+1.1 — even at ten percent wilds. Five-of-a-colour is about as unlikely as six;
+turning an impossible requirement into a slightly less impossible one is not a
+mechanic. Letting the wild carry the line outright takes it to **10.9 a round**,
+and makes the *frequency* the dial, which is the thing a bot can actually
+measure. At ten percent it reaches 25 a round, by which point a pure line has
+stopped being an event — hence four.
+
+**No dealt sequence changed.** The wild is drawn off the same roll as the
+stripe rather than a new one. A new draw in the stream would have silently
+rewritten every daily ever played, because a day's seed is chosen by playing
+that day through with the bot.
+
 ## The core
 
 The hub in the middle was a hole the rings were drawn around. It is now the
@@ -324,11 +353,12 @@ Game Center boards stay for the daily and free play.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 110 unit tests. |
+| Game engine | Done. Pure, deterministic, 118 unit tests. |
 | Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
 | Time attack | Done. Clock tuned against five modelled standards of play. |
 | The core | Done. Charge, tap-to-sweep, tuned with `npm run core`. |
+| Wild blocks | Done. Frequency measured against the pure-clear rate. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, three themes. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |

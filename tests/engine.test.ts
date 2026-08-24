@@ -18,6 +18,7 @@ import { PIECES, pieceById } from "../src/engine/pieces.js";
 import {
   STONE,
   STRIPE_FLAG,
+  WILD,
   colourOf,
   detonate,
   isBullseye,
@@ -921,8 +922,11 @@ describe("cleared cells carry their own colour", () => {
         const result = applyMove(state, move);
         if (!result) break;
         for (const cell of result.events.clearedCells) {
+          // The invariant is that the renderer can draw it. Colour 0 was the
+          // white-screen crash; WILD is a real id the renderer routes to the
+          // prism, so it belongs here too.
           expect(cell.colour).toBeGreaterThan(0);
-          expect(cell.colour).toBeLessThanOrEqual(RULES.colours);
+          expect(cell.colour === WILD || cell.colour <= RULES.colours).toBe(true);
         }
         state = result.state;
       }
@@ -1168,6 +1172,98 @@ function firstPlacement(state: ReturnType<typeof createGame>) {
   }
   return null;
 }
+
+describe("wild blocks", () => {
+  const spec = sizeById("standard").spec;
+
+  const ringOf = (values: number[]) => {
+    const board = createBoard(spec);
+    values.forEach((v, i) => (board.cells[cellIndex(spec, 0, i)] = v));
+    return board;
+  };
+
+  it("carries its line on its own, whatever else is in it", () => {
+    // The first version only let a wild *agree* with an already-uniform line.
+    // Measured, that was worth nothing — pure clears went from 1.0 a round to
+    // 1.1 even at ten percent wilds, because five-of-a-colour is already about
+    // as unlikely as six. Reducing an impossible requirement to a slightly less
+    // impossible one is not a mechanic.
+    const plain = ringOf(new Array(spec.sectors).fill(3));
+    expect(lineColour(plain, "ring", 0)).toBe(3);
+
+    const withWild = ringOf([3, 3, WILD, 3, 3, 3, 3, 3, 3, 3]);
+    expect(lineColour(withWild, "ring", 0)).toBe(3);
+
+    const mixed = ringOf([3, 4, WILD, 7, 3, 3, 2, 3, 3, 3]);
+    expect(lineColour(mixed, "ring", 0)).not.toBe(0);
+  });
+
+  it("still cannot rescue a line with a gap in it", () => {
+    // A wild is a colour, not a cell. An incomplete line is not a line.
+    const gap = ringOf([3, 3, WILD, 0, 3, 3, 3, 3, 3, 3]);
+    expect(lineColour(gap, "ring", 0)).toBe(0);
+  });
+
+  it("without one, a mixed line is still worth nothing", () => {
+    const mixed = ringOf([3, 4, 5, 3, 3, 3, 3, 3, 3, 3]);
+    expect(lineColour(mixed, "ring", 0)).toBe(0);
+  });
+
+  it("a line of nothing but wilds is a single colour too", () => {
+    const all = ringOf(new Array(spec.sectors).fill(WILD));
+    expect(lineColour(all, "ring", 0)).toBe(WILD);
+  });
+
+  it("cannot rescue a line containing stone", () => {
+    // Stone has no colour at all, and a wild agreeing with it would hand back
+    // the push that stone is supposed to cost.
+    const stoned = ringOf([3, 3, WILD, STONE, 3, 3, 3, 3, 3, 3]);
+    expect(lineColour(stoned, "ring", 0)).toBe(0);
+  });
+
+  it("goes down as one cell of one piece, never the whole piece", () => {
+    const piece = pieceById("brick");
+    const board = place(createBoard(spec), piece, 0, 0, 5, undefined, 1);
+
+    let wilds = 0;
+    let plain = 0;
+    for (const [dr, ds] of piece.cells) {
+      const value = getCell(board, dr, ds);
+      if (value === WILD) wilds++;
+      else if (colourOf(value) === 5) plain++;
+    }
+    expect(wilds).toBe(1);
+    expect(plain).toBe(piece.size - 1);
+  });
+
+  it("never arrives on the same block as a stripe", () => {
+    // Both are readable marks on a cell the size of a fingernail. Stacking
+    // them would make neither legible.
+    let state = createGame({ seed: 77, spec, rules: { stripeChance: 0.5, wildChance: 0.5 } });
+    for (let i = 0; i < 60 && !state.over; i++) {
+      for (const slot of state.tray) {
+        if (!slot) continue;
+        expect(slot.striped === undefined || slot.wild === undefined).toBe(true);
+      }
+      const move = chooseMove(state);
+      if (!move) break;
+      const result = applyMove(state, move);
+      if (!result) break;
+      state = result.state;
+    }
+  });
+
+  it("did not change a single dealt sequence", () => {
+    // Wilds are drawn off the *same* roll as stripes rather than a new one.
+    // A new draw in the stream would have silently rewritten every daily ever
+    // played, because a day's seed is chosen by playing that day through.
+    const withWilds = createGame({ seed: 4242, spec, mode: "daily" });
+    const without = createGame({ seed: 4242, spec, mode: "daily", rules: { wildChance: 0 } });
+    expect(withWilds.rngState).toBe(without.rngState);
+    expect(withWilds.tray.map((t) => t!.pieceId)).toEqual(without.tray.map((t) => t!.pieceId));
+    expect(withWilds.tray.map((t) => t!.colour)).toEqual(without.tray.map((t) => t!.colour));
+  });
+});
 
 describe("the core", () => {
   const spec = sizeById("standard").spec;

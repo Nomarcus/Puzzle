@@ -67,6 +67,15 @@ export interface RuleSet {
   /** Chance that a dealt piece carries a striped block. */
   readonly stripeChance: number;
   /**
+   * Chance that a dealt piece carries a wild block instead.
+   *
+   * Drawn off the *same* roll as the stripe rather than a new one, which is
+   * why adding wilds did not change a single dealt sequence: the daily's seeds
+   * are vetted by playing them, so a new draw in the stream would have
+   * silently rewritten every past puzzle.
+   */
+  readonly wildChance: number;
+  /**
    * Pushes shift a spoke instead of a ring. They are the rare power: only a
    * line cleared in a single colour, or a bullseye, pays for one.
    */
@@ -85,6 +94,12 @@ export const DEFAULT_RULES: RuleSet = {
   // Roughly one striped block every four trays: often enough to plan around,
   // rare enough that landing one still feels like an event.
   stripeChance: 0.07,
+  // One wild about every twenty-five placements, chosen by measuring what it
+  // does to the colour game: at zero the bot manages 1.0 single-colour clears
+  // a round, at 0.04 it manages 10.9, and at 0.10 it manages 25 — by which
+  // point a pure line has stopped being an event. Often enough to plan around,
+  // rare enough to be worth saving.
+  wildChance: 0.04,
   maxPushes: 2,
   pieceLimit: 0,
 };
@@ -99,6 +114,12 @@ export interface TraySlot {
    * an ordinary piece, which is nearly all of them.
    */
   readonly striped?: number;
+  /**
+   * Index into the piece's cells: that one goes down wild. Mutually exclusive
+   * with `striped` — a piece carries at most one special block, which keeps
+   * both readable on a cell the size of a fingernail.
+   */
+  readonly wild?: number;
 }
 
 export type Move =
@@ -224,6 +245,7 @@ function drawTray(
   rngState: number,
   bag: Bag,
   stripeChance: number,
+  wildChance: number,
 ): [tray: TraySlot[], next: number] {
   const tray: TraySlot[] = [];
   let state = rngState;
@@ -236,11 +258,12 @@ function drawTray(
     const [roll, afterRoll] = nextRandom(afterColour);
     const [where, afterWhere] = nextInt(afterRoll, piece.size);
 
-    tray.push(
-      roll < stripeChance
-        ? { pieceId: piece.id, colour: colourIndex + 1, striped: where }
-        : { pieceId: piece.id, colour: colourIndex + 1 },
-    );
+    // One roll decides both. Splitting the range rather than drawing again is
+    // what keeps every previously dealt sequence identical.
+    const base = { pieceId: piece.id, colour: colourIndex + 1 };
+    if (roll < stripeChance) tray.push({ ...base, striped: where });
+    else if (roll < stripeChance + wildChance) tray.push({ ...base, wild: where });
+    else tray.push(base);
     state = afterWhere;
   }
 
@@ -265,8 +288,9 @@ function dealTray(
   board: Board,
   fairDeal: boolean,
   stripeChance: number,
+  wildChance: number,
 ): [tray: TraySlot[], next: number] {
-  if (!fairDeal) return drawTray(rngState, bag, stripeChance);
+  if (!fairDeal) return drawTray(rngState, bag, stripeChance, wildChance);
 
   let state = rngState;
   let bestTray: TraySlot[] | null = null;
@@ -274,7 +298,7 @@ function dealTray(
   let bestLive = -1;
 
   for (let attempt = 0; attempt < 10; attempt++) {
-    const [tray, next] = drawTray(state, bag, stripeChance);
+    const [tray, next] = drawTray(state, bag, stripeChance, wildChance);
     let live = 0;
     for (const slot of tray) {
       if (hasPlacement(board, pieceById(slot.pieceId))) live++;
@@ -331,6 +355,7 @@ export function createGame(options: {
     board,
     fairDeal,
     rules.stripeChance,
+    rules.wildChance,
   );
 
   return {
@@ -369,6 +394,7 @@ export function dealFreshTray(state: GameState): GameState {
     state.board,
     state.fairDeal,
     state.rules.stripeChance,
+    state.rules.wildChance,
   );
   return { ...state, tray, rngState };
 }
@@ -593,7 +619,7 @@ function applyPlace(
 
   const rules = rulesNow(state);
   const placedCells = pieceCells(state.board, piece, move.r, move.s);
-  let board = place(state.board, piece, move.r, move.s, slot.colour, slot.striped);
+  let board = place(state.board, piece, move.r, move.s, slot.colour, slot.striped, slot.wild);
 
   const settled = resolve(board, state.spokeClears);
   const { clears, pure, bullseye, stripes, sweep } = settled;
@@ -645,6 +671,7 @@ function applyPlace(
       board,
       state.fairDeal,
       rules.stripeChance,
+      rules.wildChance,
     );
     nextTray = filled;
     rngState = afterFill;

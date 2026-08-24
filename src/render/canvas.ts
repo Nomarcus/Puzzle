@@ -9,7 +9,7 @@
  */
 
 import type { BoardSpec } from "../engine/geometry.js";
-import { type Board, colourOf, getCell, isStone, isStripedValue } from "../engine/board.js";
+import { type Board, WILD, colourOf, getCell, isStone, isStripedValue } from "../engine/board.js";
 import type { Piece } from "../engine/pieces.js";
 import { type SectorGeometry, annularSectorPath, ringRadii } from "./annulus.js";
 import { type Theme, blockColour } from "./theme.js";
@@ -161,6 +161,10 @@ export function drawBlock(
   muted = false,
   striped = false,
 ): void {
+  if (colourId === WILD && !muted) {
+    drawWild(ctx, g, theme, alpha);
+    return;
+  }
   const colour = muted ? theme.muted : blockColour(theme, colourId);
   const ri = g.innerRadius + g.pad;
   const ro = g.outerRadius - g.pad;
@@ -236,6 +240,78 @@ export function drawBlock(
     // Balanced whatever happens inside. An unbalanced save is not a cosmetic
     // problem: the clip and the transform it holds stay alive into the next
     // frame, and they compound until nothing lands on screen at all.
+    ctx.restore();
+  }
+}
+
+/**
+ * A wild block: every colour at once.
+ *
+ * Painted as a sweep of the whole palette around the sector rather than as a
+ * static rainbow stripe, so it reads as "all of them" and not as "a new
+ * colour". It keeps the same bevel and gloss as an ordinary block, because it
+ * is an ordinary block in every way except which line it will agree with.
+ */
+export function drawWild(
+  ctx: CanvasRenderingContext2D,
+  g: SectorGeometry,
+  theme: Theme,
+  alpha = 1,
+): void {
+  const ri = g.innerRadius + g.pad;
+  const ro = g.outerRadius - g.pad;
+  const width = ro - ri;
+  if (width <= 0) return;
+
+  ctx.save();
+  try {
+    ctx.globalAlpha *= alpha;
+    annularSectorPath(ctx, g);
+    ctx.save();
+    try {
+      ctx.clip();
+
+      // A band per colour, laid across the sector. Eight of them in the width
+      // of a fingernail would be mush, so it takes every other one.
+      const stops = theme.blocks.filter((_, i) => i % 2 === 0);
+      const span = g.endAngle - g.startAngle;
+      stops.forEach((colour, i) => {
+        const from = g.startAngle + (span * i) / stops.length - 0.02;
+        const to = g.startAngle + (span * (i + 1)) / stops.length + 0.02;
+        ctx.beginPath();
+        ctx.moveTo(g.cx + ri * Math.cos(from), g.cy + ri * Math.sin(from));
+        ctx.arc(g.cx, g.cy, ro, from, to);
+        ctx.arc(g.cx, g.cy, ri, to, from, true);
+        ctx.closePath();
+        ctx.fillStyle = colour.base;
+        ctx.fill();
+      });
+
+      // The same lit rim and gloss every other block has, over the top, so it
+      // sits in the same world as the sweets around it.
+      const bandOut = width * 0.26;
+      ctx.globalAlpha *= 0.5;
+      ctx.strokeStyle = "#FFFFFF";
+      ctx.lineWidth = bandOut;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ro - bandOut / 2, g.startAngle - 0.2, g.endAngle + 0.2);
+      ctx.stroke();
+
+      ctx.globalAlpha /= 0.5;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+      ctx.lineWidth = width * 0.1;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ro - bandOut * 0.9, g.startAngle - 0.2, g.endAngle + 0.2);
+      ctx.stroke();
+    } finally {
+      ctx.restore();
+    }
+
+    annularSectorPath(ctx, g);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  } finally {
     ctx.restore();
   }
 }

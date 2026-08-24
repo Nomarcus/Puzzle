@@ -6,6 +6,7 @@
  * would be a lie the player has to unlearn the moment they drag one in.
  */
 
+import { WILD } from "../engine/board.js";
 import type { BoardSpec } from "../engine/geometry.js";
 import type { Piece } from "../engine/pieces.js";
 import type { Theme } from "./theme.js";
@@ -66,6 +67,7 @@ export function drawPiece(
   alpha = 1,
   muted = false,
   stripedCell?: number,
+  wildCell?: number,
 ): number {
   const layout = computeLayout(spec, 0, 0, boardOuterRadius);
   const { r, s } = anchorFor(piece, spec);
@@ -86,7 +88,7 @@ export function drawPiece(
     drawBlock(
       ctx,
       cellGeometry(layout, r + dr, s + ds),
-      colourId,
+      i === wildCell ? WILD : colourId,
       theme,
       1,
       muted,

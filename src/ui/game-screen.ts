@@ -1381,6 +1381,7 @@ export class GameScreen {
       0.9,
       false,
       this.state.tray[slot]?.striped,
+      this.state.tray[slot]?.wild,
     );
   }
 
@@ -1410,6 +1411,7 @@ export class GameScreen {
         this.placeable[i] ? 1 : 0.65,
         !this.placeable[i],
         slot.striped,
+        slot.wild,
       );
     });
   }

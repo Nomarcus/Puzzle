@@ -47,6 +47,27 @@ export const STONE_FLAG = 32;
 
 export const STONE = STONE_FLAG;
 
+/**
+ * The wild block: a prism that counts as whatever colour the rest of its line
+ * is.
+ *
+ * Colour was the thinnest system in the game. It has exactly one job — a line
+ * cleared in a single colour pays a push — and with eight colours falling at
+ * random, a pure line is mostly luck. The wild block is what makes it a plan:
+ * one lands, and the line it sits in only needs the *other* cells to agree.
+ *
+ * A colour id rather than a flag, because it occupies the same four bits every
+ * other colour does and so needs no new packing. It is never dealt by the
+ * ordinary colour draw, which runs 1..8; it arrives the way a stripe does, on
+ * one cell of one piece, and the two are mutually exclusive — a piece carries
+ * at most one special block.
+ */
+export const WILD = 9;
+
+export function isWild(value: number): boolean {
+  return colourOf(value) === WILD;
+}
+
 export function colourOf(value: number): number {
   return value & (STRIPE_FLAG - 1);
 }
@@ -108,8 +129,9 @@ export function canPlace(board: Board, piece: Piece, r: number, s: number): bool
 }
 
 /**
- * `stripedCell` is an index into piece.cells: that one cell is laid down as a
- * striped block. Undefined lays the piece down plain.
+ * `stripedCell` and `wildCell` are indices into piece.cells: that one cell is
+ * laid down as a striped or a wild block. Undefined lays the piece down plain,
+ * which is nearly always.
  */
 export function place(
   board: Board,
@@ -118,10 +140,13 @@ export function place(
   s: number,
   colour: number,
   stripedCell?: number,
+  wildCell?: number,
 ): Board {
   const next = cloneBoard(board);
   piece.cells.forEach(([dr, ds], i) => {
-    const value = i === stripedCell ? colour | STRIPE_FLAG : colour;
+    let value = colour;
+    if (i === wildCell) value = WILD;
+    else if (i === stripedCell) value = colour | STRIPE_FLAG;
     next.cells[cellIndex(board.spec, r + dr, s + ds)] = value;
   });
   return next;
@@ -377,6 +402,8 @@ export function lineColour(board: Board, kind: "ring" | "spoke", index: number):
   const { rings, sectors } = board.spec;
   const length = kind === "ring" ? sectors : rings;
   let colour = 0;
+  let wild = false;
+  let mixed = false;
 
   for (let i = 0; i < length; i++) {
     const raw =
@@ -385,12 +412,29 @@ export function lineColour(board: Board, kind: "ring" | "spoke", index: number):
         : board.cells[cellIndex(board.spec, i, index)]!;
     // A stripe does not break a run of one colour; it is still that colour.
     const value = colourOf(raw);
+    // Empty breaks it, and so does stone — stone has no colour at all, which
+    // is what stops a stoned line from ever paying a push.
     if (value === 0) return 0;
-    if (colour === 0) colour = value;
-    else if (colour !== value) return 0;
+    // A wild carries the line on its own.
+    //
+    // The first version had it merely *agree* with a uniform rest — a line of
+    // five reds and a wild counted as red. Measured, that was worth nothing:
+    // pure clears went from 1.0 to 1.1 a round even at ten percent wilds,
+    // because a five-in-a-row of one colour is already almost as unlikely as
+    // six. Reducing an impossible requirement to a slightly less impossible one
+    // is not a mechanic.
+    //
+    // So a wild makes its line single-colour outright. That turns it into a
+    // decision worth having — you hold it for a line you are about to complete
+    // — and it makes the *frequency* the tuning dial, which is the one thing a
+    // bot can actually measure.
+    if (value === WILD) wild = true;
+    else if (colour === 0) colour = value;
+    else if (colour !== value) mixed = true;
   }
 
-  return colour;
+  if (wild) return colour === 0 ? WILD : colour;
+  return mixed ? 0 : colour;
 }
 
 /** How many of these cleared lines were a single colour. */

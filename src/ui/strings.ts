@@ -136,6 +136,10 @@ const TABLE = {
     sv: "Varje rensning fyller kärnan i mitten. När den är full — tryck på den, så sopas hela skivan. Ju fullare bräde, desto mer ger den.",
     en: "Every clear fills the core in the middle. When it is full, tap it and the whole disc is swept. The fuller the board, the more it pays.",
   },
+  how9: {
+    sv: "Ibland kommer ett prismablock — det räknas som vilken färg som helst. Får du med det i en rensning blir hela raden enfärgad och du får ett skjut.",
+    en: "Now and then a prism block turns up — it counts as any colour. Catch it in a clear and the whole line counts as single-colour, and pays a push.",
+  },
   gotIt: { sv: "Kör!", en: "Got it!" },
   how: { sv: "Så spelar du", en: "How to play" },
 

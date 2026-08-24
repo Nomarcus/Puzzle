@@ -192,7 +192,7 @@ export function chooseMove(state: GameState, policy: BotPolicy = BOT_POLICY_V1):
         // same colour made every line look single-coloured, which is the one
         // thing that buys a push.
         const placed = policy.colour
-          ? place(state.board, piece, r, s, held.colour, held.striped)
+          ? place(state.board, piece, r, s, held.colour, held.striped, held.wild)
           : place(state.board, piece, r, s, 1);
         const settled = afterClears(placed, state.spokeClears, policy);
         const value = settled.value + boardValue(settled.board);

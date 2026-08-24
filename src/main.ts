@@ -574,6 +574,7 @@ function showHowTo(): void {
       ["▣", t("how6")],
       ["⏱", t("how7")],
       ["◉", t("how8")],
+      ["◈", t("how9")],
     ] as Array<[string, string]>
   ).forEach(
     ([num, text]) => {
