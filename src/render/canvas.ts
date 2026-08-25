@@ -13,6 +13,7 @@ import { type Board, WILD, colourOf, getCell, isStone, isStripedValue } from "..
 import type { Piece } from "../engine/pieces.js";
 import { type SectorGeometry, annularSectorPath, ringRadii } from "./annulus.js";
 import { type Theme, blockColour } from "./theme.js";
+import { BEZEL_SEGMENTS, bezel, bezelColour } from "./depth.js";
 
 /** Sector 0 sits at twelve o'clock, like a dial. */
 export const ANGLE_ORIGIN = -Math.PI / 2;
@@ -409,8 +410,17 @@ export function drawStone(
   }
 }
 
-/** The dish the puzzle sits on, plus the hub in the middle. */
-export function drawPlate(ctx: CanvasRenderingContext2D, layout: BoardLayout, theme: Theme): void {
+/**
+ * The dish the puzzle sits on, plus the hub in the middle.
+ *
+ * At depth the dish's own rim becomes the depth gauge — see `drawBezel`.
+ */
+export function drawPlate(
+  ctx: CanvasRenderingContext2D,
+  layout: BoardLayout,
+  theme: Theme,
+  depth = 0,
+): void {
   const rim = layout.outerRadius + layout.pad * 4;
 
   ctx.save();
@@ -428,6 +438,60 @@ export function drawPlate(ctx: CanvasRenderingContext2D, layout: BoardLayout, th
   ctx.strokeStyle = theme.plateEdge;
   ctx.lineWidth = 2;
   ctx.stroke();
+
+  drawBezel(ctx, layout, rim, depth);
+}
+
+/**
+ * One notch per depth, around the rim of the dish.
+ *
+ * This is the part of the depth ladder you can *count*: the backdrop tells you
+ * something has changed, the rim tells you exactly how far in you are without
+ * anybody reading a number.
+ *
+ * It rides the plate's existing edge rather than sitting outside it, and that
+ * is a constraint rather than a preference. The band outside the board is
+ * `pad * 4`, which on a phone is about six pixels — concentric growth rings
+ * were the first design and twelve of them land on top of each other in a gap
+ * that size. The disc is also already 0.485 of the content width, so there is
+ * nothing to grow into either. Segmenting the edge that is drawn anyway costs
+ * no space at all and touches no playable cell.
+ */
+function drawBezel(
+  ctx: CanvasRenderingContext2D,
+  layout: BoardLayout,
+  rim: number,
+  depth: number,
+): void {
+  const { lit, lap } = bezel(depth);
+  if (lit <= 0) return;
+
+  const arc = (Math.PI * 2) / BEZEL_SEGMENTS;
+  // A little proud of the plate's own 2px edge so it reads as a raised bezel
+  // rather than as a stroke that changed colour.
+  const width = Math.max(3, layout.pad * 2.4);
+
+  ctx.save();
+  try {
+    ctx.lineCap = "butt";
+    ctx.lineWidth = width;
+    for (let i = 0; i < BEZEL_SEGMENTS; i++) {
+      // A lap already completed stays lit underneath, so the rim reads as
+      // filling further rather than as starting over.
+      const on = i < lit;
+      if (!on && lap === 0) continue;
+      const gap = arc * 0.13;
+      const start = -Math.PI / 2 + i * arc + gap;
+      const end = -Math.PI / 2 + (i + 1) * arc - gap;
+      ctx.beginPath();
+      ctx.arc(layout.cx, layout.cy, rim, start, end);
+      ctx.strokeStyle = on ? bezelColour(i, lap) : bezelColour(i, lap - 1);
+      ctx.globalAlpha = on ? 1 : 0.45;
+      ctx.stroke();
+    }
+  } finally {
+    ctx.restore();
+  }
 }
 
 /**
@@ -533,8 +597,10 @@ export function drawBoard(
   theme: Theme,
   charge = 0,
   clock = 0,
+  /** Free play's depth. Zero everywhere else, which is what gates the bezel. */
+  depth = 0,
 ): void {
-  drawPlate(ctx, layout, theme);
+  drawPlate(ctx, layout, theme, depth);
 
   for (let r = 0; r < board.spec.rings; r++) {
     for (let s = 0; s < board.spec.sectors; s++) {

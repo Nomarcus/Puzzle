@@ -26,7 +26,9 @@ export type Effect =
   | { kind: "pushSettle"; sector: number; from: number; elapsed: number; duration: number }
   | { kind: "shake"; elapsed: number; duration: number }
   | { kind: "denied"; elapsed: number; duration: number }
-  | { kind: "shockwave"; x: number; y: number; radius: number; elapsed: number; duration: number };
+  | { kind: "shockwave"; x: number; y: number; radius: number; elapsed: number; duration: number }
+  /** A depth landing: light crossing the disc as the new palette settles in. */
+  | { kind: "deepen"; x: number; y: number; radius: number; elapsed: number; duration: number };
 
 export function clearBurst(cells: ClearedCell[]): Effect {
   return { kind: "clear", cells, elapsed: 0, duration: 420 };
@@ -43,6 +45,19 @@ export function dropIn(cells: Cell[]): Effect {
  */
 export function stoneLands(cell: Cell): Effect {
   return { kind: "stone", cell, elapsed: 0, duration: 380 };
+}
+
+/**
+ * The moment a depth lands.
+ *
+ * Long, by the standards of everything else here, and deliberately so: the
+ * palette underneath it shifts over 22 pieces, which is a change nobody would
+ * ever notice happening. The feeling of getting somewhere comes from the moment
+ * it lands, not from the state it lands in, so this is the effect that makes
+ * the other two worth building.
+ */
+export function deepenSweep(x: number, y: number, radius: number): Effect {
+  return { kind: "deepen", x, y, radius, elapsed: 0, duration: 900 };
 }
 
 export function floatText(x: number, y: number, text: string, big = false): Effect {

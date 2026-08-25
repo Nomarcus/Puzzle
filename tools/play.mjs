@@ -868,6 +868,101 @@ check("and the rim turns to stone", ramped.stone > 0, `${ramped.stone} stones`);
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 
+// --- what depth looks like -------------------------------------------------
+// The ramp changed the rules every 22 pieces and changed nothing you could see,
+// so depth 8 looked exactly like depth 0. These pin the two halves of the fix
+// on the real screen: the ground deepens, and it deepens into the theme's own
+// hue rather than drifting toward some shared colour.
+//
+// The backdrop is sampled from the canvas itself rather than from the numbers
+// that produced it — the sheet is baked offscreen and blitted, so reading the
+// source would prove the maths and not the picture.
+const sampleGround = () =>
+  page.evaluate(() => {
+    const canvas = document.querySelector("#board");
+    const ctx = canvas.getContext("2d");
+    // Top-left corner: backdrop everywhere, on every disc size.
+    const d = ctx.getImageData(6, 6, 1, 1).data;
+    const [r, g, b] = [d[0] / 255, d[1] / 255, d[2] / 255];
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    // Chroma, not HSL saturation. HSL saturation is scale-invariant, so a blue
+    // washed halfway to white still reports 100% and the bleaching failure
+    // sails straight past it. Chroma is the distance from grey, which is what
+    // both failure modes — mud and bleach — actually destroy.
+    const c = max - min;
+    if (max === min) return { h: 0, c: 0, l };
+    let h;
+    if (max === r) h = ((g - b) / c + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / c + 2) / 6;
+    else h = ((r - g) / c + 4) / 6;
+    return { h: h * 360, c, l };
+  });
+
+await page.evaluate(() => window.__shiftle.start("endless"));
+await page.waitForTimeout(500);
+const shallow = await sampleGround();
+check("a fresh round starts at the top", (await page.evaluate(() => window.__shiftle.depth())) === 0);
+
+const dived = await page.evaluate(async () => {
+  const api = window.__shiftle;
+  for (let i = 0; i < 1200; i++) {
+    const state = api.state();
+    if (!state || state.over) break;
+    if (api.depth() >= 4) break;
+    if (!api.botMove()) break;
+  }
+  return { depth: api.depth(), over: api.state()?.over ?? true };
+});
+await page.waitForTimeout(1400);
+
+if (dived.depth >= 4) {
+  const deep = await sampleGround();
+  check("the ground deepens as the round goes on",
+    deep.l < shallow.l - 0.01,
+    `lightness ${(shallow.l * 100).toFixed(1)}% -> ${(deep.l * 100).toFixed(1)}% at depth ${dived.depth}`);
+  // The failure this guards is specific: blending toward gold cancels to grey
+  // and compositing it bleaches toward white. Both drop the saturation.
+  check("and gets richer rather than greyer",
+    deep.c >= shallow.c - 0.005,
+    `chroma ${shallow.c.toFixed(3)} -> ${deep.c.toFixed(3)}`);
+  check("and it is still the same theme, not a drift toward some other colour",
+    Math.abs(deep.h - shallow.h) < 8,
+    `hue ${shallow.h.toFixed(1)} -> ${deep.h.toFixed(1)}`);
+  // Never anywhere near a dark theme, which is the whole art brief.
+  check("and never anywhere near a dark screen", deep.l > 0.4,
+    `lightness ${(deep.l * 100).toFixed(1)}%`);
+} else {
+  check("the bot reached a depth worth measuring", false, `only got to ${dived.depth}`);
+}
+
+// --- and none of it reaches the clock -------------------------------------
+// Marcus asked for depth in free play only. The gate is the ramp itself rather
+// than a mode name, so this checks the thing that does the gating.
+//
+// Note this drives the real button. `__shiftle.start` is startGame, which only
+// knows daily and endless, so start("time") quietly runs free play under the
+// wrong name — a check written that way passes while testing nothing.
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+await page.evaluate(() => window.__shiftle.timeAttack());
+await page.waitForTimeout(500);
+const timed = await page.evaluate(async () => {
+  const api = window.__shiftle;
+  for (let i = 0; i < 200; i++) {
+    const state = api.state();
+    if (!state || state.over) break;
+    if (!api.botMove()) break;
+  }
+  return { depth: api.depth(), perDepth: api.state()?.ramp.piecesPerDepth ?? -1 };
+});
+check("time attack carries no ramp at all", timed.perDepth === 0, `piecesPerDepth=${timed.perDepth}`);
+check("so its depth never leaves zero, however long the round runs",
+  timed.depth === 0, `depth=${timed.depth}`);
+
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
 // --- safe-area insets ------------------------------------------------------
 // Nothing here has a notch, so this drives the insets by hand. The layout used
 // to parse the custom property directly, and whether env() is substituted at

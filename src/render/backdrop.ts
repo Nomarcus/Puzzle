@@ -17,6 +17,7 @@
  */
 
 import type { Theme } from "./theme.js";
+import { deepen, depthShift } from "./depth.js";
 import { drawCandySquare } from "./candy.js";
 
 export interface Drifter {
@@ -243,6 +244,13 @@ export function makeBackdropSheet(
   height: number,
   theme: Theme,
   halo?: Halo,
+  /**
+   * How deep the free-play round has got. Zero everywhere else — the daily, the
+   * levels, the challenges and time attack all run without a ramp, so their
+   * depth is structurally zero and none of this can reach them. That is the
+   * gate: the ramp itself, not a mode name somebody has to remember to check.
+   */
+  depth = 0,
 ): HTMLCanvasElement | null {
   if (width <= 0 || height <= 0) return null;
 
@@ -255,9 +263,21 @@ export function makeBackdropSheet(
   const w = canvas.width;
   const h = canvas.height;
 
+  // Deeper is the theme's own hue, saturated — see src/render/depth.ts for why
+  // it is not a march toward gold, which was tried twice and goes grey.
+  const shift = depthShift(depth);
   const base = ctx.createLinearGradient(0, 0, 0, h);
-  base.addColorStop(0, theme.backdrop[0]);
-  base.addColorStop(1, theme.backdrop[1]);
+  // Graded, not uniform: the bottom deepens fully and the top only a little, so
+  // the light still reads as coming from above and the gradient itself gets
+  // steeper as the round goes on.
+  //
+  // Grading is the cheap way to say "lit from above" here, because the obvious
+  // way — a warm wash over the whole screen — adds a second hue to a cool
+  // ground, and mixing complementary hues is exactly what greyed out the two
+  // designs this one replaced. The glow further down is kept tight for the
+  // same reason.
+  base.addColorStop(0, deepen(theme.backdrop[0], shift * 0.55));
+  base.addColorStop(1, deepen(theme.backdrop[1], shift));
   ctx.fillStyle = base;
   ctx.fillRect(0, 0, w, h);
 
@@ -265,29 +285,59 @@ export function makeBackdropSheet(
   // what makes a backdrop read as "just blue": these put a warm corner and a
   // cool one into it, far too faint to name but enough that the eye stops
   // seeing one flat colour.
-  const spots: ReadonlyArray<readonly [fx: number, fy: number, scale: number, tint: string]> = [
-    [0.12, 0.16, 0.55, "255, 255, 255"],
-    [0.9, 0.28, 0.5, "255, 214, 120"],
-    [0.06, 0.52, 0.45, "255, 160, 190"],
-    [0.2, 0.84, 0.5, "255, 255, 255"],
-    [0.86, 0.92, 0.48, "150, 245, 220"],
+  //
+  // The last number is how the pool answers depth: the warm ones strengthen and
+  // the cool and white ones recede, so the light turns over as the round goes
+  // on. Gently, though. Pushed hard — 0.55 was the first attempt — five
+  // full-screen washes stack up and bleach the deepened ground straight back to
+  // the pastel it started as, which undoes the gradient above rather than
+  // adding to it.
+  const spots: ReadonlyArray<
+    readonly [fx: number, fy: number, scale: number, tint: string, warm: number]
+  > = [
+    [0.12, 0.16, 0.55, "255, 255, 255", -0.7],
+    [0.9, 0.28, 0.5, "255, 214, 120", 1],
+    [0.06, 0.52, 0.45, "255, 160, 190", 0.6],
+    [0.2, 0.84, 0.5, "255, 255, 255", -0.7],
+    [0.86, 0.92, 0.48, "150, 245, 220", -1],
   ];
-  for (const [fx, fy, scale, tint] of spots) {
-    const radius = Math.max(w, h) * scale;
+  for (const [fx, fy, scale, tint, warm] of spots) {
+    const alpha = Math.max(0.08, Math.min(0.42, 0.3 + warm * shift * 0.26));
+    const radius = Math.max(w, h) * scale * (1 + warm * shift * 0.3);
     const x = w * fx;
     const y = h * fy;
 
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    gradient.addColorStop(0, `rgba(${tint}, 0.30)`);
+    gradient.addColorStop(0, `rgba(${tint}, ${alpha.toFixed(3)})`);
     gradient.addColorStop(1, `rgba(${tint}, 0)`);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, w, h);
   }
 
+  // A little real warmth at the very top, where the light is coming from. Kept
+  // tight and weak on purpose: spread across the screen it desaturates the
+  // ground it is meant to be lighting, and the grading above is already doing
+  // most of this work.
+  if (shift > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = shift * 0.22;
+    const glow = ctx.createRadialGradient(w * 0.5, 0, 0, w * 0.5, 0, h * 0.42);
+    glow.addColorStop(0, "#FFB84D");
+    glow.addColorStop(1, "rgba(255, 184, 77, 0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
   if (halo && halo.radius > 0) {
     const outer = halo.radius * 2.1;
     const gradient = ctx.createRadialGradient(halo.x, halo.y, halo.radius * 0.4, halo.x, halo.y, outer);
-    gradient.addColorStop(0, theme.backdrop[0]);
+    // Deepened alongside the ground it sits on. Left at the theme's own colour
+    // this is a pale wash at 0.6 alpha over twice the disc's radius, and at
+    // depth it would bleach out the very gradient it is drawn on top of — the
+    // halo's job is to lift the disc off the ground, not to repaint it.
+    gradient.addColorStop(0, deepen(theme.backdrop[0], shift));
     gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
 
     ctx.globalAlpha = 0.6;

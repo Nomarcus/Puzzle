@@ -4,6 +4,38 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
+## 1.0 (16)
+
+Free play now looks like it is getting deeper. Nothing about how it plays has
+changed — the ramp is the same ramp.
+
+### What to test
+
+**Play free play for a while and watch the screen, not the board.** Every 22
+pieces the round goes a depth deeper, and now three things happen: light sweeps
+across the disc as it lands, the background settles into a richer version of
+whatever theme you chose, and one more segment lights up around the rim of the
+dish.
+
+**The rim is a counter.** Twelve segments, one per depth, filling clockwise from
+the top. You should be able to see how deep you are without reading the number
+in the header. Past twelve it fills again in a hotter colour.
+
+**Check it still looks like your theme.** Sky should still be blue and
+Bubblegum should still be pink at depth 9 — deeper and richer, never greyer and
+never darker. If any theme looks washed out or muddy at depth, that is the bug
+to report.
+
+**And check the clock mode is untouched.** Time attack has no depth and should
+look exactly as it did in build 15 — no rim segments, no colour change. Same for
+the daily and the levels.
+
+### Fixed since build 15
+
+- Nothing. This build only adds the above.
+
+---
+
 ## 1.0 (15)
 
 A start screen build. The menu itself, nothing about how the game plays.

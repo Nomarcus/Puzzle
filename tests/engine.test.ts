@@ -11,7 +11,15 @@ import {
   unlockProgress,
   unlockedBetween,
 } from "../src/engine/progress.js";
-import { THEMES, blockColour } from "../src/render/theme.js";
+import { SKY, THEMES, blockColour } from "../src/render/theme.js";
+import {
+  BEZEL_SEGMENTS,
+  bezel,
+  bezelColour,
+  deepen,
+  depthShift,
+  toHSL,
+} from "../src/render/depth.js";
 import {
   applyClears,
   canPlace,
@@ -1779,5 +1787,112 @@ describe("challenge codes", () => {
     const shared = Math.min(greedy.length, plain.length);
     expect(shared).toBeGreaterThan(RULES.traySize * 2);
     expect(greedy.slice(0, shared)).toEqual(plain.slice(0, shared));
+  });
+});
+
+describe("what depth looks like", () => {
+  it("changes nothing at the top of a round", () => {
+    expect(depthShift(0)).toBe(0);
+    for (const theme of THEMES) {
+      expect(deepen(theme.backdrop[0], depthShift(0))).toBe(theme.backdrop[0]);
+      expect(deepen(theme.backdrop[1], depthShift(0))).toBe(theme.backdrop[1]);
+    }
+  });
+
+  it("holds every theme's hue exactly, however deep it goes", () => {
+    // Rule 1: depth modifies the theme, it never replaces it. Drifting the hue
+    // is how a Bubblegum player would end up looking at somebody else's theme.
+    for (const theme of THEMES) {
+      for (const start of theme.backdrop) {
+        const before = toHSL(start)!;
+        for (const depth of [1, 4, 9, 30]) {
+          const after = toHSL(deepen(start, depthShift(depth)))!;
+          // 1.5 degrees is the 8-bit hex round-trip, measured: the worst case
+          // across all seven themes is Mint's ground at 0.65. Real drift would
+          // be tens of degrees, so this still catches it.
+          expect(Math.abs(after.h - before.h)).toBeLessThan(1.5);
+        }
+      }
+    }
+  });
+
+  it("gets richer rather than greyer", () => {
+    // Rule 3, and the one that killed two earlier attempts: blending toward
+    // gold cancelled to mud and compositing it bleached toward white. Both
+    // would fail here, because both drop the saturation.
+    for (const theme of THEMES) {
+      for (const start of theme.backdrop) {
+        const before = toHSL(start)!;
+        const after = toHSL(deepen(start, depthShift(9)))!;
+        expect(after.s).toBeGreaterThanOrEqual(before.s - 1e-9);
+        expect(after.l).toBeLessThan(before.l);
+      }
+    }
+  });
+
+  it("never arrives anywhere near a dark theme", () => {
+    // The whole art brief in one assertion. Lemonade's ground is the darkest
+    // starting point of the seven, and even it stays well clear of the floor.
+    for (const theme of THEMES) {
+      for (const start of theme.backdrop) {
+        for (const depth of [9, 12, 40, 1000]) {
+          expect(toHSL(deepen(start, depthShift(depth)))!.l).toBeGreaterThanOrEqual(0.41);
+        }
+      }
+    }
+  });
+
+  it("stops shifting once it is deep, so it cannot run away", () => {
+    const nine = deepen(SKY.backdrop[0], depthShift(9));
+    expect(deepen(SKY.backdrop[0], depthShift(50))).toBe(nine);
+    expect(deepen(SKY.backdrop[0], depthShift(5000))).toBe(nine);
+  });
+
+  it("survives a colour it cannot read instead of taking the frame down", () => {
+    // This runs inside a draw call. A bad value should cost a shade, not a frame.
+    expect(deepen("not a colour", 0.4)).toBe("not a colour");
+    expect(deepen("", 0.4)).toBe("");
+    expect(toHSL("#zzz")).toBeNull();
+    // Short hex is legal CSS and the themes could start using it any day.
+    expect(toHSL("#0af")).toEqual(toHSL("#00aaff"));
+  });
+
+  it("fills the rim one segment per depth", () => {
+    expect(bezel(0)).toEqual({ lit: 0, lap: 0 });
+    expect(bezel(1)).toEqual({ lit: 1, lap: 0 });
+    expect(bezel(11)).toEqual({ lit: 11, lap: 0 });
+  });
+
+  it("shows a completed lap as full, not as empty", () => {
+    // The remainder at exactly 12 is zero, and blanking the rim at the moment
+    // it completes would read as losing the run rather than finishing a lap.
+    expect(bezel(12)).toEqual({ lit: 12, lap: 0 });
+    expect(bezel(13)).toEqual({ lit: 1, lap: 1 });
+    expect(bezel(24)).toEqual({ lit: 12, lap: 1 });
+    expect(bezel(25)).toEqual({ lit: 1, lap: 2 });
+  });
+
+  it("still says something at a depth nobody will reach", () => {
+    // Depth is unbounded in the engine: the stone dial tightens forever, so
+    // there is no depth the game refuses to go past.
+    for (const depth of [40, 200, 5000]) {
+      const { lit, lap } = bezel(depth);
+      expect(lit).toBeGreaterThanOrEqual(1);
+      expect(lit).toBeLessThanOrEqual(BEZEL_SEGMENTS);
+      expect(lap).toBeGreaterThanOrEqual(0);
+      expect(bezelColour(lit - 1, lap)).toMatch(/^rgb\(/);
+    }
+  });
+
+  it("never picks a block colour for the rim", () => {
+    // Rule 2 from the other side: the rim must not start looking like a cell.
+    const blocks = new Set(THEMES.flatMap((t) => t.blocks.map((b) => b.base.toLowerCase())));
+    for (let lap = 0; lap < 3; lap++) {
+      for (let i = 0; i < BEZEL_SEGMENTS; i++) {
+        const colour = bezelColour(i, lap);
+        expect(colour).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+        expect(blocks.has(colour)).toBe(false);
+      }
+    }
   });
 });

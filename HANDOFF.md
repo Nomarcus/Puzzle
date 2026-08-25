@@ -204,6 +204,88 @@ by shrinking the logo to a token. Swedish is checked separately because it is
 the longer language — "Mot klockan" wraps to two lines inside its tile — and it
 is the one Marcus reads.
 
+## What depth looks like
+
+The ramp changed the rules every 22 pieces and changed nothing you could see, so
+depth 8 looked exactly like depth 0 and a long run felt like a short one that
+had gone on a while. Three things now move with the depth. The maths is in
+`src/render/depth.ts`, kept out of the draw calls so it is tested rather than
+eyeballed.
+
+**The rim of the dish is a counter.** Twelve segments, one per depth, filling
+clockwise from the top and walking lemon to orange as they go; past twelve it
+fills again in a hotter colour, because depth is unbounded in the engine and the
+rim has to say something at depth 30 as well as at depth 3. This is the part you
+can *count* — the number in the header says the same thing, but nobody reads a
+header. It rides the plate's existing edge, and that is a constraint rather than
+a preference: concentric growth rings were the first design and the band outside
+the board is `pad * 4`, about six pixels on a phone, so twelve rings landed on
+top of each other. The disc is already 0.485 of the content width, so there was
+nothing to grow into either.
+
+**The ground deepens into the theme's own hue.** Hue held exactly, saturation
+pushed, lightness dropped a little, graded so the bottom deepens more than the
+top and the light still reads as coming from above. Every theme intensifies into
+itself: Sky to a deep vivid blue, Bubblegum to a deep pink, Mint to a deep
+emerald, with no per-theme colour to hand-pick and no way to drift off-brand.
+
+**And the moment lands.** A depth change spread over 22 pieces is a change
+nobody notices, so light sweeps across the disc as it arrives and the new
+palette settles in behind it. Without this the other two are invisible, which is
+why it is not optional polish.
+
+### Three rules, and the two designs that broke on the third
+
+1. **Depth modifies the theme, it never replaces it.** Four of the seven themes
+   are earned with lifetime score; if depth overwrote the colours, choosing
+   Bubblegum would stop meaning anything.
+2. **Block colour is untouched.** A line only pays a spin if every cell shares
+   one colour, and the eight hues are spaced by lightness for colour-blind
+   players. Nothing here goes near `theme.blocks`.
+3. **It cannot drain the colour.** Dark slate, neon, a violet gradient — the
+   whole default way of signalling depth is the look the brief rules out.
+
+Rule 3 took three attempts, and the first two looked right in the source and
+wrong on the screen:
+
+- **Blending the backdrop toward gold cancels to grey.** Sky's blue and gold are
+  near-complementary, so interpolating between them in RGB destroys the
+  saturation. By depth 9 the screen was mud.
+- **Compositing the gold in `overlay` bleaches instead.** Sky's blue channel is
+  already at maximum, so overlay screens it and the whole screen washed out
+  toward white.
+
+Blue cannot travel to gold at all: the short way round the wheel passes through
+green, which fights the green blocks, and the long way passes through violet.
+Holding the hue and pushing the saturation sidesteps it — and is the better idea
+anyway, because it needs no shared target colour.
+
+A third thing had to be dialled back rather than redesigned: the pools of light
+and the halo were first given depth responses of 0.55 and 0.95 alpha, and five
+full-screen washes at those strengths bleach the deepened ground straight back
+to the pastel it started as. They are gentle now, and the halo is deepened
+alongside the ground it sits on rather than staying at the theme's own colour.
+
+### It is free play only, and the gate is structural
+
+Marcus asked for this in free play and explicitly not in time attack. Only one
+`createGame` call in the app passes a ramp — the free-play path — so the daily,
+the levels, the challenges and time attack all run on `NO_RAMP`, their depth is
+structurally zero, and everything above is gated on the depth rather than on a
+mode name somebody has to remember to check. `npm run play` drives the real time
+attack button and asserts both `piecesPerDepth === 0` and `depth === 0` after a
+full round.
+
+### How it was measured
+
+The backdrop is sampled **off the canvas** rather than from the numbers that
+produced it — the sheet is baked offscreen and blitted, so reading the source
+would prove the maths and not the picture. The metric is **chroma**, not HSL
+saturation: HSL saturation is scale-invariant, so a blue washed halfway to white
+still reports 100% and the bleaching failure sails straight past it. Measured
+between depth 0 and depth 4 on a real round: lightness 75.7% → 72.4%, chroma
+0.486 → 0.522, hue 199.4 → 198.5. Deeper, more colourful, same theme.
+
 ## Wild blocks
 
 Colour was the thinnest system in the game. It has exactly one job — a line
@@ -504,6 +586,7 @@ Game Center boards stay for the daily and free play.
 | Progression | Done. Seven themes, four of them earned. Cosmetic only. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, seven themes. |
+| Depth visuals | Done. Rim counter, deepening ground, arrival sweep. Free play only; the clock mode is untouched by construction. |
 | Start screen | Done. The disc fits the band the column leaves it; records on one row. Pinned by `npm run play` in both languages. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance` and `npm run ramp`. |

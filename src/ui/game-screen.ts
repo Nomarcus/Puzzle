@@ -34,6 +34,7 @@ import {
   progress,
   shake,
   pushSettle,
+  deepenSweep,
   shockwave,
   spinSettle,
   stoneLands,
@@ -401,6 +402,25 @@ export class GameScreen {
    * Where the furniture ended up. Only the browser tests read this — it is the
    * one way to check the safe-area insets landed without a notched device.
    */
+  /**
+   * Bakes the background sheet for the depth the round is at now.
+   *
+   * Six full-screen gradient passes, so it is baked rather than drawn live —
+   * and re-baked only when the depth actually changes, which in free play is
+   * once every 22 pieces and in every other mode is never. Cheap enough to sit
+   * inside the same frame as the sweep that announces it.
+   */
+  private rebakeBackdrop(): void {
+    const { width, height, board, boardRadius } = this.layout;
+    this.sheet = makeBackdropSheet(
+      width,
+      height,
+      this.theme,
+      { x: board.cx, y: board.cy, radius: boardRadius },
+      depthOf(this.state),
+    );
+  }
+
   getLayout(): { headerY: number; trayTop: number; boardCy: number; boardRadius: number } {
     return {
       headerY: this.layout.headerY,
@@ -474,11 +494,7 @@ export class GameScreen {
       headerY,
     };
 
-    this.sheet = makeBackdropSheet(width, height, this.theme, {
-      x: cx,
-      y: cy,
-      radius: boardRadius,
-    });
+    this.rebakeBackdrop();
 
     // Scattered over the whole window, not just the playable column. On a
     // tablet the margins around the disc are the part that needs filling; on a
@@ -924,6 +940,10 @@ export class GameScreen {
     if (events.depthReached !== null) {
       const { cx, cy } = this.layout.board;
       this.effects.push(floatText(cx, cy - 40, `${t("depth")} ${events.depthReached}`, true));
+      // The palette underneath shifts over the next 22 pieces, which nobody
+      // would ever catch happening. This is the moment that makes it felt.
+      this.effects.push(deepenSweep(cx, cy, this.layout.boardRadius));
+      this.rebakeBackdrop();
       this.options.haptic?.("heavy");
       playSound("deeper", 0, events.depthReached);
     }
@@ -1008,6 +1028,7 @@ export class GameScreen {
         this.theme,
         coreFraction(this.state.core, this.state.charge),
         this.clock,
+        depthOf(this.state),
       );
 
       // Decoration, in its own pass. If any of it throws, the player still gets
@@ -1018,6 +1039,7 @@ export class GameScreen {
         this.drawClearBursts(ctx, board);
         if (this.pointer.kind === "drag") this.drawDrag(ctx, board);
         this.drawShockwaves(ctx);
+        this.drawDeepenSweeps(ctx);
         drawParticles(ctx, this.particles, this.theme);
       } catch (error) {
         this.reportPaintFailure(error);
@@ -1107,6 +1129,53 @@ export class GameScreen {
   }
 
   /** The ring of light that races out on a bullseye. */
+  /**
+   * Light crossing the disc as a new depth settles in.
+   *
+   * Clipped to the plate, so it reads as the board itself catching the light
+   * rather than as a flash over the whole screen — the screen already flashes
+   * for a bullseye and the two must not be confused. Warm, because warm is what
+   * is left once dark and neon are both ruled out by the brief.
+   */
+  private drawDeepenSweeps(ctx: CanvasRenderingContext2D): void {
+    for (const effect of this.effects) {
+      if (effect.kind !== "deepen") continue;
+      const t = easeOutCubic(progress(effect));
+      // In fast, out slow: the arrival is the part worth noticing.
+      const alpha = Math.sin(Math.min(1, progress(effect)) * Math.PI) * 0.85;
+      if (alpha <= 0.01) continue;
+
+      const reach = effect.radius * 1.16;
+      ctx.save();
+      try {
+        ctx.beginPath();
+        ctx.arc(effect.x, effect.y, reach, 0, Math.PI * 2);
+        ctx.clip();
+
+        // A diagonal band travelling from top-left to bottom-right.
+        const span = reach * 2;
+        const head = -reach + t * (span + reach);
+        const gradient = ctx.createLinearGradient(
+          effect.x + head - reach * 0.55,
+          effect.y + head - reach * 0.55,
+          effect.x + head + reach * 0.55,
+          effect.y + head + reach * 0.55,
+        );
+        gradient.addColorStop(0, "rgba(255, 246, 214, 0)");
+        gradient.addColorStop(0.45, "rgba(255, 240, 196, 0.9)");
+        gradient.addColorStop(0.6, "rgba(255, 200, 108, 0.55)");
+        gradient.addColorStop(1, "rgba(255, 200, 108, 0)");
+
+        ctx.globalAlpha = alpha;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = gradient;
+        ctx.fillRect(effect.x - reach, effect.y - reach, reach * 2, reach * 2);
+      } finally {
+        ctx.restore();
+      }
+    }
+  }
+
   private drawShockwaves(ctx: CanvasRenderingContext2D): void {
     for (const effect of this.effects) {
       if (effect.kind !== "shockwave") continue;
