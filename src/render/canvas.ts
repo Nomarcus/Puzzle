@@ -12,7 +12,8 @@ import type { BoardSpec } from "../engine/geometry.js";
 import { type Board, WILD, colourOf, getCell, isStone, isStripedValue } from "../engine/board.js";
 import type { Piece } from "../engine/pieces.js";
 import { type SectorGeometry, annularSectorPath, ringRadii } from "./annulus.js";
-import { type Theme, blockColour } from "./theme.js";
+import { type BlockColour, type Theme, blockColour } from "./theme.js";
+import { CANDY, type Material, cellNoise, materialAt } from "./material.js";
 import { BEZEL_SEGMENTS, bezel, bezelColour } from "./depth.js";
 
 /** Sector 0 sits at twelve o'clock, like a dial. */
@@ -161,11 +162,16 @@ export function drawBlock(
   alpha = 1,
   muted = false,
   striped = false,
+  /** What the block is made of. Defaults to the sweet it has always been. */
+  material: Material = CANDY,
 ): void {
   if (colourId === WILD && !muted) {
     drawWild(ctx, g, theme, alpha);
     return;
   }
+  // A block with nowhere to go is greyed out to say so, and that message beats
+  // any amount of polish: a muted diamond still has to read as unplayable.
+  if (muted) material = CANDY;
   const colour = muted ? theme.muted : blockColour(theme, colourId);
   const ri = g.innerRadius + g.pad;
   const ro = g.outerRadius - g.pad;
@@ -202,13 +208,30 @@ export function drawBlock(
       ctx.arc(g.cx, g.cy, ri + bandIn / 2, g.startAngle - 0.2, g.endAngle + 0.2);
       ctx.stroke();
 
-      // Narrow specular streak.
-      const gloss = width * 0.1;
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.42)";
+      // Narrow specular streak. Wider and brighter the harder the material.
+      const gloss = width * material.gloss;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${material.glossAlpha})`;
       ctx.lineWidth = gloss;
       ctx.beginPath();
       ctx.arc(g.cx, g.cy, ro - bandOut * 0.72, g.startAngle - 0.2, g.endAngle + 0.2);
       ctx.stroke();
+
+      drawFacets(ctx, g, colour, material, ri, ro, width);
+
+      // Light catching the cut edge, drawn INSIDE the clip.
+      //
+      // Outside it, half of every stroke straddles the path and lands in the
+      // gap between cells, so the board grows a white grid and every block
+      // reads a shade paler than it is — which is the one thing the colour
+      // rules forbid, since a pale strawberry and a pale bubblegum are the same
+      // block to somebody matching by lightness. Clipped, only the inner half
+      // survives, and it reads as an edge rather than as a border.
+      if (material.rim > 0) {
+        annularSectorPath(ctx, g);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${material.rim})`;
+        ctx.lineWidth = Math.max(1, width * 0.07);
+        ctx.stroke();
+      }
 
       if (striped) {
         // A cross of bright bands: one around the ring, one across it. The mark
@@ -237,10 +260,131 @@ export function drawBlock(
     ctx.strokeStyle = theme.blockOutline;
     ctx.lineWidth = 1.5;
     ctx.stroke();
+
+    if (material.sparkle > 0) drawSparkle(ctx, g, material, ri, ro, width);
   } finally {
     // Balanced whatever happens inside. An unbalanced save is not a cosmetic
     // problem: the clip and the transform it holds stay alive into the next
     // frame, and they compound until nothing lands on screen at all.
+    ctx.restore();
+  }
+}
+
+/**
+ * The cuts that turn a sweet into a stone worth having.
+ *
+ * Radial, because the cell is a ring segment: a cut along the arc would follow
+ * the bevel that is already there and read as another highlight, while a cut
+ * across it breaks the shape into faces that catch light differently. Each face
+ * is nudged lighter or darker from the block's *own* light and dark shades
+ * rather than toward white, so a facetted block keeps its hue and its place in
+ * the lightness order the colour-blind reading depends on.
+ */
+function drawFacets(
+  ctx: CanvasRenderingContext2D,
+  g: SectorGeometry,
+  colour: BlockColour,
+  material: Material,
+  ri: number,
+  ro: number,
+  width: number,
+): void {
+  if (material.facets <= 0) return;
+  const spread = g.endAngle - g.startAngle;
+
+  ctx.save();
+  try {
+    for (let i = 1; i <= material.facets; i++) {
+      const t = i / (material.facets + 1);
+      const angle = g.startAngle + spread * t;
+      // Kept very faint. A strong wash over half a cell does not read as a cut
+      // face, it reads as a second colour — and on a board where a line only
+      // pays out if every cell is the same colour, a block that looks like two
+      // is worse than a block with no facets at all.
+      ctx.globalAlpha = material.facetDepth;
+      ctx.fillStyle = i % 2 === 0 ? colour.dark : colour.light;
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, ro, angle, g.startAngle + spread * Math.min(1, t + 1 / (material.facets + 1)));
+      ctx.arc(
+        g.cx,
+        g.cy,
+        ri,
+        g.startAngle + spread * Math.min(1, t + 1 / (material.facets + 1)),
+        angle,
+        true,
+      );
+      ctx.closePath();
+      ctx.fill();
+
+      // The cut itself. Faint on purpose: a crisp white line across a block
+      // reads as a scratch, and enough of them read as a grid laid over the
+      // board. What should say "cut" is the two faces meeting at different
+      // brightnesses, not the join between them.
+      ctx.globalAlpha = material.facetDepth * 0.9;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.75)";
+      ctx.lineWidth = Math.max(0.75, width * 0.03);
+      ctx.beginPath();
+      ctx.moveTo(g.cx + ri * Math.cos(angle), g.cy + ri * Math.sin(angle));
+      ctx.lineTo(g.cx + ro * Math.cos(angle), g.cy + ro * Math.sin(angle));
+      ctx.stroke();
+    }
+  } finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * A four-point glint, on a scattering of cells rather than all of them.
+ *
+ * All of them would be a texture, and a texture is not a reward — it is the
+ * fact that only some catch the light that makes the board look like it is made
+ * of something. Which cells is hashed from the cell's own position, so the
+ * sparkle sits still instead of crawling across the disc every frame.
+ */
+function drawSparkle(
+  ctx: CanvasRenderingContext2D,
+  g: SectorGeometry,
+  material: Material,
+  ri: number,
+  ro: number,
+  width: number,
+): void {
+  const midAngle = (g.startAngle + g.endAngle) / 2;
+  const mid = (ri + ro) / 2;
+  const noise = cellNoise(mid, midAngle);
+  if (noise > material.sparkle) return;
+
+  // Placed off-centre by the same hash, so the glints do not line up in a ring.
+  const angle = g.startAngle + (g.endAngle - g.startAngle) * (0.3 + noise * 1.4);
+  const radius = ri + width * (0.3 + cellNoise(midAngle, mid) * 0.4);
+  const x = g.cx + radius * Math.cos(angle);
+  const y = g.cy + radius * Math.sin(angle);
+  const arm = width * (0.3 + noise * 0.5);
+
+  ctx.save();
+  try {
+    ctx.globalAlpha *= 0.5 + noise * 0.5;
+    // A soft bloom under a short cross, rather than a hard plus sign. The plus
+    // on its own reads as clip art stuck on top of the block; the bloom is what
+    // makes it look like the light is coming off the surface.
+    const bloom = ctx.createRadialGradient(x, y, 0, x, y, arm * 1.5);
+    bloom.addColorStop(0, "rgba(255, 255, 255, 0.55)");
+    bloom.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = bloom;
+    ctx.beginPath();
+    ctx.arc(x, y, arm * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = Math.max(1, width * 0.055);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - arm, y);
+    ctx.lineTo(x + arm, y);
+    ctx.moveTo(x, y - arm * 0.72);
+    ctx.lineTo(x, y + arm * 0.72);
+    ctx.stroke();
+  } finally {
     ctx.restore();
   }
 }
@@ -601,14 +745,19 @@ export function drawBoard(
   depth = 0,
 ): void {
   drawPlate(ctx, layout, theme, depth);
+  const material = materialAt(depth);
 
   for (let r = 0; r < board.spec.rings; r++) {
     for (let s = 0; s < board.spec.sectors; s++) {
       const g = cellGeometry(layout, r, s);
       const value = getCell(board, r, s);
       if (value === 0) drawEmptyCell(ctx, g, theme);
+      // Stone deliberately does not follow the material ladder. It is the one
+      // thing on the disc that is not a sweet to be cleared, and the top of the
+      // ladder is "hard shiny mineral" — if stone joined in, the threat and the
+      // reward would end up looking like each other.
       else if (isStone(value)) drawStone(ctx, g, theme);
-      else drawBlock(ctx, g, colourOf(value), theme, 1, false, isStripedValue(value));
+      else drawBlock(ctx, g, colourOf(value), theme, 1, false, isStripedValue(value), material);
     }
   }
 

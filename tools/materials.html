@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>materials</title>
+<body style="margin:0;background:#111">
+<script type="module">
+import { DEFAULT_SPEC } from "/src/engine/geometry.ts";
+import { createBoard } from "/src/engine/board.ts";
+import { cellIndex } from "/src/engine/geometry.ts";
+import { computeLayout, drawBoard } from "/src/render/canvas.ts";
+import { makeBackdropSheet, drawBackdropSheet } from "/src/render/backdrop.ts";
+import { SKY } from "/src/render/theme.ts";
+import { MATERIALS } from "/src/render/material.ts";
+
+const SPEC = DEFAULT_SPEC;
+const STONE_FLAG = 32;
+
+// A realistic mid-round board: mostly full, a few gaps, and stone on the rim so
+// the threat can be compared against the reward at every tier.
+function board(depth) {
+  const b = createBoard(SPEC);
+  for (let r = 0; r < SPEC.rings; r++) {
+    for (let s = 0; s < SPEC.sectors; s++) {
+      if ((r * 5 + s * 3) % 9 === 0) continue;
+      b.cells[cellIndex(SPEC, r, s)] = ((s * 3 + r * 2) % 8) + 1;
+    }
+  }
+  const outer = SPEC.rings - 1;
+  for (const s of [1, 4, 8]) b.cells[cellIndex(SPEC, outer, s)] = STONE_FLAG;
+  return b;
+}
+
+const W = 520, H = 520, DPR = 3;
+window.__shots = [];
+
+for (const m of MATERIALS) {
+  const depth = m.from;
+  const canvas = document.createElement("canvas");
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + "px";
+  canvas.style.height = H + "px";
+  canvas.id = "m-" + m.id;
+  document.body.append(canvas);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(DPR, DPR);
+
+  const cx = W / 2, cy = H / 2, radius = Math.min(W, H) * 0.435;
+  const sheet = makeBackdropSheet(W, H, SKY, { x: cx, y: cy, radius }, depth);
+  drawBackdropSheet(ctx, sheet, W, H, SKY);
+  drawBoard(ctx, board(depth), computeLayout(SPEC, cx, cy, radius), SKY, 0, 0, depth);
+  window.__shots.push({ id: m.id, label: m.label, depth });
+}
+window.__ready = true;
+</script>
+</body>

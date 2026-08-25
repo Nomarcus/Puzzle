@@ -916,6 +916,10 @@ const dived = await page.evaluate(async () => {
 });
 await page.waitForTimeout(1400);
 
+check("and the blocks harden as it goes deeper",
+  (await page.evaluate(() => window.__shiftle.material())) !== "candy",
+  `material=${await page.evaluate(() => window.__shiftle.material())} at depth ${dived.depth}`);
+
 if (dived.depth >= 4) {
   const deep = await sampleGround();
   check("the ground deepens as the round goes on",
@@ -957,6 +961,8 @@ const timed = await page.evaluate(async () => {
   return { depth: api.depth(), perDepth: api.state()?.ramp.piecesPerDepth ?? -1 };
 });
 check("time attack carries no ramp at all", timed.perDepth === 0, `piecesPerDepth=${timed.perDepth}`);
+check("and its blocks stay the sweet they have always been",
+  (await page.evaluate(() => window.__shiftle.material())) === "candy");
 check("so its depth never leaves zero, however long the round runs",
   timed.depth === 0, `depth=${timed.depth}`);
 

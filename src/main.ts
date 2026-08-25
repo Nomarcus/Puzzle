@@ -12,6 +12,7 @@ import { coreReady } from "./engine/core.js";
 import { chooseMove } from "./engine/bot.js";
 import { applyMove } from "./engine/game.js";
 import { FREE_PLAY_RAMP } from "./engine/ramp.js";
+import { materialAt } from "./render/material.js";
 import { TIME_ATTACK } from "./engine/timeattack.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
@@ -1429,6 +1430,12 @@ if (import.meta.env.DEV) {
       return true;
     },
     streak: () => streakOf(dailyHistory(), new Date()),
+
+    /** What the blocks are made of right now, for the browser tests. */
+    material: () => {
+      const state = screen?.getState();
+      return materialAt(state ? depthOf(state) : 0).id;
+    },
 
     /** Where the menu's disc ended up, for the browser tests. */
     menuDisc: () => menu?.discBox() ?? null,

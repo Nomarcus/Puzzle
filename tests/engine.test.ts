@@ -13,6 +13,13 @@ import {
 } from "../src/engine/progress.js";
 import { SKY, THEMES, blockColour } from "../src/render/theme.js";
 import {
+  MATERIALS,
+  cellNoise,
+  materialAt,
+  materialChanged,
+  materialIndex,
+} from "../src/render/material.js";
+import {
   BEZEL_SEGMENTS,
   bezel,
   bezelColour,
@@ -1894,5 +1901,88 @@ describe("what depth looks like", () => {
         expect(blocks.has(colour)).toBe(false);
       }
     }
+  });
+});
+
+describe("what the blocks are made of", () => {
+  it("gives every other mode the sweet it has always had", () => {
+    // The daily, the levels, the challenges and time attack all run without a
+    // ramp, so their depth is structurally zero.
+    expect(materialAt(0).id).toBe("candy");
+    expect(materialAt(-5).id).toBe("candy");
+    expect(materialAt(Number.NaN).id).toBe("candy");
+    expect(MATERIALS[0]!.from).toBe(0);
+  });
+
+  it("climbs one tier at a time and never goes back", () => {
+    let seen = -1;
+    for (let depth = 0; depth <= 40; depth++) {
+      const index = materialIndex(depth);
+      expect(index).toBeGreaterThanOrEqual(seen);
+      expect(index - seen).toBeLessThanOrEqual(1);
+      seen = index;
+    }
+    expect(seen).toBe(MATERIALS.length - 1);
+  });
+
+  it("holds at the top rather than falling off it", () => {
+    // Depth is unbounded in the engine, so there is a depth past every tier.
+    const top = MATERIALS[MATERIALS.length - 1]!;
+    for (const depth of [12, 30, 500, 100000]) {
+      expect(materialAt(depth).id).toBe(top.id);
+    }
+  });
+
+  it("notices a tier being crossed, and only then", () => {
+    expect(materialChanged(2, 3)).toBe(true);
+    expect(materialChanged(3, 4)).toBe(false);
+    expect(materialChanged(8, 9)).toBe(true);
+    expect(materialChanged(11, 12)).toBe(true);
+    expect(materialChanged(12, 13)).toBe(false);
+    // Going nowhere is not a change, and neither is going backwards.
+    expect(materialChanged(9, 9)).toBe(false);
+    expect(materialChanged(12, 3)).toBe(false);
+  });
+
+  it("only ever gets shinier, never duller", () => {
+    for (let i = 1; i < MATERIALS.length; i++) {
+      const prev = MATERIALS[i - 1]!;
+      const next = MATERIALS[i]!;
+      expect(next.from).toBeGreaterThan(prev.from);
+      expect(next.gloss).toBeGreaterThanOrEqual(prev.gloss);
+      expect(next.glossAlpha).toBeGreaterThanOrEqual(prev.glossAlpha);
+      expect(next.rim).toBeGreaterThanOrEqual(prev.rim);
+      expect(next.facets).toBeGreaterThanOrEqual(prev.facets);
+      expect(next.sparkle).toBeGreaterThanOrEqual(prev.sparkle);
+    }
+  });
+
+  it("never paints over enough of a block to change what colour it is", () => {
+    // The rule this guards: a line only pays a spin if every cell shares one
+    // colour, and the eight hues are spaced by lightness for colour-blind
+    // players. A facet wash strong enough to read as a second colour, or a rim
+    // bright enough to pale the body, breaks both — the first version of this
+    // did exactly that at 0.46 and half of every block went white.
+    for (const material of MATERIALS) {
+      expect(material.facetDepth).toBeLessThanOrEqual(0.2);
+      expect(material.rim).toBeLessThanOrEqual(0.45);
+      // And a sparkle on every cell is a texture, not a reward.
+      expect(material.sparkle).toBeLessThanOrEqual(0.35);
+    }
+  });
+
+  it("puts its glints in the same places every frame", () => {
+    // Hashed from the cell, not drawn from the engine's RNG — that stream is
+    // threaded through game state for replay and decoration must never take
+    // from it — and not from the clock, or the sparkle crawls over the board.
+    for (const [r, a] of [[40, 0.5], [12.5, 2.1], [0, 0], [999, 6.28]] as const) {
+      const once = cellNoise(r, a);
+      expect(cellNoise(r, a)).toBe(once);
+      expect(once).toBeGreaterThanOrEqual(0);
+      expect(once).toBeLessThan(1);
+    }
+    // And different cells get different values, or every block sparkles at once.
+    const spread = new Set([cellNoise(40, 0.5), cellNoise(40, 1.1), cellNoise(55, 0.5)]);
+    expect(spread.size).toBe(3);
   });
 });

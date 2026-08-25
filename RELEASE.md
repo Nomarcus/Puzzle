@@ -4,6 +4,37 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
+## 1.0 (17)
+
+The blocks themselves now change as free play goes deeper. Still nothing about
+how it plays.
+
+### What to test
+
+**Play free play a long way and watch the blocks.** Every three depths they
+change material: candy → glazed → glass → crystal → diamond. Candy is what you
+have always seen; diamond has cut faces, a bright edge and glints on some
+blocks. Depth 12 is the last one.
+
+**Can you still tell the colours apart?** This is the thing to report. Every
+tier paints the same colour underneath and only changes the shine, because a
+line only pays a spin if every cell matches. If a crystal or diamond block ever
+looks like two colours, or two different colours start looking the same, that is
+a bug and an important one.
+
+**Can you still tell stone apart from a diamond block?** Stone stays plain grey
+on purpose and does not follow the ladder. At depth 12 there is a lot of shine
+on the board — check the threat still reads as a threat.
+
+**And check the other modes are untouched.** Time attack, the daily and the
+levels should all still be plain candy however long you play.
+
+### Fixed since build 16
+
+- Nothing. This build only adds the above.
+
+---
+
 ## 1.0 (16)
 
 Free play now looks like it is getting deeper. Nothing about how it plays has

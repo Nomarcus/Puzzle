@@ -266,6 +266,49 @@ full-screen washes at those strengths bleach the deepened ground straight back
 to the pastel it started as. They are gentle now, and the halo is deepened
 alongside the ground it sits on rather than staying at the theme's own colour.
 
+### The blocks harden as you go: candy to diamond
+
+Five tiers, one every three depths — candy, glazed, glass, crystal, diamond —
+in `src/render/material.ts`. Candy is what the game has always looked like and
+what every mode other than free play still is. Past depth 12 there is nothing
+further to become and the rim counter carries the reward on alone.
+
+It is a **finish** ladder, never a colour ladder, and that is forced rather than
+chosen: a line only pays a spin if every cell shares one colour, and the eight
+hues are spaced by lightness so they stay apart for colour-blind players. So
+every tier paints the same `colour.base` underneath and changes only what
+happens on top — specular width, edge light, facet cuts, glints.
+
+Three attempts went wrong on screen while looking right in the source, and all
+three are the same mistake in different clothes — putting white on a block:
+
+- **The rim light was drawn outside the clip.** Half of every stroke straddled
+  the path and landed in the gap between cells, so the board grew a white grid
+  and every block read a shade paler than it is. Clipped, only the inner half
+  survives and it reads as an edge rather than a border.
+- **The facet faces were far too strong.** At `facetDepth 0.46` a wash over half
+  a cell does not read as a cut face, it reads as a *second colour* — and on a
+  board where a line only pays if every cell matches, a block that looks like
+  two is worse than a block with no facets at all. They are at 0.12 and 0.17 now,
+  and what says "cut" is the two faces meeting, not the join between them.
+- **A crisp white line down each cut read as a scratch**, and enough of them as
+  a grid laid over the board.
+
+One trap worth knowing about for anything added here later: **stone must stay
+obviously not-a-block.** Stone is the one thing on the disc that is not a sweet
+to be cleared, and "hard shiny mineral" is exactly what the top of this ladder
+is. What keeps them apart is saturation — a diamond block is a fully saturated
+red with facets cut into it and stone has no hue at all — so no tier may drain
+the body's colour. Stone deliberately does not follow the ladder.
+
+Together with the rim counter this is where the continuous reward comes from:
+five materials times twelve rim segments is sixty visibly different states per
+lap, and the rim starts a new lap in a hotter colour each time it fills. A tier
+lands every three depths, roughly every 66 pieces.
+
+`npm run materials` renders all five on the real disc. Every tier was tuned by
+looking at that output.
+
 ### It is free play only, and the gate is structural
 
 Marcus asked for this in free play and explicitly not in time attack. Only one
@@ -586,7 +629,7 @@ Game Center boards stay for the daily and free play.
 | Progression | Done. Seven themes, four of them earned. Cosmetic only. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, seven themes. |
-| Depth visuals | Done. Rim counter, deepening ground, arrival sweep. Free play only; the clock mode is untouched by construction. |
+| Depth visuals | Done. Rim counter, deepening ground, arrival sweep, and a five-tier material ladder from candy to diamond. Free play only; the clock mode is untouched by construction. |
 | Start screen | Done. The disc fits the band the column leaves it; records on one row. Pinned by `npm run play` in both languages. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance` and `npm run ramp`. |
@@ -860,7 +903,8 @@ src/platform/   storage, haptics, share, Game Center — all no-op on the web
 tools/          bot, balance sweeps, browser tests, icon generation
                 `npm run balance` sweeps every disc and pack; `npm run endless`
                 asks whether a round ever ends at all; `npm run ramp` measures
-                the difficulty ramp; `npm run levels` the twenty levels
+                the difficulty ramp; `npm run levels` the forty levels;
+                `npm run materials` renders the five block materials
 ios/            the Xcode project
 ```
 

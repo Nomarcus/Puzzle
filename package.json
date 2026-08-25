@@ -24,7 +24,8 @@
     "ramp": "vite-node tools/ramp.ts",
     "core": "vite-node tools/core.ts",
     "verify:ios": "node tools/verify-ios.mjs",
-    "audio": "node tools/audio-preview.mjs"
+    "audio": "node tools/audio-preview.mjs",
+    "materials": "node tools/shot-materials.mjs"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
