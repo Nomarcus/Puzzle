@@ -4,7 +4,7 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
-## 1.0 (13)
+## 1.0 (14)
 
 The biggest build so far. Two new modes, twice as many levels, a new mechanic in
 the middle of the board, and a reason to come back tomorrow.
@@ -39,6 +39,15 @@ and not yet today should keep the streak and pulse the badge, not zero it.
 
 **Earned themes.** Four new palettes unlock on lifetime score, at 150k / 500k /
 1.5M / 4M. Locked ones show a padlock and a progress bar names the next one.
+
+### Fixed since build 13
+
+- Tapping a **locked theme** raised a notice that wiped the menu underneath it,
+  so dismissing it left an empty screen with no way back but force-quitting.
+  Notices now sit on top of what they cover. The same bug stranded you on four
+  other screens, including the one that fires when you unlock a theme.
+- The **Menu button** at the bottom of the level list was squashed flat by the
+  scroll.
 
 ### Known and deliberate
 

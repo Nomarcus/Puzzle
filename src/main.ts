@@ -118,8 +118,31 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * Replaces whatever screen is up. Every full screen goes through here, so only
+ * one can ever be on show.
+ */
 function overlay(className: string): HTMLDivElement {
   document.querySelectorAll(".overlay").forEach((node) => node.remove());
+  const node = el("div", `overlay ${className}`);
+  app.append(node);
+  return node;
+}
+
+/**
+ * A card *over* the current screen rather than instead of it.
+ *
+ * Notices and confirmations used to go through overlay(), which clears
+ * everything before it draws — so a notice raised from the menu took the menu
+ * with it, and dismissing the notice left an empty screen with no way back but
+ * force-quitting the app. It stranded a player in four places, including the
+ * one that fires when they unlock a theme: earning something locked them out.
+ *
+ * A modal has to leave what it covers alone. It is appended after, so it sits
+ * on top, and it fills the window, so nothing underneath can be tapped through
+ * it.
+ */
+function modal(className: string): HTMLDivElement {
   const node = el("div", `overlay ${className}`);
   app.append(node);
   return node;
@@ -263,6 +286,7 @@ function stopEverything(): void {
   document.querySelectorAll(".overlay").forEach((node) => node.remove());
   document.querySelectorAll(".goal-strip").forEach((node) => node.remove());
   document.querySelectorAll(".hud").forEach((node) => node.remove());
+  document.querySelectorAll(".scroll-top-fade").forEach((node) => node.remove());
   screen?.destroy();
   screen = null;
   menu?.stop();
@@ -289,7 +313,7 @@ function bankDaily(state: GameState): void {
 
 /** A card with one way out. For telling the player something, not asking. */
 function notice(title: string, body: string): void {
-  const node = overlay("confirm");
+  const node = modal("confirm");
   const card = el("div", "card");
   card.append(el("div", "card-title", title));
   card.append(el("p", "confirm-body", body));
@@ -305,7 +329,7 @@ function notice(title: string, body: string): void {
 function confirmThen(title: string, body: string, onConfirm: () => void): void {
   // A card over a dimmed board, not a full-screen wash — the question is small
   // and the player should still see the round they are about to give up.
-  const node = overlay("confirm");
+  const node = modal("confirm");
   const card = el("div", "card");
 
   card.append(el("div", "card-title", title));
@@ -566,6 +590,10 @@ function showLevels(): void {
   // Twenty tiles do not fit on a phone, so this screen scrolls — which means
   // the way out cannot live at the bottom of it. Appended to the app rather
   // than to the overlay so it stays pinned while the tiles scroll under it.
+  // A soft band behind the pinned button, so tiles scrolling under it fade out
+  // instead of running into it.
+  app.append(el("div", "scroll-top-fade"));
+
   const hud = el("div", "hud");
   const close = el("button", "icon");
   close.innerHTML = ICON_QUIT;
@@ -1336,6 +1364,12 @@ if (import.meta.env.DEV) {
       const shown = document.querySelector(".score-big")?.textContent ?? "";
       const digits = shown.replace(/[^0-9]/g, "");
       return digits ? Number(digits) : null;
+    },
+
+    /** Raises a notice, for the browser tests. */
+    notice: (title: string, body: string) => {
+      notice(title, body);
+      return true;
     },
 
     /** Progression, for the browser tests. */

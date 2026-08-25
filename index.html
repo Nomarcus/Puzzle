@@ -91,6 +91,35 @@
         background: rgba(255, 255, 255, 0.93);
       }
 
+      /*
+       * Nothing in a scrolling column may be squashed.
+       *
+       * Flex items shrink by default, and a column that overflows shrinks every
+       * one that lets it. The tiles have a min-height and survived; the Menu
+       * button had none and came out 38px tall instead of 62 — a thin green
+       * sliver with the text pressed against both edges.
+       */
+      .overlay.levels > * {
+        flex-shrink: 0;
+      }
+
+      /*
+       * A soft edge under the pinned close button, so tiles scrolling past it
+       * fade out rather than colliding with it.
+       */
+      .scroll-top-fade {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: calc(var(--safe-top) + 62px);
+        pointer-events: none;
+        background: linear-gradient(
+          rgba(255, 255, 255, 0.97) 55%,
+          rgba(255, 255, 255, 0)
+        );
+      }
+
       .overlay[hidden] {
         display: none;
       }

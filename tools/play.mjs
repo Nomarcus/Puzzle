@@ -525,6 +525,42 @@ check("and the result says time, not game over", ended.title === "Time!" || ende
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 
+// --- notices must never strand the player -----------------------------------
+// A notice used to go through overlay(), which clears the screen before it
+// draws — so dismissing one left nothing behind and the only way out was to
+// force-quit. Every notice in the app is checked here.
+await page.evaluate(() => window.__shiftle.setLifetime(0));
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
+// Tapping a theme you have not earned yet.
+await page.locator('.swatch.locked').first().click();
+await page.waitForTimeout(200);
+check("a locked theme explains itself", (await page.locator('[data-action="notice-ok"]').count()) === 1);
+check("and the menu is still underneath it", (await page.locator(".overlay.menu").count()) === 1);
+
+await page.locator('[data-action="notice-ok"]').click();
+await page.waitForTimeout(200);
+check(
+  "dismissing it leaves you back on the menu, not a dead screen",
+  (await page.locator('[data-action="daily"]').count()) === 1,
+);
+check("with the notice gone", (await page.locator('[data-action="notice-ok"]').count()) === 0);
+
+// The same hazard on a result screen: earning a theme raises a notice there,
+// and that one used to destroy the play-again and menu buttons.
+await page.evaluate(() => window.__shiftle.notice("Test", "Body"));
+await page.waitForTimeout(200);
+check("a notice over the menu never removes it",
+  (await page.locator(".overlay.menu").count()) === 1);
+await page.locator('[data-action="notice-ok"]').click();
+await page.waitForTimeout(150);
+check("and dismissing still leaves a way out",
+  (await page.locator('[data-action="daily"]').count()) === 1);
+
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(200);
+
 // --- progression -----------------------------------------------------------
 await page.evaluate(() => window.__shiftle.setLifetime(0));
 await page.evaluate(() => window.__shiftle.menu());
@@ -659,6 +695,23 @@ check("and nothing is still playing behind it", (await page.evaluate(() => windo
 {
   const box = await page.locator('.hud [data-action="menu"]').boundingBox();
   check("the way out is reachable without scrolling", box !== null && box.y < 200, `y=${box?.y}`);
+}
+
+// A scrolling flex column shrinks every child that lets it. The tiles have a
+// min-height and survived; the Menu button had none and came out 38px tall
+// instead of 62 — a thin sliver with the text pressed against both edges.
+{
+  await page.evaluate(() => {
+    const list = document.querySelector(".overlay.levels");
+    if (list) list.scrollTop = list.scrollHeight;
+  });
+  await page.waitForTimeout(250);
+  const menu = await page.locator(".overlay.levels .big").last().boundingBox();
+  check(
+    "and the button at the bottom is not squashed by the scroll",
+    menu !== null && menu.height >= 56,
+    `${menu?.height}px tall`,
+  );
 }
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(200);
