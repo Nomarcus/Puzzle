@@ -13,6 +13,13 @@ import {
 } from "../src/engine/progress.js";
 import { SKY, THEMES, blockColour } from "../src/render/theme.js";
 import {
+  ERAS,
+  eraAt,
+  eraChanged,
+  paletteFor,
+  themeForDepth,
+} from "../src/render/palette.js";
+import {
   MATERIALS,
   cellNoise,
   materialAt,
@@ -1954,6 +1961,9 @@ describe("what the blocks are made of", () => {
       expect(next.rim).toBeGreaterThanOrEqual(prev.rim);
       expect(next.facets).toBeGreaterThanOrEqual(prev.facets);
       expect(next.sparkle).toBeGreaterThanOrEqual(prev.sparkle);
+      // Grain is wood's alone and is not part of the climb — every other tier
+      // is smooth, so this is the one property that legitimately goes back down.
+      expect(next.grain).toBeGreaterThanOrEqual(0);
     }
   });
 
@@ -1984,5 +1994,132 @@ describe("what the blocks are made of", () => {
     // And different cells get different values, or every block sparkles at once.
     const spread = new Set([cellNoise(40, 0.5), cellNoise(40, 1.1), cellNoise(55, 0.5)]);
     expect(spread.size).toBe(3);
+  });
+});
+
+describe("palette eras", () => {
+  /** Hue, saturation and lightness separation of a set of eight blocks. */
+  const separation = (blocks: readonly { base: string }[]) => {
+    const c = blocks.map((b) => toHSL(b.base)!);
+    let minHue = 360;
+    for (let i = 0; i < c.length; i++) {
+      for (let j = i + 1; j < c.length; j++) {
+        const d = Math.abs(c[i]!.h - c[j]!.h);
+        minHue = Math.min(minHue, Math.min(d, 360 - d));
+      }
+    }
+    const ls = c.map((x) => x.l);
+    return {
+      minHue,
+      minSat: Math.min(...c.map((x) => x.s)),
+      lo: Math.min(...ls),
+      hi: Math.max(...ls),
+    };
+  };
+
+  it("swaps every colour at once, never one of them", () => {
+    // The rule this protects: a line only pays a spin if every cell shares one
+    // colour. Eight colours moving together is safe; one drifting toward a
+    // neighbour would make two distinct blocks start reading as a match.
+    for (const era of ERAS) {
+      const palette = paletteFor(SKY, era);
+      expect(palette).toHaveLength(SKY.blocks.length);
+      expect(new Set(palette.map((c) => c.base)).size).toBe(8);
+    }
+  });
+
+  it("leaves the first era exactly as the game shipped", () => {
+    expect(paletteFor(SKY, ERAS[0]!)).toBe(SKY.blocks);
+    expect(themeForDepth(SKY, 0)).toBe(SKY);
+    for (const theme of THEMES) expect(themeForDepth(theme, 0)).toBe(theme);
+  });
+
+  it("is never less separable than the palette that already ships", () => {
+    // The bar is measured, not invented: the shipped palette's tightest hue gap
+    // is 17.4 degrees (orange at 29 and lemon at 46) and its lowest saturation
+    // is 78%. Hand-picking eight fresh hexes per era was the first attempt and
+    // three of four candidates came in worse — 12.6 degrees and 49% at worst.
+    // A rigid rotation cannot: it moves all eight together and the gaps between
+    // them are preserved exactly.
+    const bar = separation(SKY.blocks);
+    expect(bar.minHue).toBeCloseTo(17.4, 1);
+    for (const era of ERAS) {
+      const era8 = separation(paletteFor(SKY, era));
+      // Half a degree of slack for the 8-bit hex round-trip, which is the only
+      // thing that can move a rigid rotation's spacing at all.
+      expect(era8.minHue).toBeGreaterThan(bar.minHue - 0.5);
+      expect(era8.minSat).toBeGreaterThan(bar.minSat - 0.01);
+    }
+  });
+
+  it("never drifts pale enough to lose the plate, or dark enough to stop being a sweet", () => {
+    for (const theme of THEMES) {
+      for (const era of ERAS) {
+        for (const colour of paletteFor(theme, era)) {
+          const { l } = toHSL(colour.base)!;
+          expect(l).toBeGreaterThanOrEqual(0.35);
+          expect(l).toBeLessThanOrEqual(0.75);
+        }
+      }
+    }
+  });
+
+  it("never lets a block go grey enough to be mistaken for stone", () => {
+    // Stone is the one thing on the disc that is not a sweet to be cleared. It
+    // is off-palette and unsaturated on purpose, and a washed-out block is how
+    // that distinction quietly dies.
+    const stone = toHSL(SKY.stone.base)!;
+    expect(stone.s).toBeLessThan(0.25);
+    for (const theme of THEMES) {
+      for (const era of ERAS) {
+        for (const colour of paletteFor(theme, era)) {
+          expect(toHSL(colour.base)!.s).toBeGreaterThan(0.6);
+        }
+      }
+    }
+  });
+
+  it("changes era every ten depths and then goes round again", () => {
+    expect(eraAt(0).id).toBe("candy");
+    expect(eraAt(9).id).toBe("candy");
+    expect(eraAt(10).id).toBe(ERAS[1]!.id);
+    expect(eraAt(20).id).toBe(ERAS[2]!.id);
+    expect(eraAt(30).id).toBe(ERAS[3]!.id);
+    // Depth is unbounded in the engine, so the eras have to cycle rather than
+    // run out. Coming back to candy reads as a lap, like the rim counter.
+    expect(eraAt(40).id).toBe("candy");
+    expect(eraAt(41).id).toBe("candy");
+    expect(eraAt(50).id).toBe(ERAS[1]!.id);
+  });
+
+  it("notices an era being crossed, and only forwards", () => {
+    expect(eraChanged(9, 10)).toBe(true);
+    expect(eraChanged(10, 11)).toBe(false);
+    expect(eraChanged(19, 20)).toBe(true);
+    expect(eraChanged(20, 9)).toBe(false);
+    expect(eraChanged(5, 5)).toBe(false);
+  });
+
+  it("moves the ground with the era, but only a little", () => {
+    // Marcus asked for the background to keep changing "but not too much". A
+    // theme that rotates far enough stops being the one the player earned.
+    for (const theme of THEMES) {
+      const start = toHSL(theme.backdrop[0])!;
+      for (const depth of [0, 10, 20, 30, 40, 130]) {
+        const after = toHSL(themeForDepth(theme, depth).backdrop[0])!;
+        const drift = Math.abs(after.h - start.h);
+        expect(Math.min(drift, 360 - drift)).toBeLessThanOrEqual(20.5);
+      }
+    }
+  });
+
+  it("hands other modes their own theme untouched, object and all", () => {
+    // Depth is structurally zero without a ramp, so this is what the daily, the
+    // levels, the challenges and time attack all get.
+    for (const theme of THEMES) {
+      expect(themeForDepth(theme, 0).blocks).toBe(theme.blocks);
+      expect(themeForDepth(theme, -3).blocks).toBe(theme.blocks);
+      expect(themeForDepth(theme, Number.NaN).blocks).toBe(theme.blocks);
+    }
   });
 });

@@ -71,6 +71,7 @@ import { t } from "./strings.js";
 import { safeInsets } from "./safe-area.js";
 import { play as playSound, unlock as unlockAudio } from "../platform/audio.js";
 import { type Box, drawPiece } from "../render/tray.js";
+import { themeForDepth } from "../render/palette.js";
 import {
   angleAt,
   angleTravelled,
@@ -167,6 +168,8 @@ export class GameScreen {
   private options: GameScreenOptions;
 
   private state: GameState;
+  /** What the player chose. `theme` is this, transformed for the depth. */
+  private baseTheme: Theme;
   private theme: Theme;
   private layout!: ScreenLayout;
   private effects: Effect[] = [];
@@ -202,6 +205,7 @@ export class GameScreen {
     this.ctx = canvas.getContext("2d")!;
     this.state = state;
     this.options = options;
+    this.baseTheme = options.theme;
     this.theme = options.theme;
 
     this.measure();
@@ -358,7 +362,7 @@ export class GameScreen {
   }
 
   setTheme(theme: Theme): void {
-    this.theme = theme;
+    this.baseTheme = theme;
     // The background has the theme's colours baked into it.
     this.measure();
   }
@@ -411,14 +415,25 @@ export class GameScreen {
    * inside the same frame as the sweep that announces it.
    */
   private rebakeBackdrop(): void {
+    const depth = depthOf(this.state);
+
+    // The era's palette is applied by swapping the whole theme, not by threading
+    // a colour list through every draw call. `theme` already reaches the board,
+    // the tray, the particles, the drifters and the share card, so one
+    // substitution here keeps all of them in step — and a tray still holding the
+    // last era's sweets beside this era's board would be the obvious bug.
+    this.theme = themeForDepth(this.baseTheme, depth);
+
     const { width, height, board, boardRadius } = this.layout;
     this.sheet = makeBackdropSheet(
       width,
       height,
       this.theme,
       { x: board.cx, y: board.cy, radius: boardRadius },
-      depthOf(this.state),
+      depth,
     );
+    // Baked from the theme's colours, so they follow the era too.
+    this.sprites = makeCandySprites(this.theme);
   }
 
   getLayout(): { headerY: number; trayTop: number; boardCy: number; boardRadius: number } {
@@ -501,7 +516,8 @@ export class GameScreen {
     // phone there is no margin at all, because the disc is nearly as wide as
     // the screen — so the drift rises past behind it instead of being fenced
     // off it. Where it has to make way is decided per frame, since it moves.
-    this.sprites = makeCandySprites(this.theme);
+    // The sprites themselves are baked in rebakeBackdrop, which owns everything
+    // that has to follow the era's palette.
     this.drifters = makeDrifters(width, height);
     // Sized to the text, not to the row: a zone any taller than what it
     // protects washes out blocks that were never in the way.

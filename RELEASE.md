@@ -4,6 +4,35 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
+## 1.0 (18)
+
+Two things now change as free play goes deeper: the blocks get harder, and every
+ten depths the whole palette swaps.
+
+### What to test
+
+**Every ten depths, all eight colours change at once.** Same board, same shapes,
+same rules, an entirely new set of sweets — and the background moves with them,
+a little. There are four palettes and then it cycles back round.
+
+**Can you still tell the eight apart in every palette?** This is the thing to
+report. A line only pays a spin if every cell matches, so if two colours ever
+start looking like each other in one of the new palettes, that is the bug that
+matters most.
+
+**Wood is the new second tier**, at depth 3. The ladder is now candy → wood →
+glass → crystal → diamond, ordered by hardness. Wooden blocks are painted, not
+bare timber — the colour stays, the grain is what changes.
+
+**And check the other modes are still untouched.** Time attack, the daily and
+the levels stay plain candy in the palette you picked, however long you play.
+
+### Fixed since build 17
+
+- Nothing. This build only adds the above.
+
+---
+
 ## 1.0 (17)
 
 The blocks themselves now change as free play goes deeper. Still nothing about

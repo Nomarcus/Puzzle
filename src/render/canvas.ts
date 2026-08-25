@@ -216,6 +216,7 @@ export function drawBlock(
       ctx.arc(g.cx, g.cy, ro - bandOut * 0.72, g.startAngle - 0.2, g.endAngle + 0.2);
       ctx.stroke();
 
+      drawGrain(ctx, g, colour, material, ri, ro, width);
       drawFacets(ctx, g, colour, material, ri, ro, width);
 
       // Light catching the cut edge, drawn INSIDE the clip.
@@ -266,6 +267,55 @@ export function drawBlock(
     // Balanced whatever happens inside. An unbalanced save is not a cosmetic
     // problem: the clip and the transform it holds stay alive into the next
     // frame, and they compound until nothing lands on screen at all.
+    ctx.restore();
+  }
+}
+
+/**
+ * Grain, running the long way round the cell.
+ *
+ * Along the arc rather than across it, which is the opposite of the facet cuts
+ * and deliberately so: grain follows the length of a plank, and on a ring
+ * segment the long direction is the arc. Cutting the other way would read as
+ * the same mark the crystal tier uses and the two tiers would blur together.
+ *
+ * Drawn from the block's own dark shade at low alpha, never a brown or a grey.
+ * A wooden block here is a *painted* wooden block — the colour has to stay the
+ * era's colour, or the board drifts toward the one thing on it that is not a
+ * sweet.
+ */
+function drawGrain(
+  ctx: CanvasRenderingContext2D,
+  g: SectorGeometry,
+  colour: BlockColour,
+  material: Material,
+  ri: number,
+  ro: number,
+  width: number,
+): void {
+  if (material.grain <= 0) return;
+
+  ctx.save();
+  try {
+    ctx.strokeStyle = colour.dark;
+    ctx.lineCap = "round";
+    const lines = 4;
+    for (let i = 0; i < lines; i++) {
+      // Uneven spacing and length, hashed off the cell, so every block is not
+      // the same four stripes — that reads as corduroy rather than as timber.
+      const jitter = cellNoise(ri + i * 7.3, g.startAngle + i);
+      const t = (i + 0.5) / lines + (jitter - 0.5) * 0.12;
+      const r = ri + (ro - ri) * Math.max(0.08, Math.min(0.92, t));
+      // Measured by looking: at a third of these values the grain was invisible
+      // on a real phone-sized cell and wood read as slightly satin candy.
+      ctx.globalAlpha = material.grain * (0.55 + jitter * 0.45);
+      ctx.lineWidth = Math.max(0.8, width * (0.055 + jitter * 0.045));
+      const trim = (g.endAngle - g.startAngle) * (0.05 + jitter * 0.16);
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, r, g.startAngle + trim, g.endAngle - trim);
+      ctx.stroke();
+    }
+  } finally {
     ctx.restore();
   }
 }

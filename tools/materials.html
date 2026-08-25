@@ -10,6 +10,7 @@ import { computeLayout, drawBoard } from "/src/render/canvas.ts";
 import { makeBackdropSheet, drawBackdropSheet } from "/src/render/backdrop.ts";
 import { SKY } from "/src/render/theme.ts";
 import { MATERIALS } from "/src/render/material.ts";
+import { ERAS, ERA_EVERY, themeForDepth } from "/src/render/palette.ts";
 
 const SPEC = DEFAULT_SPEC;
 const STONE_FLAG = 32;
@@ -32,8 +33,17 @@ function board(depth) {
 const W = 520, H = 520, DPR = 3;
 window.__shots = [];
 
-for (const m of MATERIALS) {
-  const depth = m.from;
+// The material ladder at its own depths, then one shot per palette era so the
+// two axes can be judged apart. An era shot sits at a depth deep enough to be
+// wearing the top material, or the colour change would be confounded with a
+// finish change.
+const SHOTS = [
+  ...MATERIALS.map((m) => ({ id: m.id, label: m.label, depth: m.from })),
+  ...ERAS.slice(1).map((e, i) => ({ id: `era-${e.id}`, label: e.label, depth: (i + 1) * ERA_EVERY })),
+];
+
+for (const m of SHOTS) {
+  const depth = m.depth;
   const canvas = document.createElement("canvas");
   canvas.width = W * DPR;
   canvas.height = H * DPR;
@@ -45,9 +55,12 @@ for (const m of MATERIALS) {
   ctx.scale(DPR, DPR);
 
   const cx = W / 2, cy = H / 2, radius = Math.min(W, H) * 0.435;
-  const sheet = makeBackdropSheet(W, H, SKY, { x: cx, y: cy, radius }, depth);
-  drawBackdropSheet(ctx, sheet, W, H, SKY);
-  drawBoard(ctx, board(depth), computeLayout(SPEC, cx, cy, radius), SKY, 0, 0, depth);
+  // Exactly what the game does: the era's palette arrives by swapping the whole
+  // theme, so the board, the tray and everything else stay in step.
+  const theme = themeForDepth(SKY, depth);
+  const sheet = makeBackdropSheet(W, H, theme, { x: cx, y: cy, radius }, depth);
+  drawBackdropSheet(ctx, sheet, W, H, theme);
+  drawBoard(ctx, board(depth), computeLayout(SPEC, cx, cy, radius), theme, 0, 0, depth);
   window.__shots.push({ id: m.id, label: m.label, depth });
 }
 window.__ready = true;

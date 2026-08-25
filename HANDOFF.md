@@ -268,7 +268,13 @@ alongside the ground it sits on rather than staying at the theme's own colour.
 
 ### The blocks harden as you go: candy to diamond
 
-Five tiers, one every three depths — candy, glazed, glass, crystal, diamond —
+Five tiers, one every three depths — candy, wood, glass, crystal, diamond —
+ordered by **hardness** rather than preciousness, which is what let wood in at
+all: wood is not more precious than a sweet, but sugar is soft, wood is solid,
+glass is harder, crystal harder, diamond hardest. Wooden blocks are *painted*,
+never bare timber — bare wood is brown, brown is unsaturated, and an unsaturated
+block has started to look like stone.
+
 in `src/render/material.ts`. Candy is what the game has always looked like and
 what every mode other than free play still is. Past depth 12 there is nothing
 further to become and the rim counter carries the reward on alone.
@@ -308,6 +314,48 @@ lands every three depths, roughly every 66 pieces.
 
 `npm run materials` renders all five on the real disc. Every tier was tuned by
 looking at that output.
+
+### Every ten depths, the whole palette swaps
+
+Marcus's ask, and the one part of the depth ladder that changes the board rather
+than the light on it: same disc, same shapes, an entirely new set of eight. In
+`src/render/palette.ts`. Four eras, then it cycles — depth is unbounded, so
+coming back round to candy after forty reads as a lap rather than as running out.
+
+**A whole-palette swap is safe where shifting one colour is not.** The pure-clear
+rule does not care which eight colours are on the board, only that there are
+eight and that they can be told apart. Eight moving together keeps every gap;
+one moving alone would drift toward a neighbour and two distinct blocks would
+start reading as a match.
+
+The eras are **rigid rotations of the shipped eight**, not hand-picked hexes,
+and that is a correction rather than a first instinct. Hand-picking was tried:
+of four candidate palettes, three came in *worse than what already ships* —
+hues crowded to 12.6 degrees against the shipped floor of 17.4, and saturation
+fell to 49% against a floor of 78%. A rigid rotation cannot do that, because it
+preserves every gap exactly. The bar is enforced in the tests.
+
+**A measurement that corrected our own documentation.** `theme.ts` says the eight
+are "spaced by lightness so they stay distinguishable for colour-blind players".
+That is only half true: the smallest lightness gap between neighbours in the
+shipped palette is **zero** — orange and lemon are both at 50% lightness and are
+told apart by hue alone, 17.4 degrees. So lightness spacing could not be used as
+the bar, because the palette everybody has played since day one would fail it.
+The bar is therefore "no worse than what ships", deliberately a floor rather than
+an ideal. If the shipped palette should be improved for colour-blind players
+that is a change to all eight at once and its own piece of work, not something to
+smuggle in behind a feature about going deeper.
+
+The ground rotates with the era too, capped at 20 degrees — Marcus asked for the
+background to keep changing "but not too much", and a theme that turns far enough
+stops being the one the player chose and earned.
+
+The swap arrives by **substituting the whole Theme** (`themeForDepth`) rather
+than threading a palette through every draw call, because `theme` already reaches
+the board, the tray, the particles, the drifters and the share card. One
+substitution keeps them in step; a tray still holding the last era's sweets
+beside this era's board would be the obvious bug. `GameScreen` therefore keeps
+`baseTheme` (what the player chose) separate from `theme` (that, transformed).
 
 ### It is free play only, and the gate is structural
 
@@ -629,7 +677,7 @@ Game Center boards stay for the daily and free play.
 | Progression | Done. Seven themes, four of them earned. Cosmetic only. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, seven themes. |
-| Depth visuals | Done. Rim counter, deepening ground, arrival sweep, and a five-tier material ladder from candy to diamond. Free play only; the clock mode is untouched by construction. |
+| Depth visuals | Done. Rim counter, deepening ground, arrival sweep, a five-tier material ladder from candy to diamond, and a palette era every ten depths. Free play only; the clock mode is untouched by construction. |
 | Start screen | Done. The disc fits the band the column leaves it; records on one row. Pinned by `npm run play` in both languages. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance` and `npm run ramp`. |

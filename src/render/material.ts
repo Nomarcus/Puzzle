@@ -1,7 +1,16 @@
 /**
  * What the blocks are made of, and how that changes as a round goes deeper.
  *
- * The ladder is candy → glazed → glass → crystal → diamond. It exists because a
+ * The ladder is candy → wood → glass → crystal → diamond, and it is ordered by
+ * **hardness** rather than by preciousness. That matters: Marcus asked for wood
+ * alongside crystal and diamond, and wood is not more precious than a sweet, so
+ * a preciousness ladder had nowhere to put it. Hardness does — sugar is soft,
+ * wood is solid, glass is harder, crystal harder, diamond hardest — and it is
+ * physically true, which is why it reads as a progression without a word of
+ * explanation. Every rung is also shinier than the one before, so the ladder
+ * works even for a player who never thinks about the materials at all.
+ *
+ * It exists because a
  * player who has gone a very long way should be able to see that they have,
  * from the blocks themselves and not from a number, and because "the sweets
  * turned to diamond" is a reward you can feel without anybody explaining it.
@@ -43,6 +52,8 @@ export interface Material {
   readonly facetDepth: number;
   /** A star glint on a scattering of cells. 0 for none. */
   readonly sparkle: number;
+  /** Grain running around the cell. Wood's whole tell. 0 for none. */
+  readonly grain: number;
 }
 
 /**
@@ -65,17 +76,24 @@ export const MATERIALS: readonly Material[] = [
     facets: 0,
     facetDepth: 0,
     sparkle: 0,
+    grain: 0,
   },
   {
-    id: "glazed",
-    label: "Glazed",
+    // Painted wooden toys, not bare timber. Bare wood is brown, brown is
+    // low-saturation, and a low-saturation block has started to look like stone
+    // — the one thing on the disc that must never be mistaken for a sweet. So
+    // the paint stays the era's colour and the wood is entirely what the finish
+    // does: a satin sheen and grain running round the cell.
+    id: "wood",
+    label: "Wood",
     from: 3,
     gloss: 0.16,
-    glossAlpha: 0.6,
-    rim: 0.14,
+    glossAlpha: 0.5,
+    rim: 0.1,
     facets: 0,
     facetDepth: 0,
     sparkle: 0,
+    grain: 0.5,
   },
   {
     id: "glass",
@@ -87,6 +105,7 @@ export const MATERIALS: readonly Material[] = [
     facets: 0,
     facetDepth: 0,
     sparkle: 0,
+    grain: 0,
   },
   {
     id: "crystal",
@@ -98,6 +117,7 @@ export const MATERIALS: readonly Material[] = [
     facets: 2,
     facetDepth: 0.12,
     sparkle: 0.14,
+    grain: 0,
   },
   {
     id: "diamond",
@@ -109,6 +129,7 @@ export const MATERIALS: readonly Material[] = [
     facets: 3,
     facetDepth: 0.17,
     sparkle: 0.3,
+    grain: 0,
   },
 ];
 

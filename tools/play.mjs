@@ -901,20 +901,38 @@ const sampleGround = () =>
 
 await page.evaluate(() => window.__shiftle.start("endless"));
 await page.waitForTimeout(500);
+// Read off a fresh board, and it is the same for every round: depth 0 is depth
+// 0 whichever seed dealt it, so this stays valid even if the dive below has to
+// deal a new round to find one the bot survives.
 const shallow = await sampleGround();
 check("a fresh round starts at the top", (await page.evaluate(() => window.__shiftle.depth())) === 0);
 
-const dived = await page.evaluate(async () => {
-  const api = window.__shiftle;
-  for (let i = 0; i < 1200; i++) {
-    const state = api.state();
-    if (!state || state.over) break;
-    if (api.depth() >= 4) break;
-    if (!api.botMove()) break;
+// Free play is seeded from the clock, so how deep the bot gets varies from run
+// to run — and on an unlucky board it dies before depth 4 and every check below
+// it fails for no reason at all. Seen live: one run reported four failures and
+// the next reported none. So this deals a fresh round and tries again rather
+// than judging the feature on one bad deal.
+let dived = { depth: 0, over: true };
+for (let attempt = 0; attempt < 5 && dived.depth < 4; attempt++) {
+  if (attempt > 0) {
+    await page.evaluate(() => window.__shiftle.start("endless"));
+    await page.waitForTimeout(400);
   }
-  return { depth: api.depth(), over: api.state()?.over ?? true };
-});
+  dived = await page.evaluate(async () => {
+    const api = window.__shiftle;
+    for (let i = 0; i < 1200; i++) {
+      const state = api.state();
+      if (!state || state.over) break;
+      if (api.depth() >= 4) break;
+      if (!api.botMove()) break;
+    }
+    return { depth: api.depth(), over: api.state()?.over ?? true };
+  });
+}
 await page.waitForTimeout(1400);
+
+check("a fresh round opens in the player's own palette",
+  (await page.evaluate(() => window.__shiftle.era())) === "candy");
 
 check("and the blocks harden as it goes deeper",
   (await page.evaluate(() => window.__shiftle.material())) !== "candy",
@@ -963,6 +981,8 @@ const timed = await page.evaluate(async () => {
 check("time attack carries no ramp at all", timed.perDepth === 0, `piecesPerDepth=${timed.perDepth}`);
 check("and its blocks stay the sweet they have always been",
   (await page.evaluate(() => window.__shiftle.material())) === "candy");
+check("and it never leaves the palette the player chose",
+  (await page.evaluate(() => window.__shiftle.era())) === "candy");
 check("so its depth never leaves zero, however long the round runs",
   timed.depth === 0, `depth=${timed.depth}`);
 

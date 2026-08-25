@@ -13,6 +13,7 @@ import { chooseMove } from "./engine/bot.js";
 import { applyMove } from "./engine/game.js";
 import { FREE_PLAY_RAMP } from "./engine/ramp.js";
 import { materialAt } from "./render/material.js";
+import { eraAt } from "./render/palette.js";
 import { TIME_ATTACK } from "./engine/timeattack.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
@@ -1430,6 +1431,12 @@ if (import.meta.env.DEV) {
       return true;
     },
     streak: () => streakOf(dailyHistory(), new Date()),
+
+    /** Which palette era is on the board, for the browser tests. */
+    era: () => {
+      const state = screen?.getState();
+      return eraAt(state ? depthOf(state) : 0).id;
+    },
 
     /** What the blocks are made of right now, for the browser tests. */
     material: () => {
