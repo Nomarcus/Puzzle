@@ -12,6 +12,7 @@ import { DEFAULT_SPEC } from "../engine/geometry.js";
 import { type Board, createBoard } from "../engine/board.js";
 import { cellIndex } from "../engine/geometry.js";
 import { computeLayout, drawBoard, fitCanvas, withRingOffset } from "../render/canvas.js";
+import { safeInsets } from "./safe-area.js";
 import type { Theme } from "../render/theme.js";
 import {
   type Drifter,
@@ -72,7 +73,7 @@ export class MenuScene {
     this.height = size.height;
     this.sheet = makeBackdropSheet(this.width, this.height, this.theme, {
       x: this.width / 2,
-      y: this.height * 0.3,
+      y: this.discCentre(),
       radius: this.discRadius(),
     });
     this.sprites = makeCandySprites(this.theme);
@@ -83,10 +84,10 @@ export class MenuScene {
     this.quiet = [
       {
         x: (this.width - column) / 2,
-        // From the title down: everything below the disc is text or buttons.
-        y: this.height * 0.5,
+        // From the column's top edge down, all of it is text or buttons.
+        y: this.ceiling > 0 ? this.ceiling : this.height * 0.5,
         width: column,
-        height: this.height * 0.5,
+        height: this.height,
       },
     ];
   }
@@ -115,13 +116,57 @@ export class MenuScene {
     this.frame = 0;
   }
 
-  /** Where the disc sits, so the DOM can lay itself out underneath. */
-  discBottom(): number {
-    return this.height * 0.3 + this.discRadius() + 20;
+  /** Where the DOM column begins, once it has measured itself. */
+  private ceiling = 0;
+
+  /**
+   * Fits the disc into the space above the menu column.
+   *
+   * The disc used to be sized against the window while the column was sized
+   * against its own content, and the column won. Measured on a 390x844 phone:
+   * **246 of the disc's 312 pixels sat behind buttons** — four fifths of the
+   * one thing on this screen that is the game's face.
+   *
+   * Now the column measures itself and says where it starts, and the disc takes
+   * what is left. Self-correcting for any phone, and it cannot come back the
+   * next time something is added to the menu: a taller screen gets a bigger
+   * logo rather than a bigger gap.
+   */
+  fitAbove(y: number): void {
+    if (Math.abs(this.ceiling - y) < 1) return;
+    this.ceiling = y;
+    this.measure();
+  }
+
+  /**
+   * Where the disc actually ended up, in CSS pixels.
+   *
+   * Exposed so the browser test can assert the whole circle is on screen and
+   * clear of the column, rather than a screenshot having to be looked at.
+   */
+  discBox(): { centre: number; radius: number; top: number; bottom: number; ceiling: number } {
+    const centre = this.discCentre();
+    const radius = this.discRadius();
+    return { centre, radius, top: centre - radius, bottom: centre + radius, ceiling: this.ceiling };
+  }
+
+  private discCentre(): number {
+    if (this.ceiling <= 0) return this.height * 0.3;
+    // Centred in its band, but never so high that it clips the status bar.
+    return Math.max(this.discRadius() + this.topInset(), this.ceiling / 2);
+  }
+
+  private topInset(): number {
+    return safeInsets().top + 14;
   }
 
   private discRadius(): number {
-    return Math.min(this.width * 0.4, this.height * 0.21);
+    const byWidth = this.width * 0.44;
+    if (this.ceiling <= 0) return Math.min(byWidth, this.height * 0.21);
+    // Half the band it has been given, less a margin at each end so the circle
+    // never touches the status bar or the first button.
+    const band = (this.ceiling - this.topInset() - 24) / 2;
+    return Math.max(52, Math.min(byWidth, band));
   }
 
   private render(): void {
@@ -135,10 +180,10 @@ export class MenuScene {
       alpha: 0.46,
       quiet: this.quiet,
       sprites: this.sprites,
-      behind: { x: this.width / 2, y: this.height * 0.3, radius: this.discRadius() },
+      behind: { x: this.width / 2, y: this.discCentre(), radius: this.discRadius() },
     });
 
-    let layout = computeLayout(SPEC, this.width / 2, this.height * 0.3, this.discRadius());
+    let layout = computeLayout(SPEC, this.width / 2, this.discCentre(), this.discRadius());
     for (let r = 0; r < SPEC.rings; r++) {
       layout = withRingOffset(layout, r, this.clock * (RING_SPEED[r] ?? 0.1));
     }

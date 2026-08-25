@@ -4,6 +4,32 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
+## 1.0 (15)
+
+A start screen build. The menu itself, nothing about how the game plays.
+
+### What to test
+
+**The start screen.** The disc is the game's face and four fifths of it was
+behind the buttons — 246 of its 312 pixels, measured on an iPhone 14. The
+column now measures itself and the disc takes the space above it, so the whole
+circle is visible on any phone. Does it look like the front of a game?
+
+**Your records, on the front page.** Streak, levels cleared, best free-play
+score and best time attack score now sit on one line under the mode buttons,
+instead of being scattered between them. A fresh install shows none of them
+rather than a row of zeros.
+
+**The three other modes are tiles now**, side by side, rather than three
+full-width buttons. Check they are still easy to hit with a thumb — "Mot
+klockan" wraps to two lines in Swedish and is the tightest one.
+
+### Fixed since build 14
+
+- The start screen showed most of the disc behind the buttons on every phone.
+
+---
+
 ## 1.0 (14)
 
 The biggest build so far. Two new modes, twice as many levels, a new mechanic in

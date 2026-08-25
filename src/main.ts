@@ -413,7 +413,6 @@ function showMenu(): void {
 
   const node = overlay("menu");
   node.append(titleNode());
-  node.append(el("div", "tagline", t("tagline")));
 
   const done = todayResult();
   const daily = el(
@@ -431,41 +430,27 @@ function showMenu(): void {
   const today = dailyPuzzle(new Date());
   node.append(el("div", "best", `#${today.number} · ${variantLabel(today.size, today.pack)}`));
 
-  // The streak. Shown even when it is only one day long: a streak nobody can
-  // see is not a streak, and the first day is the one worth encouraging.
-  const streak = streakOf(dailyHistory(), new Date());
-  if (streak.length > 0) {
-    const badge = el("div", `streak${streak.atRisk ? " at-risk" : ""}`);
-    badge.dataset.streak = String(streak.length);
-    badge.append(el("span", "streak-flame", "🔥"));
-    badge.append(el("b", undefined, String(streak.length)));
-    badge.append(el("span", undefined, streak.atRisk ? t("streakKeep") : t("streakDays")));
-    node.append(badge);
+  // The other three modes, side by side.
+  //
+  // They were three full-width buttons with a record line between each, and
+  // between them they were most of why the column ran to 681 pixels on an
+  // 844-pixel phone — which left four fifths of the disc behind them. Three
+  // tiles and one records row say the same things in a third of the height.
+  const modes = el("div", "mode-row");
+  for (const [label, cls, action, go] of [
+    [t("levels"), "warm", "levels", showLevels],
+    [t("endless"), "alt", "endless", showSetup],
+    [t("timeAttack"), "hot", "time", startTimeAttack],
+  ] as const) {
+    const button = el("button", `big ${cls}`, label);
+    button.dataset.action = action;
+    button.addEventListener("click", go);
+    modes.append(button);
   }
+  node.append(modes);
 
-  const levels = el("button", "big warm", t("levels"));
-  levels.dataset.action = "levels";
-  levels.addEventListener("click", showLevels);
-  node.append(levels);
-
-  const cleared = levelsDone().length;
-  if (cleared > 0) node.append(el("div", "best", `${cleared} / ${LEVELS.length}`));
-
-  const endless = el("button", "big alt", t("endless"));
-  endless.dataset.action = "endless";
-  endless.addEventListener("click", showSetup);
-  node.append(endless);
-
-  const best = readNumber("best", 0);
-  if (best > 0) node.append(el("div", "best", `${t("best")} ${localeNumber(best)}`));
-
-  const timed = el("button", "big hot", t("timeAttack"));
-  timed.dataset.action = "time";
-  timed.addEventListener("click", startTimeAttack);
-  node.append(timed);
-
-  const timeBest = readNumber("bestTime", 0);
-  if (timeBest > 0) node.append(el("div", "best", `${t("timeBest")} ${localeNumber(timeBest)}`));
+  const records = recordsRow();
+  if (records) node.append(records);
 
   // The themes, earned and unearned. Locked ones are shown rather than hidden:
   // a reward nobody knows about is not a reward, and the row is the only place
@@ -567,6 +552,22 @@ function showMenu(): void {
     hud.append(boards);
     node.append(hud);
   }
+
+  // The column knows how tall it turned out; the disc does not. So the column
+  // measures itself and the disc takes what is left, rather than being sized
+  // against the window and losing most of itself behind the buttons.
+  //
+  // Measured next frame, and again once the fonts have settled. Everything
+  // else that changes this menu — a language switch, a theme unlocked, a
+  // streak appearing — rebuilds it through showMenu and remeasures for free.
+  // A late font swap does not, and the title is set in SF Pro Rounded.
+  const refit = () => {
+    if (!node.isConnected) return;
+    const first = node.firstElementChild?.getBoundingClientRect();
+    if (first) menu?.fitAbove(first.top);
+  };
+  requestAnimationFrame(refit);
+  void document.fonts?.ready.then(refit).catch(() => {});
 }
 
 /**
@@ -668,6 +669,49 @@ function streakPanel(): HTMLDivElement {
   panel.append(strip);
 
   return panel;
+}
+
+/**
+ * Everything the player has to show for themselves, on one line.
+ *
+ * A streak, the levels cleared, and the two records. Each was its own row
+ * before — five of them, with a gap each — and scattered between the buttons
+ * they belonged to. Collected, they read as an achievement rather than as
+ * labelling, and they cost one row instead of five.
+ *
+ * Every item is dropped when it is zero: a fresh install shows nothing here
+ * rather than a row of noughts, which is the difference between a record and a
+ * reminder that you have not got one.
+ */
+function recordsRow(): HTMLDivElement | null {
+  const row = el("div", "records");
+  const streak = streakOf(dailyHistory(), new Date());
+  const cleared = levelsDone().length;
+  const best = readNumber("best", 0);
+  const timeBest = readNumber("bestTime", 0);
+
+  const add = (icon: string, value: string, label: string, className = "") => {
+    const chip = el("div", `record ${className}`.trim());
+    chip.append(el("span", "record-icon", icon));
+    chip.append(el("b", undefined, value));
+    chip.setAttribute("aria-label", `${label}: ${value}`);
+    chip.title = label;
+    row.append(chip);
+  };
+
+  // Keeps the `streak` class the badge had when it was its own row: it is the
+  // same badge, moved, and the tests that guard it across midnight name it.
+  if (streak.length > 0) {
+    add("🔥", String(streak.length), t("streakNow"), `streak${streak.atRisk ? " at-risk" : ""}`);
+  }
+  if (cleared > 0) add("◆", `${cleared}/${LEVELS.length}`, t("levels"));
+  if (best > 0) add("★", localeNumber(best), t("best"));
+  if (timeBest > 0) add("⏱", localeNumber(timeBest), t("timeBest"));
+
+  // Nothing to show means no row at all, not an empty one: the column is a
+  // flex stack with a gap, so a zero-height child still costs a gap of dead
+  // space on the one install where the screen is emptiest.
+  return row.childElementCount > 0 ? row : null;
 }
 
 function showSetup(): void {
@@ -1385,6 +1429,9 @@ if (import.meta.env.DEV) {
       return true;
     },
     streak: () => streakOf(dailyHistory(), new Date()),
+
+    /** Where the menu's disc ended up, for the browser tests. */
+    menuDisc: () => menu?.discBox() ?? null,
 
     /** The core, for the browser tests. */
     charge: () => screen?.getState()?.charge ?? 0,

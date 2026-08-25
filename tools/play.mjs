@@ -641,6 +641,131 @@ await page.waitForTimeout(200);
 check("and no badge for somebody who has never played",
   (await page.locator(".streak").count()) === 0);
 
+// --- the menu layout -------------------------------------------------------
+// The bug this pins, measured on this exact viewport: the disc was sized
+// against the window (312px across) while the column was sized against its own
+// content (681px of an 844px screen), so **246 of the disc's 312 pixels sat
+// behind buttons** — four fifths of the game's face. The column now measures
+// itself and the disc takes the band above it, so the numbers below are read
+// off the real layout rather than a screenshot being squinted at.
+await page.evaluate(() => {
+  localStorage.removeItem("shiftle:best");
+  localStorage.removeItem("shiftle:bestTime");
+  window.__shiftle.clearLevels();
+  window.__shiftle.setHistory({});
+});
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(400);
+
+check(
+  "a fresh install shows no records row rather than a row of noughts",
+  (await page.locator(".records").count()) === 0,
+);
+
+// A save with something in it: a streak, levels, and both records.
+await page.evaluate(() => {
+  const day = (back) => new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+  localStorage.setItem("shiftle:best", "72904");
+  localStorage.setItem("shiftle:bestTime", "12480");
+  localStorage.setItem("shiftle:levels", JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
+  window.__shiftle.setHistory({ [day(3)]: 4000, [day(2)]: 5200, [day(1)]: 6100, [day(0)]: 7000 });
+});
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(400);
+await shot("15-menu");
+
+{
+  const chips = await page.evaluate(() =>
+    [...document.querySelectorAll(".records .record")].map((c) => ({
+      text: c.textContent,
+      top: Math.round(c.getBoundingClientRect().top),
+    })),
+  );
+  check("a played save shows all four records", chips.length === 4,
+    chips.map((c) => c.text).join(" "));
+  check(
+    "and they sit on one line, not four rows",
+    new Set(chips.map((c) => c.top)).size === 1,
+    chips.map((c) => c.top).join(","),
+  );
+}
+
+{
+  const tiles = await page.evaluate(() =>
+    [...document.querySelectorAll(".mode-row .big")].map((b) => {
+      const box = b.getBoundingClientRect();
+      return { action: b.dataset.action, top: Math.round(box.top), height: Math.round(box.height) };
+    }),
+  );
+  check("the three other modes are all on the menu", tiles.length === 3,
+    tiles.map((t) => t.action).join(","));
+  check("side by side on one row", new Set(tiles.map((t) => t.top)).size === 1,
+    tiles.map((t) => t.top).join(","));
+  // Swedish "Mot klockan" wraps to two lines inside its tile. The tiles have to
+  // stay the same height anyway, or the row reads as broken.
+  check("and the same height even where the label wraps",
+    new Set(tiles.map((t) => t.height)).size === 1,
+    tiles.map((t) => t.height).join(","));
+  check("each tall enough to hit with a thumb", tiles.every((t) => t.height >= 44),
+    tiles.map((t) => t.height).join(","));
+}
+
+{
+  const layout = await page.evaluate(() => {
+    const disc = window.__shiftle.menuDisc();
+    const column = document.querySelector(".overlay.menu")?.firstElementChild;
+    const box = column?.getBoundingClientRect();
+    return { disc, columnTop: box ? box.top : null, height: window.innerHeight };
+  });
+  const { disc, columnTop } = layout;
+  check("the menu knows where its column starts", disc !== null && columnTop !== null);
+  check(
+    "the whole circle is on screen — nothing clipped off the top",
+    disc.top >= 0,
+    `top=${disc.top.toFixed(1)}`,
+  );
+  check(
+    "and none of it is behind the column",
+    disc.bottom <= columnTop + 1,
+    `disc bottom ${disc.bottom.toFixed(1)} vs column top ${columnTop.toFixed(1)}`,
+  );
+  // The band could be satisfied by a tiny disc, which would pass the two checks
+  // above and still lose the logo. It has to stay the biggest thing up there.
+  check(
+    "and it is still a logo, not a token",
+    disc.radius >= 120,
+    `radius=${disc.radius.toFixed(1)} of ${(layout.height * 0.5).toFixed(0)} available`,
+  );
+}
+
+// Swedish is the longer language and the one Marcus reads. The disc must
+// survive the column growing under it. Switched with the real pill, so this
+// also proves the refit runs on a rebuild and not only on first paint.
+await page.locator('.langs .pill', { hasText: "SV" }).click();
+await page.waitForTimeout(400);
+await shot("16-menu-sv");
+{
+  const sv = await page.evaluate(() => {
+    const disc = window.__shiftle.menuDisc();
+    const box = document.querySelector(".overlay.menu")?.firstElementChild?.getBoundingClientRect();
+    return { disc, columnTop: box ? box.top : null };
+  });
+  check("the circle is clear of the Swedish column too",
+    sv.disc.bottom <= sv.columnTop + 1 && sv.disc.radius >= 120,
+    `radius=${sv.disc.radius.toFixed(1)} bottom=${sv.disc.bottom.toFixed(1)} column=${sv.columnTop.toFixed(1)}`);
+}
+await page.locator('.langs .pill', { hasText: "EN" }).click();
+await page.waitForTimeout(300);
+
+await page.evaluate(() => {
+  localStorage.removeItem("shiftle:best");
+  localStorage.removeItem("shiftle:bestTime");
+  window.__shiftle.clearLevels();
+  window.__shiftle.setHistory({});
+});
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
+
 // --- the core --------------------------------------------------------------
 // The hub charges from clears and sweeps the disc when tapped. The tap has to
 // be checked before the spin gesture, since the hub sits inside the disc.

@@ -26,9 +26,9 @@ ends only when nothing fits *and* neither power remains.
 
 Four modes on the menu. **Daily** derives its board, piece pack and sequence
 from the UTC date so every player in the world gets the identical puzzle,
-rationed to 60 pieces, one attempt per day. **Levels** is twenty hand-built
-puzzles in two sets of twenty, each a fixed board, a fixed goal and a fixed
-number of pieces. **Free
+rationed to 60 pieces, one attempt per day. **Levels** is forty hand-built puzzles in
+two sets of twenty, each a fixed board, a fixed goal and a fixed number of
+pieces. **Free
 play** is the high-score chase; it gets harder the longer it lasts and every
 round ends. **Time attack** is the short, stressful one — the clock never stops
 and only clearing lines buys seconds back. All four are described below.
@@ -135,7 +135,9 @@ Levels give a player somewhere to get to and free play gives them a number to
 beat. The daily gives them a reason to come back — but only if coming back is
 *visible*.
 
-- A **badge on the menu** the moment there is a streak to show, from day one.
+- A **badge on the menu** the moment there is a streak to show, from day one —
+  now the first chip in the records row, still carrying its own `streak` class
+  and its own pulse.
 - On the daily's result screen: the current streak, the longest ever, and a
   **fortnight of squares** with the gaps left in. The gaps are the reason to
   draw it.
@@ -152,6 +154,55 @@ The arithmetic is in `src/engine/streak.ts`, kept out of the UI so the awkward
 cases are tested rather than eyeballed: month boundaries, leap days, and the
 alive-but-unplayed state. Days are compared as timestamps, not as strings —
 "2026-03-01" follows "2026-02-28" and no amount of string arithmetic knows that.
+
+## The start screen, and why the disc kept losing
+
+The menu is the only screen somebody sees before deciding whether to play, and
+for most of the project it was showing the game's face with the game's face
+covered up.
+
+The cause was that **two things sized themselves against different rulers**. The
+disc sized itself against the window — `height * 0.21` for its radius. The DOM
+column sized itself against its own contents, and it kept gaining contents: a
+tagline, three full-width buttons, a record line between each of them. Neither
+knew about the other, and the column won because it was painted on top.
+
+Measured on a 390×844 iPhone before the fix: the column ran to **681 pixels of
+an 844-pixel screen**, and **246 of the disc's 312 pixels were behind buttons**.
+Four fifths of the logo, invisible.
+
+The fix is one direction of dependency. The column measures itself and tells the
+scene where it starts (`MenuScene.fitAbove`); the scene fits the disc into the
+band above that, centred in it, with a margin at each end so the circle never
+touches the status bar or the first button. That is self-correcting: a taller
+phone gets a bigger logo rather than a bigger gap, and it cannot regress the
+next time something is added to the menu — a heavier column simply gets a
+smaller disc rather than eating the one behind it.
+
+What made the band big enough to be worth having:
+
+- The tagline went. The title says it and the disc says it better.
+- Levels, free play and time attack became **three tiles on one row** instead of
+  three full-width buttons.
+- The five scattered record lines became **one row of chips** — streak, levels
+  cleared, best free-play score, best time attack — which is also the answer to
+  "can I see my high score on the front page": all of it, on one line, without
+  opening anything.
+
+Each chip is dropped when it is zero, so a fresh install shows nothing there
+rather than a row of noughts. That is the difference between a record and a
+reminder that you have not got one, and it is why the row is built as
+`recordsRow()` returning `null` rather than an empty div: the column is a flex
+stack with a gap, and a zero-height child still costs a gap of dead space on the
+one install where the screen is emptiest.
+
+The measurement is pinned rather than eyeballed. `MenuScene.discBox()` reports
+where the disc actually landed, and `npm run play` asserts against the real
+layout in both languages: the circle is fully on screen, none of it is behind
+the column, and the radius is still above 120px so the band cannot be satisfied
+by shrinking the logo to a token. Swedish is checked separately because it is
+the longer language — "Mot klockan" wraps to two lines inside its tile — and it
+is the one Marcus reads.
 
 ## Wild blocks
 
@@ -444,7 +495,7 @@ Game Center boards stay for the daily and free play.
 | Area | Status |
 |---|---|
 | Game engine | Done. Pure, deterministic, 134 unit tests. |
-| Levels | Done. Twenty of them, difficulty measured with `npm run levels`. |
+| Levels | Done. Forty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
 | Time attack | Done. Clock tuned against five modelled standards of play. |
 | The core | Done. Charge, tap-to-sweep, tuned with `npm run core`. |
@@ -453,6 +504,7 @@ Game Center boards stay for the daily and free play.
 | Progression | Done. Seven themes, four of them earned. Cosmetic only. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, seven themes. |
+| Start screen | Done. The disc fits the band the column leaves it; records on one row. Pinned by `npm run play` in both languages. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance` and `npm run ramp`. |
 | iOS project | Generated and committed at `ios/`. |

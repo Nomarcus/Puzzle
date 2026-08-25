@@ -222,6 +222,66 @@
         box-shadow: 0 6px 0 #7e94a1;
       }
 
+      /*
+       * The three secondary modes, side by side. Full-width buttons with a
+       * record line between each ran the menu column to 681px on an 844px
+       * phone and buried four fifths of the disc.
+       */
+      .mode-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 9px;
+        width: 100%;
+        max-width: 330px;
+      }
+
+      .mode-row .big {
+        width: 100%;
+        max-width: none;
+        padding: 15px 6px;
+        font-size: 14px;
+        line-height: 1.15;
+        letter-spacing: 0;
+        border-radius: 20px;
+      }
+
+      .mode-row .big::after {
+        border-radius: 15px;
+        height: 30%;
+      }
+
+      /* Everything the player has to show for themselves, on one line. */
+      .records {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 7px;
+        max-width: 340px;
+      }
+
+      .record {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.34);
+        color: #12384f;
+        font-size: 13px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .record-icon { font-size: 12px; }
+
+      /* A streak you still have to earn today. A pulse, not a colour change —
+         losing one is bad news and the chip should not look broken. */
+      .record.at-risk {
+        background: rgba(255, 122, 0, 0.9);
+        color: #fff;
+        animation: streakPulse 1.6s ease-in-out infinite;
+      }
+
       .swatches {
         display: flex;
         gap: 14px;
@@ -304,30 +364,8 @@
         color: #5b8aa6;
       }
 
-      /*
-       * The streak badge on the menu. Warm and slightly loud — it is a small
-       * number that wants to be noticed, and the flame does most of the work.
-       */
-      .streak {
-        display: flex;
-        align-items: baseline;
-        gap: 6px;
-        padding: 5px 14px;
-        border-radius: 999px;
-        background: rgba(255, 122, 0, 0.9);
-        color: #fff;
-        font-size: 13px;
-        font-weight: 800;
-        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.14);
-      }
-
-      .streak b { font-size: 17px; }
-      .streak-flame { font-size: 15px; }
-
-      /* A streak you still have to earn today gets a pulse, not a colour
-         change — losing one is bad news and the badge should not look broken. */
-      .streak.at-risk { animation: streakPulse 1.6s ease-in-out infinite; }
-
+      /* The streak badge is a records chip now — see .record.at-risk, which
+         uses these frames. */
       @keyframes streakPulse {
         0%, 100% { transform: scale(1); }
         50% { transform: scale(1.07); }
