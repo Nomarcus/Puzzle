@@ -15,6 +15,23 @@ import { SKY, THEMES, blockColour } from "../src/render/theme.js";
 import { eraAt, eraChanged, paletteFor, themeForDepth } from "../src/render/palette.js";
 import { cellNoise, materialById } from "../src/render/material.js";
 import {
+  SAVE_VERSION,
+  applyRound,
+  discoverWorld,
+  freshSave,
+  isDiscovered,
+  loadSave,
+} from "../src/engine/save.js";
+import {
+  GOALS,
+  MASTERY_BONUS,
+  applyMastery,
+  chooseGoal,
+  goalById,
+  offered,
+  tallyOf,
+} from "../src/engine/mastery.js";
+import {
   PATTERNS,
   SHADE_CAP,
   STROKE_CAP,
@@ -2226,5 +2243,167 @@ describe("depth worlds", () => {
     expect(busy.rngState).toBe(quiet.rngState);
     expect(busy.score).toBe(quiet.score);
     expect(Array.from(busy.board.cells)).toEqual(Array.from(quiet.board.cells));
+  });
+});
+
+describe("the save record", () => {
+  it("survives anything that could be in storage", () => {
+    // The rule: a broken save must never stop the game starting.
+    for (const junk of [null, undefined, 0, "", "not json", [], true, { version: 99 }]) {
+      const save = loadSave(junk);
+      expect(save.version).toBe(SAVE_VERSION);
+      expect(save.records).toEqual({});
+      expect(save.mastery.activeId).toBeNull();
+    }
+  });
+
+  it("throws away values that are not numbers, rather than storing them", () => {
+    const save = loadSave({
+      records: { endless: { score: "lots", depth: -4, bestCombo: Number.NaN, coresFired: 3 } },
+      worlds: { fruit: { bestDepth: "deep" }, "../evil": { bestDepth: 9 }, ok: { bestDepth: 5 } },
+      mastery: { round: -1, activeId: 42, progress: Infinity },
+    });
+    expect(save.records.endless).toEqual({
+      score: 0, depth: 0, bestCombo: 0, ringsCleared: 0, coresFired: 3, survived: 0,
+    });
+    expect(save.worlds.fruit).toEqual({ bestDepth: 0 });
+    // An id used as an object key is a cheap injection route, so it is filtered.
+    expect(save.worlds["../evil"]).toBeUndefined();
+    expect(save.worlds.ok).toEqual({ bestDepth: 5 });
+    expect(save.mastery).toEqual({ round: 0, activeId: null, progress: 0, completed: 0 });
+  });
+
+  it("carries an old mute forward as silence, not as new music", () => {
+    // Somebody who had the whole game silenced must not be handed music on
+    // first launch just because music became its own setting.
+    expect(loadSave(null, true).audio).toEqual({ music: false, sfx: false, haptics: false });
+    expect(loadSave(null, false).audio).toEqual({ music: true, sfx: true, haptics: true });
+    // An explicit stored choice always wins over the migrated default.
+    expect(loadSave({ audio: { music: true, sfx: false, haptics: true } }, true).audio).toEqual({
+      music: true, sfx: false, haptics: true,
+    });
+  });
+
+  it("only calls something a record when there was something to beat", () => {
+    let save = freshSave();
+    const first = applyRound(save, "endless", { score: 5000, depth: 4 });
+    // Nothing to beat on a first round. Calling that a record is the fabricated
+    // milestone the brief bans.
+    expect(first.beaten).toEqual([]);
+    expect(first.save.records.endless?.score).toBe(5000);
+
+    const second = applyRound(first.save, "endless", { score: 9000, depth: 3 });
+    expect(second.beaten).toEqual([{ kind: "score", from: 5000, to: 9000 }]);
+    // A worse depth leaves the old one alone.
+    expect(second.save.records.endless?.depth).toBe(4);
+  });
+
+  it("ranks beaten records by what matters, not by field order", () => {
+    const seeded = applyRound(freshSave(), "endless", {
+      score: 100, depth: 1, bestCombo: 1, ringsCleared: 1,
+    }).save;
+    const { beaten } = applyRound(seeded, "endless", {
+      score: 200, depth: 2, bestCombo: 2, ringsCleared: 2,
+    });
+    expect(beaten.map((b) => b.kind)).toEqual(["depth", "score", "bestCombo", "ringsCleared"]);
+  });
+
+  it("keeps records per mode, so one cannot overwrite another", () => {
+    let save = applyRound(freshSave(), "endless", { score: 9000 }).save;
+    save = applyRound(save, "daily", { score: 100 }).save;
+    expect(save.records.endless?.score).toBe(9000);
+    expect(save.records.daily?.score).toBe(100);
+  });
+
+  it("reports a world as discovered exactly once", () => {
+    const first = discoverWorld(freshSave(), "fruit", 3);
+    expect(first.firstTime).toBe(true);
+    expect(isDiscovered(first.save, "fruit")).toBe(true);
+    const again = discoverWorld(first.save, "fruit", 5);
+    expect(again.firstTime).toBe(false);
+    expect(again.save.worlds.fruit?.bestDepth).toBe(5);
+    // A shallower visit never lowers the best.
+    expect(discoverWorld(again.save, "fruit", 2).save.worlds.fruit?.bestDepth).toBe(5);
+  });
+});
+
+describe("mastery goals", () => {
+  it("offers three different kinds every round, for ever", () => {
+    for (let round = 0; round < 200; round++) {
+      const three = offered(round);
+      expect(three).toHaveLength(3);
+      expect(new Set(three.map((g) => g.id)).size).toBe(3);
+      for (const goal of three) expect(goalById(goal.id)).toBe(goal);
+    }
+  });
+
+  it("is deterministic, so the same round always offers the same three", () => {
+    for (const round of [0, 3, 17, 99]) {
+      expect(offered(round).map((g) => g.id)).toEqual(offered(round).map((g) => g.id));
+    }
+  });
+
+  it("never asks for depth outside free play, the only mode that ramps", () => {
+    for (const goal of GOALS) {
+      expect(goal.modes.length).toBeGreaterThan(0);
+      if (goal.id.startsWith("depth-")) expect(goal.modes).toEqual(["endless"]);
+    }
+  });
+
+  it("ignores a round in a mode the goal cannot be worked on", () => {
+    const save = chooseGoal(freshSave(), "depth-8");
+    const out = applyMastery(save, tallyOf("daily", 9999, 0, {
+      ringsCleared: 40, spokesCleared: 0, bestCombo: 9, coresFired: 4, stripesFired: 9, pureClears: 9,
+    }));
+    expect(out.progress).toBe(0);
+    expect(out.completed).toBe(false);
+    expect(out.bonus).toBe(0);
+  });
+
+  it("never lets a bad round undo progress", () => {
+    let save = chooseGoal(freshSave(), "rings-20");
+    const stats = (rings: number) => tallyOf("endless", 0, 0, {
+      ringsCleared: rings, spokesCleared: 0, bestCombo: 0, coresFired: 0, stripesFired: 0, pureClears: 0,
+    });
+    save = applyMastery(save, stats(14)).save;
+    expect(save.mastery.progress).toBe(14);
+    save = applyMastery(save, stats(2)).save;
+    expect(save.mastery.progress).toBe(14);
+  });
+
+  it("pays into lifetime only on completion, and only a little", () => {
+    const save = chooseGoal(freshSave(), "core-1");
+    const tally = tallyOf("endless", 0, 0, {
+      ringsCleared: 0, spokesCleared: 0, bestCombo: 0, coresFired: 2, stripesFired: 0, pureClears: 0,
+    });
+    const out = applyMastery(save, tally);
+    expect(out.completed).toBe(true);
+    expect(out.bonus).toBe(MASTERY_BONUS);
+    // A free-play round is worth roughly 100,000 lifetime on measured play, so
+    // the bonus must stay far below "a better way to earn than playing".
+    expect(MASTERY_BONUS).toBeLessThan(10_000);
+    // Completing clears the goal and moves the offer on. Nothing expires.
+    expect(out.save.mastery.activeId).toBeNull();
+    expect(out.save.mastery.round).toBe(1);
+    expect(out.save.mastery.completed).toBe(1);
+  });
+
+  it("does nothing at all when no goal is chosen", () => {
+    const save = freshSave();
+    const out = applyMastery(save, tallyOf("endless", 500, 9, {
+      ringsCleared: 9, spokesCleared: 0, bestCombo: 9, coresFired: 9, stripesFired: 9, pureClears: 9,
+    }));
+    expect(out.save).toBe(save);
+    expect(out.bonus).toBe(0);
+  });
+
+  it("resets progress when the player swaps goal, but not when re-picking the same", () => {
+    let save = chooseGoal(freshSave(), "rings-20");
+    save = applyMastery(save, tallyOf("endless", 0, 0, {
+      ringsCleared: 9, spokesCleared: 0, bestCombo: 0, coresFired: 0, stripesFired: 0, pureClears: 0,
+    })).save;
+    expect(chooseGoal(save, "rings-20").mastery.progress).toBe(9);
+    expect(chooseGoal(save, "combo-5").mastery.progress).toBe(0);
+    expect(chooseGoal(save, "nonsense").mastery.activeId).toBe("rings-20");
   });
 });
