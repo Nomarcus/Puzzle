@@ -9,8 +9,8 @@ import { cellIndex } from "/src/engine/geometry.ts";
 import { computeLayout, drawBoard } from "/src/render/canvas.ts";
 import { makeBackdropSheet, drawBackdropSheet } from "/src/render/backdrop.ts";
 import { SKY } from "/src/render/theme.ts";
-import { MATERIALS } from "/src/render/material.ts";
-import { ERAS, ERA_EVERY, themeForDepth } from "/src/render/palette.ts";
+import { WORLDS, LAP_SPAN } from "/src/render/world.ts";
+import { themeForDepth } from "/src/render/palette.ts";
 
 const SPEC = DEFAULT_SPEC;
 const STONE_FLAG = 32;
@@ -33,13 +33,11 @@ function board(depth) {
 const W = 520, H = 520, DPR = 3;
 window.__shots = [];
 
-// The material ladder at its own depths, then one shot per palette era so the
-// two axes can be judged apart. An era shot sits at a depth deep enough to be
-// wearing the top material, or the colour change would be confounded with a
-// finish change.
+// One shot per world at its own opening depth, then the same worlds on a deeper
+// lap, so both what a world looks like and what a lap does to it can be judged.
 const SHOTS = [
-  ...MATERIALS.map((m) => ({ id: m.id, label: m.label, depth: m.from })),
-  ...ERAS.slice(1).map((e, i) => ({ id: `era-${e.id}`, label: e.label, depth: (i + 1) * ERA_EVERY })),
+  ...WORLDS.map((w) => ({ id: w.id, label: w.label, depth: w.from + 5 })),
+  ...WORLDS.slice(0, 3).map((w) => ({ id: `lap2-${w.id}`, label: `${w.label} · lap 2`, depth: LAP_SPAN + w.from + 5 })),
 ];
 
 for (const m of SHOTS) {

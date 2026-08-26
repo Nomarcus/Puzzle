@@ -315,7 +315,74 @@ lands every three depths, roughly every 66 pieces.
 `npm run materials` renders all five on the real disc. Every tier was tuned by
 looking at that output.
 
-### Every ten depths, the whole palette swaps
+### Depth Worlds
+
+Ten worlds, one every ten depths, then the same ten again on a deeper lap.
+`src/render/world.ts` is the **single depth-driven table** in the renderer:
+everything asks `worldAt(depth)` and reads what it needs off the answer. There is
+deliberately no `if (depth < 10)` anywhere in the drawing code.
+
+| Depth | World | Pattern | Finish → late |
+|---|---|---|---|
+| 0–9 | Candy | none | candy → glazed |
+| 10–19 | Fruit | seeds | glazed → matte |
+| 20–29 | Woodland | grain | wood |
+| 30–39 | Toy Box | studs | plastic |
+| 40–49 | Animal | spots | matte → satin |
+| 50–59 | Crystal Cave | facets | crystal → diamond |
+| 60–69 | Ocean | bubbles | pearl |
+| 70–79 | Space | speckles | glass → crystal |
+| 80–89 | Arcade | grid | glow |
+| 90–99 | Lava | cracks | matte → molten |
+
+Past depth 100 the same ten return with a lap trim — a little more sparkle, a
+slightly stronger ground, the alternate pattern variant. Pattern *strength*
+deliberately does not climb: it is the one dial that would cost legibility.
+
+**Worlds own the finish.** `material.ts` used to be a depth ladder of its own and
+the two collided — `materialAt(20)` was already *diamond*, so a wood world at
+depth 20 came out as grain plus facets plus sparkle. Three signatures on a cell
+sixteen pixels wide is exactly the mush this had to avoid. It is now a vocabulary
+of twelve finishes, and the world names the one it wants.
+
+**The rhythm** is a world every ten depths and a finish step at the halfway mark,
+so something changes every five without a second concept.
+
+#### The readability rule, made enforceable
+
+A pattern may never change what colour a block reads as. Three mechanisms:
+
+1. **Patterns draw in the block's own light or dark shade**, at bounded alpha.
+   Those are the colours the bevel is already made of, so a mark can shift
+   lightness a little and hue not at all.
+2. **Caps are data, not intentions.** Every pattern is a row in `PATTERNS`
+   carrying its ink, alpha and stroke width, and a test checks them. White is
+   capped at **0.30** — for scale, the striped marker is white at **0.92** across
+   the full width of the cell. No pattern may draw both a full arc and a full
+   radial line, because that pair *is* the striped mark.
+3. **Measured on the canvas.** `npm run play` samples the drawn board in each
+   reachable world and asserts the blocks keep their chroma. Measured: depth 0
+   mean chroma **0.861**, depth 10 **0.530** — both far above the 0.25 floor that
+   separates a block from the plate.
+
+#### Which worlds a test can actually reach
+
+`npx vite-node tools/ramp.ts 24` puts the median round at **272–347 pieces**,
+which is **depth ~14**, and the browser bot could not be driven past depth 15. So
+the browser suite checks Candy and Fruit — the worlds real rounds reach — and the
+deeper ones are covered by unit tests plus **`npm run worlds`**, which draws every
+world and a second lap through this same renderer at full size. That contact
+sheet is how each world was tuned; the first pass of seeds and studs was
+invisible on a phone-sized cell and only showed up there.
+
+#### Free play only, structurally
+
+Unchanged and still structural: exactly one `createGame` call passes a ramp, so
+the daily, the levels, the challenges and time attack run on `NO_RAMP`, their
+depth is zero by construction, and `worldAt(0)` is Candy with no pattern. No mode
+string is consulted anywhere.
+
+### The palette half of a world
 
 Marcus's ask, and the one part of the depth ladder that changes the board rather
 than the light on it: same disc, same shapes, an entirely new set of eight. In

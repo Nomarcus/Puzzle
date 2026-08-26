@@ -47,6 +47,10 @@ const TABLE = {
   goalCores: { sv: "Ladda och avfyra kärnan %n gånger", en: "Charge and fire the core %n times" },
   goalCores1: { sv: "Ladda och avfyra kärnan", en: "Charge and fire the core" },
   depth: { sv: "DJUP", en: "DEPTH" },
+  /** Shown under the world's name the moment a new Depth World is entered. */
+  newLayer: { sv: "Nytt lager upptäckt", en: "New layer discovered" },
+  /** The hint in the header, in the last few depths of a world. %s is its name. */
+  nextWorld: { sv: "Näst: %s", en: "Next: %s" },
   coreFired: { sv: "KÄRNAN!", en: "CORE!" },
   coreReadyHint: { sv: "Tryck i mitten", en: "Tap the middle" },
   time: { sv: "TID", en: "TIME" },

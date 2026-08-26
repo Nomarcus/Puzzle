@@ -72,6 +72,7 @@ import { safeInsets } from "./safe-area.js";
 import { play as playSound, unlock as unlockAudio } from "../platform/audio.js";
 import { type Box, drawPiece } from "../render/tray.js";
 import { themeForDepth } from "../render/palette.js";
+import { worldAt, worldChanged } from "../render/world.js";
 import {
   angleAt,
   angleTravelled,
@@ -845,6 +846,7 @@ export class GameScreen {
       for (const cell of cells) {
         const at = cellCentre(board, cell.r, cell.s);
         burst(this.particles, at.x, at.y, cell.colour, {
+          shape: worldAt(depthOf(this.state)).particle,
           count: events.sweep ? 5 : 7,
           speed: events.sweep ? 300 : 220,
           awayFrom: { x: board.cx, y: board.cy },
@@ -955,13 +957,30 @@ export class GameScreen {
 
     if (events.depthReached !== null) {
       const { cx, cy } = this.layout.board;
-      this.effects.push(floatText(cx, cy - 40, `${t("depth")} ${events.depthReached}`, true));
+      const reached = events.depthReached;
+      this.effects.push(floatText(cx, cy - 40, `${t("depth")} ${reached}`, true));
       // The palette underneath shifts over the next 22 pieces, which nobody
       // would ever catch happening. This is the moment that makes it felt.
       this.effects.push(deepenSweep(cx, cy, this.layout.boardRadius));
       this.rebakeBackdrop();
       this.options.haptic?.("heavy");
-      playSound("deeper", 0, events.depthReached);
+      playSound("deeper", 0, reached);
+
+      // A new world rides the announcement that already exists rather than
+      // stacking a second overlay on top of it: the same float and the same
+      // sweep, with the world's name under the depth. Short on purpose — this
+      // lands mid-round and must never interrupt the flow.
+      if (worldChanged(reached - 1, reached)) {
+        const world = worldAt(reached);
+        // Clear of the middle, because the move that crosses a depth is very
+        // often the move that cleared a line, and the clear's own "ALL ONE
+        // COLOUR" and score float land dead centre. Stacked there the two
+        // announcements overlap into an unreadable pile — which is exactly what
+        // the first version did on the iPhone shot.
+        const below = cy + this.layout.boardRadius * 0.66;
+        this.effects.push(floatText(cx, below, world.label, true));
+        this.effects.push(floatText(cx, below + 40, t("newLayer")));
+      }
     }
 
     this.refreshPlaceable();

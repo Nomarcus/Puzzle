@@ -21,8 +21,8 @@ await page.waitForFunction(() => window.__ready === true, { timeout: 30000 });
 await page.waitForTimeout(400);
 const shots = await page.evaluate(() => window.__shots);
 for (const s of shots) {
-  await page.locator(`#m-${s.id}`).screenshot({ path: `/home/user/Puzzle/tools/out/mat-${s.id}.png` });
-  await page.locator(`#m-${s.id}`).screenshot({ path: `/home/user/Puzzle/tools/out/mat-${s.id}.jpg`, type: "jpeg", quality: 90 });
+  await page.locator(`#m-${s.id}`).screenshot({ path: `/home/user/Puzzle/tools/out/world-${s.id}.png` });
+  await page.locator(`#m-${s.id}`).screenshot({ path: `/home/user/Puzzle/tools/out/world-${s.id}.jpg`, type: "jpeg", quality: 90 });
   console.log(`${s.label.padEnd(9)} djup ${s.depth}`);
 }
 await browser.close();

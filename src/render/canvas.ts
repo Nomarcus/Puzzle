@@ -13,7 +13,9 @@ import { type Board, WILD, colourOf, getCell, isStone, isStripedValue } from "..
 import type { Piece } from "../engine/pieces.js";
 import { type SectorGeometry, annularSectorPath, ringRadii } from "./annulus.js";
 import { type BlockColour, type Theme, blockColour } from "./theme.js";
-import { CANDY, type Material, cellNoise, materialAt } from "./material.js";
+import { CANDY, type Material, cellNoise, materialById, withSparkle } from "./material.js";
+import { type PatternId, drawPattern } from "./pattern.js";
+import { finishAt, lapTrim, worldAt } from "./world.js";
 import { BEZEL_SEGMENTS, bezel, bezelColour } from "./depth.js";
 
 /** Sector 0 sits at twelve o'clock, like a dial. */
@@ -164,14 +166,22 @@ export function drawBlock(
   striped = false,
   /** What the block is made of. Defaults to the sweet it has always been. */
   material: Material = CANDY,
+  /** The world's pattern, drawn over the finish. Defaults to nothing. */
+  pattern: PatternId = "none",
+  patternStrength = 0,
+  patternVariant = false,
 ): void {
   if (colourId === WILD && !muted) {
     drawWild(ctx, g, theme, alpha);
     return;
   }
   // A block with nowhere to go is greyed out to say so, and that message beats
-  // any amount of polish: a muted diamond still has to read as unplayable.
-  if (muted) material = CANDY;
+  // any amount of polish: a muted diamond still has to read as unplayable, and
+  // a pattern on top of the grey would only make it harder to see that it is.
+  if (muted) {
+    material = CANDY;
+    pattern = "none";
+  }
   const colour = muted ? theme.muted : blockColour(theme, colourId);
   const ri = g.innerRadius + g.pad;
   const ro = g.outerRadius - g.pad;
@@ -216,8 +226,12 @@ export function drawBlock(
       ctx.arc(g.cx, g.cy, ro - bandOut * 0.72, g.startAngle - 0.2, g.endAngle + 0.2);
       ctx.stroke();
 
-      drawGrain(ctx, g, colour, material, ri, ro, width);
       drawFacets(ctx, g, colour, material, ri, ro, width);
+
+      // The world's pattern, inside the clip and over the finish. Inside,
+      // because half a stroke landing in the gap between cells is what turns a
+      // decoration into a grid drawn over the whole board.
+      drawPattern(ctx, g, colour, pattern, patternStrength, patternVariant);
 
       // Light catching the cut edge, drawn INSIDE the clip.
       //
@@ -267,55 +281,6 @@ export function drawBlock(
     // Balanced whatever happens inside. An unbalanced save is not a cosmetic
     // problem: the clip and the transform it holds stay alive into the next
     // frame, and they compound until nothing lands on screen at all.
-    ctx.restore();
-  }
-}
-
-/**
- * Grain, running the long way round the cell.
- *
- * Along the arc rather than across it, which is the opposite of the facet cuts
- * and deliberately so: grain follows the length of a plank, and on a ring
- * segment the long direction is the arc. Cutting the other way would read as
- * the same mark the crystal tier uses and the two tiers would blur together.
- *
- * Drawn from the block's own dark shade at low alpha, never a brown or a grey.
- * A wooden block here is a *painted* wooden block — the colour has to stay the
- * era's colour, or the board drifts toward the one thing on it that is not a
- * sweet.
- */
-function drawGrain(
-  ctx: CanvasRenderingContext2D,
-  g: SectorGeometry,
-  colour: BlockColour,
-  material: Material,
-  ri: number,
-  ro: number,
-  width: number,
-): void {
-  if (material.grain <= 0) return;
-
-  ctx.save();
-  try {
-    ctx.strokeStyle = colour.dark;
-    ctx.lineCap = "round";
-    const lines = 4;
-    for (let i = 0; i < lines; i++) {
-      // Uneven spacing and length, hashed off the cell, so every block is not
-      // the same four stripes — that reads as corduroy rather than as timber.
-      const jitter = cellNoise(ri + i * 7.3, g.startAngle + i);
-      const t = (i + 0.5) / lines + (jitter - 0.5) * 0.12;
-      const r = ri + (ro - ri) * Math.max(0.08, Math.min(0.92, t));
-      // Measured by looking: at a third of these values the grain was invisible
-      // on a real phone-sized cell and wood read as slightly satin candy.
-      ctx.globalAlpha = material.grain * (0.55 + jitter * 0.45);
-      ctx.lineWidth = Math.max(0.8, width * (0.055 + jitter * 0.045));
-      const trim = (g.endAngle - g.startAngle) * (0.05 + jitter * 0.16);
-      ctx.beginPath();
-      ctx.arc(g.cx, g.cy, r, g.startAngle + trim, g.endAngle - trim);
-      ctx.stroke();
-    }
-  } finally {
     ctx.restore();
   }
 }
@@ -795,7 +760,11 @@ export function drawBoard(
   depth = 0,
 ): void {
   drawPlate(ctx, layout, theme, depth);
-  const material = materialAt(depth);
+  // One lookup. The world owns the finish and the pattern, so nothing in here
+  // ever branches on the depth itself.
+  const world = worldAt(depth);
+  const trim = lapTrim(depth);
+  const material = withSparkle(materialById(finishAt(depth)), trim.sparkle);
 
   for (let r = 0; r < board.spec.rings; r++) {
     for (let s = 0; s < board.spec.sectors; s++) {
@@ -807,7 +776,21 @@ export function drawBoard(
       // ladder is "hard shiny mineral" — if stone joined in, the threat and the
       // reward would end up looking like each other.
       else if (isStone(value)) drawStone(ctx, g, theme);
-      else drawBlock(ctx, g, colourOf(value), theme, 1, false, isStripedValue(value), material);
+      else {
+        drawBlock(
+          ctx,
+          g,
+          colourOf(value),
+          theme,
+          1,
+          false,
+          isStripedValue(value),
+          material,
+          world.pattern,
+          world.patternStrength,
+          trim.variant,
+        );
+      }
     }
   }
 

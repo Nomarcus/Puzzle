@@ -913,7 +913,7 @@ check("a fresh round starts at the top", (await page.evaluate(() => window.__shi
 // the next reported none. So this deals a fresh round and tries again rather
 // than judging the feature on one bad deal.
 let dived = { depth: 0, over: true };
-for (let attempt = 0; attempt < 5 && dived.depth < 4; attempt++) {
+for (let attempt = 0; attempt < 5 && dived.depth < 6; attempt++) {
   if (attempt > 0) {
     await page.evaluate(() => window.__shiftle.start("endless"));
     await page.waitForTimeout(400);
@@ -923,7 +923,7 @@ for (let attempt = 0; attempt < 5 && dived.depth < 4; attempt++) {
     for (let i = 0; i < 1200; i++) {
       const state = api.state();
       if (!state || state.over) break;
-      if (api.depth() >= 4) break;
+      if (api.depth() >= 6) break;
       if (!api.botMove()) break;
     }
     return { depth: api.depth(), over: api.state()?.over ?? true };
@@ -938,7 +938,7 @@ check("and the blocks harden as it goes deeper",
   (await page.evaluate(() => window.__shiftle.material())) !== "candy",
   `material=${await page.evaluate(() => window.__shiftle.material())} at depth ${dived.depth}`);
 
-if (dived.depth >= 4) {
+if (dived.depth >= 6) {
   const deep = await sampleGround();
   check("the ground deepens as the round goes on",
     deep.l < shallow.l - 0.01,
@@ -957,6 +957,80 @@ if (dived.depth >= 4) {
 } else {
   check("the bot reached a depth worth measuring", false, `only got to ${dived.depth}`);
 }
+
+// --- the depth worlds ------------------------------------------------------
+// The hard rule is that a world's pattern may never change what colour a block
+// reads as, because colour is what decides whether a line pays. That is checked
+// by *sampling the drawn board* rather than by trusting the pattern specs — the
+// specs are unit-tested, but only the canvas knows what actually landed.
+const worldColours = () =>
+  page.evaluate(() => {
+    const canvas = document.querySelector("#board");
+    const ctx = canvas.getContext("2d");
+    const dpr = canvas.width / canvas.clientWidth;
+    const l = window.__shiftle.layout();
+    // Walk a ring of samples at the middle radius and keep the ones that landed
+    // on a saturated cell, so this measures blocks and not the plate.
+    const cx = (canvas.clientWidth / 2) * dpr;
+    const cy = l.boardCy * dpr;
+    const r = l.boardRadius * 0.72 * dpr;
+    const out = [];
+    for (let i = 0; i < 180; i++) {
+      const a = (i / 180) * Math.PI * 2;
+      const d = ctx.getImageData(Math.round(cx + r * Math.cos(a)), Math.round(cy + r * Math.sin(a)), 1, 1).data;
+      const [red, green, blue] = [d[0] / 255, d[1] / 255, d[2] / 255];
+      const max = Math.max(red, green, blue), min = Math.min(red, green, blue);
+      const chroma = max - min;
+      if (chroma < 0.25) continue;
+      out.push(chroma);
+    }
+    return out;
+  });
+
+// Only the worlds a real round actually reaches. Measured here and confirmed by
+// `npx vite-node tools/ramp.ts`: the bot's median round is depth ~14 and it
+// could not be driven past 15, so asking it for depth 20 or 30 tests the bot's
+// stamina rather than the renderer. The deeper worlds are covered by the unit
+// tests and by `npm run worlds`, which draws every one of them through this same
+// renderer at full size.
+for (const target of [0, 10]) {
+  await page.evaluate(() => window.__shiftle.start("endless"));
+  await page.waitForTimeout(400);
+  const got = await page.evaluate(async (want) => {
+    const api = window.__shiftle;
+    for (let i = 0; i < 2000; i++) {
+      const state = api.state();
+      if (!state || state.over) break;
+      if (api.depth() >= want) break;
+      if (!api.botMove()) break;
+    }
+    return { depth: api.depth(), world: api.world(), over: api.state()?.over ?? true };
+  }, target);
+  if (got.depth < target) {
+    check(`the bot reached depth ${target}`, false, `only got to ${got.depth}`);
+    continue;
+  }
+  // A fresh board is nearly empty, so the sample ring would land in the holes
+  // and measure the plate. Lay some pieces down first.
+  await page.evaluate(async () => {
+    const api = window.__shiftle;
+    for (let i = 0; i < 24 && api.filledCells() < 24; i++) {
+      if (!api.botMove()) break;
+    }
+  });
+  await page.waitForTimeout(900);
+  const chromas = await worldColours();
+  const mean = chromas.reduce((a, b) => a + b, 0) / Math.max(1, chromas.length);
+  check(
+    `depth ${target} is the ${got.world} world and its blocks keep their colour`,
+    chromas.length > 20 && mean > 0.35,
+    `${chromas.length} samples, mean chroma ${mean.toFixed(3)}`,
+  );
+  await shot(`20-world-${got.world}`);
+}
+
+await page.evaluate(() => window.__shiftle.menu());
+await page.waitForTimeout(250);
 
 // --- and none of it reaches the clock -------------------------------------
 // Marcus asked for depth in free play only. The gate is the ramp itself rather
@@ -983,6 +1057,8 @@ check("and its blocks stay the sweet they have always been",
   (await page.evaluate(() => window.__shiftle.material())) === "candy");
 check("and it never leaves the palette the player chose",
   (await page.evaluate(() => window.__shiftle.era())) === "candy");
+check("and it never leaves the first world",
+  (await page.evaluate(() => window.__shiftle.world())) === "candy");
 check("so its depth never leaves zero, however long the round runs",
   timed.depth === 0, `depth=${timed.depth}`);
 

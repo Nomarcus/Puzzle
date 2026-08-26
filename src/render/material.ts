@@ -1,45 +1,50 @@
 /**
- * What the blocks are made of, and how that changes as a round goes deeper.
+ * The finishes a block can wear.
  *
- * The ladder is candy → wood → glass → crystal → diamond, and it is ordered by
- * **hardness** rather than by preciousness. That matters: Marcus asked for wood
- * alongside crystal and diamond, and wood is not more precious than a sweet, so
- * a preciousness ladder had nowhere to put it. Hardness does — sugar is soft,
- * wood is solid, glass is harder, crystal harder, diamond hardest — and it is
- * physically true, which is why it reads as a progression without a word of
- * explanation. Every rung is also shinier than the one before, so the ladder
- * works even for a player who never thinks about the materials at all.
+ * This used to be a depth ladder of its own. It is now a **vocabulary**: a
+ * Depth World names the finish it wants (see `world.ts`), and nothing here reads
+ * the depth. That is a correction rather than a refactor for its own sake — with
+ * both systems driven by depth they collided, because `materialAt(20)` was
+ * already *diamond*, so a wood world at depth 20 came out as grain plus facets
+ * plus sparkle. Three signatures on a cell that is sixteen pixels wide on a
+ * phone is exactly the mush the world system has to avoid.
  *
- * It exists because a
- * player who has gone a very long way should be able to see that they have,
- * from the blocks themselves and not from a number, and because "the sweets
- * turned to diamond" is a reward you can feel without anybody explaining it.
+ * Style and surface therefore stop competing, and where they would overload each
+ * other the world wins, which is both the brief's rule and the readable one.
  *
- * The hard constraint is the same one that governs `depth.ts`, and it is the
- * reason this is a *finish* ladder rather than a colour ladder: **a line only
- * pays a spin if every cell shares one colour**, and the eight hues are spaced
- * by lightness so they stay apart for colour-blind players. So every tier below
- * paints the same `colour.base` fill underneath and only changes what happens
- * on top of it — highlights, facet cuts, edge light. Nothing here shifts a hue,
- * and nothing here is allowed to wash the body out toward white, because a pale
- * strawberry and a pale bubblegum are the same block to somebody who is
+ * The hard constraint is unchanged and is the reason this is a finish vocabulary
+ * rather than a colour one: **a line only pays a spin if every cell shares one
+ * colour**. So every finish paints the same `colour.base` fill underneath and
+ * changes only what happens on top — highlights, edge light, cuts, glints.
+ * Nothing here shifts a hue, and nothing may wash the body out toward white,
+ * because a pale strawberry and a pale bubblegum are the same block to somebody
  * matching by lightness.
  *
- * One thing the ladder must not do, which is easy to miss: **stone has to stay
- * obviously not-a-block**. Stone is the one thing on the disc that is not a
- * sweet to be cleared, it is grey and off-palette on purpose, and "hard shiny
- * mineral" is exactly what the top of this ladder is. What keeps them apart is
- * saturation — a diamond block is a fully saturated red or green with facets
- * cut into it, and stone has no hue at all — so no tier may drain the body's
- * colour, or the threat stops reading as a threat.
+ * One trap worth keeping in mind for anything added later: **stone has to stay
+ * obviously not-a-block**. It is the one thing on the disc that is not a sweet to
+ * be cleared, it is grey and off-palette on purpose, and "hard shiny mineral" is
+ * exactly what the top of this vocabulary is. What keeps them apart is
+ * saturation, so no finish may drain the body's colour.
  */
 
+export type MaterialId =
+  | "candy"
+  | "glazed"
+  | "matte"
+  | "satin"
+  | "wood"
+  | "plastic"
+  | "glass"
+  | "pearl"
+  | "glow"
+  | "molten"
+  | "crystal"
+  | "diamond";
+
 export interface Material {
-  readonly id: string;
+  readonly id: MaterialId;
   /** Shown to the player when the tier is reached. */
   readonly label: string;
-  /** First depth that uses this tier. The first entry must be 0. */
-  readonly from: number;
   /** Width of the specular streak, as a fraction of the cell's width. */
   readonly gloss: number;
   /** How bright that streak is. */
@@ -52,121 +57,51 @@ export interface Material {
   readonly facetDepth: number;
   /** A star glint on a scattering of cells. 0 for none. */
   readonly sparkle: number;
-  /** Grain running around the cell. Wood's whole tell. 0 for none. */
-  readonly grain: number;
 }
 
 /**
- * Five tiers, spaced three depths apart.
+ * Twelve finishes.
  *
- * Three depths is about 66 pieces, which on the bot's numbers is a couple of
- * minutes of real play — long enough that arriving somewhere feels earned and
- * short enough that a good run passes through several. The last tier is
- * open-ended: past depth 12 there is nothing further to become, and the rim
- * counter carries the reward on alone from there.
+ * `gloss`/`glossAlpha` are the specular streak, `rim` the light catching the
+ * cell's edge, `facets` the cut faces, `sparkle` how many cells carry a glint.
+ * Everything is a fraction of the cell so it scales with the disc.
+ *
+ * `candy` must stay exactly what shipped: it is what the daily, the levels, the
+ * challenges and time attack all wear, and what free play's first ten depths
+ * wear too, so a change here is a change to the game's own face.
  */
 export const MATERIALS: readonly Material[] = [
-  {
-    id: "candy",
-    label: "Candy",
-    from: 0,
-    gloss: 0.1,
-    glossAlpha: 0.42,
-    rim: 0,
-    facets: 0,
-    facetDepth: 0,
-    sparkle: 0,
-    grain: 0,
-  },
-  {
-    // Painted wooden toys, not bare timber. Bare wood is brown, brown is
-    // low-saturation, and a low-saturation block has started to look like stone
-    // — the one thing on the disc that must never be mistaken for a sweet. So
-    // the paint stays the era's colour and the wood is entirely what the finish
-    // does: a satin sheen and grain running round the cell.
-    id: "wood",
-    label: "Wood",
-    from: 3,
-    gloss: 0.16,
-    glossAlpha: 0.5,
-    rim: 0.1,
-    facets: 0,
-    facetDepth: 0,
-    sparkle: 0,
-    grain: 0.5,
-  },
-  {
-    id: "glass",
-    label: "Glass",
-    from: 6,
-    gloss: 0.2,
-    glossAlpha: 0.78,
-    rim: 0.26,
-    facets: 0,
-    facetDepth: 0,
-    sparkle: 0,
-    grain: 0,
-  },
-  {
-    id: "crystal",
-    label: "Crystal",
-    from: 9,
-    gloss: 0.22,
-    glossAlpha: 0.85,
-    rim: 0.32,
-    facets: 2,
-    facetDepth: 0.12,
-    sparkle: 0.14,
-    grain: 0,
-  },
-  {
-    id: "diamond",
-    label: "Diamond",
-    from: 12,
-    gloss: 0.24,
-    glossAlpha: 0.95,
-    rim: 0.4,
-    facets: 3,
-    facetDepth: 0.17,
-    sparkle: 0.3,
-    grain: 0,
-  },
+  { id: "candy", label: "Candy", gloss: 0.1, glossAlpha: 0.42, rim: 0, facets: 0, facetDepth: 0, sparkle: 0 },
+  { id: "glazed", label: "Glazed", gloss: 0.16, glossAlpha: 0.6, rim: 0.14, facets: 0, facetDepth: 0, sparkle: 0 },
+  // Matte is the one finish that goes *down*: fruit skin and animal hide are not
+  // wet, and killing the specular is the whole tell.
+  { id: "matte", label: "Matte", gloss: 0.06, glossAlpha: 0.16, rim: 0.06, facets: 0, facetDepth: 0, sparkle: 0 },
+  { id: "satin", label: "Satin", gloss: 0.14, glossAlpha: 0.38, rim: 0.12, facets: 0, facetDepth: 0, sparkle: 0 },
+  { id: "wood", label: "Wood", gloss: 0.16, glossAlpha: 0.5, rim: 0.1, facets: 0, facetDepth: 0, sparkle: 0 },
+  // Injection-moulded plastic: a hard, tight highlight rather than a broad one.
+  { id: "plastic", label: "Plastic", gloss: 0.12, glossAlpha: 0.82, rim: 0.22, facets: 0, facetDepth: 0, sparkle: 0 },
+  { id: "glass", label: "Glass", gloss: 0.2, glossAlpha: 0.78, rim: 0.26, facets: 0, facetDepth: 0, sparkle: 0 },
+  { id: "pearl", label: "Pearl", gloss: 0.26, glossAlpha: 0.62, rim: 0.24, facets: 0, facetDepth: 0, sparkle: 0.1 },
+  { id: "glow", label: "Glow", gloss: 0.18, glossAlpha: 0.72, rim: 0.42, facets: 0, facetDepth: 0, sparkle: 0.12 },
+  { id: "molten", label: "Molten", gloss: 0.22, glossAlpha: 0.68, rim: 0.3, facets: 0, facetDepth: 0, sparkle: 0.16 },
+  { id: "crystal", label: "Crystal", gloss: 0.22, glossAlpha: 0.85, rim: 0.32, facets: 2, facetDepth: 0.12, sparkle: 0.14 },
+  { id: "diamond", label: "Diamond", gloss: 0.24, glossAlpha: 0.95, rim: 0.4, facets: 3, facetDepth: 0.17, sparkle: 0.3 },
 ];
 
+const BY_ID = new Map(MATERIALS.map((m) => [m.id, m]));
+
+/** The finish a world named. Falls back to candy rather than throwing. */
+export function materialById(id: MaterialId): Material {
+  return BY_ID.get(id) ?? MATERIALS[0]!;
+}
+
+/** A deeper lap wears the same finish with a little more glint. */
+export function withSparkle(material: Material, extra: number): Material {
+  if (extra <= 0) return material;
+  return { ...material, sparkle: Math.min(0.45, material.sparkle + extra) };
+}
+
 export const CANDY = MATERIALS[0]!;
-
-/**
- * The tier a depth is in.
- *
- * Depth 0 is candy, which is what every other mode is: the daily, the levels,
- * the challenges and time attack all run without a ramp, so their depth is
- * structurally zero and they get the block they have always had.
- */
-export function materialAt(depth: number): Material {
-  if (!Number.isFinite(depth) || depth <= 0) return CANDY;
-  let found = CANDY;
-  for (const material of MATERIALS) {
-    if (depth >= material.from) found = material;
-  }
-  return found;
-}
-
-/** The tier index, for anything that needs to compare two of them. */
-export function materialIndex(depth: number): number {
-  const material = materialAt(depth);
-  return MATERIALS.indexOf(material);
-}
-
-/**
- * Whether crossing into `depth` entered a new tier, so the game can say so.
- *
- * Reads both depths rather than tracking a flag, because the ramp is a pure
- * function of pieces placed and anything that has to be remembered separately
- * is a thing that can fall out of step with a replay.
- */
-export function materialChanged(from: number, to: number): boolean {
-  return materialIndex(to) > materialIndex(from);
-}
 
 /**
  * A stable 0..1 per cell, so a sparkle stays on the same blocks from frame to

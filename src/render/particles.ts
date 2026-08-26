@@ -11,14 +11,17 @@
  * phone.
  */
 
-import type { Theme } from "./theme.js";
+import { type Theme, blockColour } from "./theme.js";
 import { drawCandySquare } from "./candy.js";
+import type { ParticleShape } from "./world.js";
 
 /** Above this the frame rate matters more than the confetti. */
 const MAX_PARTICLES = 420;
 const GRAVITY = 1400;
 
 export interface Particle {
+  /** What the world throws off. Purely cosmetic; the physics are identical. */
+  shape: ParticleShape;
   x: number;
   y: number;
   vx: number;
@@ -32,6 +35,7 @@ export interface Particle {
 }
 
 export interface BurstOptions {
+  readonly shape?: ParticleShape;
   readonly count?: number;
   readonly speed?: number;
   readonly size?: number;
@@ -56,6 +60,7 @@ export function burst(
   colour: number,
   options: BurstOptions = {},
 ): void {
+  const shape = options.shape ?? "confetti";
   const count = options.count ?? 6;
   const speed = options.speed ?? 210;
   const size = options.size ?? 11;
@@ -76,6 +81,7 @@ export function burst(
     const life = 0.5 + jitter * 0.45;
 
     particles.push({
+      shape,
       x,
       y,
       vx: Math.cos(angle) * power,
@@ -117,6 +123,89 @@ export function drawParticles(
     // rather than a puff of smoke.
     const t = p.life / p.maxLife;
     const alpha = t > 0.34 ? 1 : t / 0.34;
+    drawShape(ctx, p, theme, alpha);
+  }
+}
+
+/**
+ * Debris in the world's own idiom.
+ *
+ * All procedural, no bitmaps: these are a handful of paths per particle and a
+ * sprite sheet for eight worlds would cost more to load than it saves to draw.
+ * Every shape reuses the block's colour, so a burst still reads as the line that
+ * just went off rather than as generic sparkle.
+ */
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  p: Particle,
+  theme: Theme,
+  alpha: number,
+): void {
+  if (p.shape === "confetti") {
     drawCandySquare(ctx, p.x, p.y, p.size, p.angle, p.colour, theme, alpha);
+    return;
+  }
+
+  const colour = blockColour(theme, p.colour);
+  const r = p.size / 2;
+  ctx.save();
+  try {
+    ctx.globalAlpha *= alpha;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.angle);
+    ctx.fillStyle = colour.base;
+    ctx.strokeStyle = colour.light;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    switch (p.shape) {
+      case "seed":
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r * 0.55, r, 0, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case "splinter":
+        ctx.fillRect(-r, -r * 0.28, r * 2, r * 0.56);
+        break;
+      case "chip":
+        ctx.beginPath();
+        ctx.roundRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6, r * 0.45);
+        ctx.fill();
+        break;
+      case "bubble":
+        ctx.lineWidth = Math.max(1, r * 0.32);
+        ctx.strokeStyle = colour.base;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.8, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      case "glint":
+      case "star": {
+        // A four-point star, drawn as two strokes. Cheaper than a path and it
+        // keeps the thin points that make it read as light rather than as a dot.
+        ctx.lineWidth = Math.max(1, r * 0.34);
+        ctx.strokeStyle = colour.light;
+        ctx.beginPath();
+        ctx.moveTo(-r, 0);
+        ctx.lineTo(r, 0);
+        ctx.moveTo(0, -r);
+        ctx.lineTo(0, r);
+        ctx.stroke();
+        break;
+      }
+      case "spark":
+        ctx.lineWidth = Math.max(1, r * 0.4);
+        ctx.strokeStyle = colour.light;
+        ctx.beginPath();
+        ctx.moveTo(-r, r * 0.4);
+        ctx.lineTo(r, -r * 0.4);
+        ctx.stroke();
+        break;
+      default:
+        drawCandySquare(ctx, 0, 0, p.size, 0, p.colour, theme, 1);
+        break;
+    }
+  } finally {
+    ctx.restore();
   }
 }

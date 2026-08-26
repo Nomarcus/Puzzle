@@ -12,20 +12,27 @@ import {
   unlockedBetween,
 } from "../src/engine/progress.js";
 import { SKY, THEMES, blockColour } from "../src/render/theme.js";
+import { eraAt, eraChanged, paletteFor, themeForDepth } from "../src/render/palette.js";
+import { cellNoise, materialById } from "../src/render/material.js";
 import {
-  ERAS,
-  eraAt,
-  eraChanged,
-  paletteFor,
-  themeForDepth,
-} from "../src/render/palette.js";
+  PATTERNS,
+  SHADE_CAP,
+  STROKE_CAP,
+  WHITE_CAP,
+  patternSpec,
+} from "../src/render/pattern.js";
 import {
-  MATERIALS,
-  cellNoise,
-  materialAt,
-  materialChanged,
-  materialIndex,
-} from "../src/render/material.js";
+  LAP_SPAN,
+  WORLDS,
+  depthsToNextWorld,
+  finishAt,
+  lapAt,
+  lapTrim,
+  nextWorld,
+  worldAt,
+  worldChanged,
+  worldIndex,
+} from "../src/render/world.js";
 import {
   BEZEL_SEGMENTS,
   bezel,
@@ -1911,91 +1918,14 @@ describe("what depth looks like", () => {
   });
 });
 
-describe("what the blocks are made of", () => {
-  it("gives every other mode the sweet it has always had", () => {
-    // The daily, the levels, the challenges and time attack all run without a
-    // ramp, so their depth is structurally zero.
-    expect(materialAt(0).id).toBe("candy");
-    expect(materialAt(-5).id).toBe("candy");
-    expect(materialAt(Number.NaN).id).toBe("candy");
-    expect(MATERIALS[0]!.from).toBe(0);
-  });
-
-  it("climbs one tier at a time and never goes back", () => {
-    let seen = -1;
-    for (let depth = 0; depth <= 40; depth++) {
-      const index = materialIndex(depth);
-      expect(index).toBeGreaterThanOrEqual(seen);
-      expect(index - seen).toBeLessThanOrEqual(1);
-      seen = index;
-    }
-    expect(seen).toBe(MATERIALS.length - 1);
-  });
-
-  it("holds at the top rather than falling off it", () => {
-    // Depth is unbounded in the engine, so there is a depth past every tier.
-    const top = MATERIALS[MATERIALS.length - 1]!;
-    for (const depth of [12, 30, 500, 100000]) {
-      expect(materialAt(depth).id).toBe(top.id);
-    }
-  });
-
-  it("notices a tier being crossed, and only then", () => {
-    expect(materialChanged(2, 3)).toBe(true);
-    expect(materialChanged(3, 4)).toBe(false);
-    expect(materialChanged(8, 9)).toBe(true);
-    expect(materialChanged(11, 12)).toBe(true);
-    expect(materialChanged(12, 13)).toBe(false);
-    // Going nowhere is not a change, and neither is going backwards.
-    expect(materialChanged(9, 9)).toBe(false);
-    expect(materialChanged(12, 3)).toBe(false);
-  });
-
-  it("only ever gets shinier, never duller", () => {
-    for (let i = 1; i < MATERIALS.length; i++) {
-      const prev = MATERIALS[i - 1]!;
-      const next = MATERIALS[i]!;
-      expect(next.from).toBeGreaterThan(prev.from);
-      expect(next.gloss).toBeGreaterThanOrEqual(prev.gloss);
-      expect(next.glossAlpha).toBeGreaterThanOrEqual(prev.glossAlpha);
-      expect(next.rim).toBeGreaterThanOrEqual(prev.rim);
-      expect(next.facets).toBeGreaterThanOrEqual(prev.facets);
-      expect(next.sparkle).toBeGreaterThanOrEqual(prev.sparkle);
-      // Grain is wood's alone and is not part of the climb — every other tier
-      // is smooth, so this is the one property that legitimately goes back down.
-      expect(next.grain).toBeGreaterThanOrEqual(0);
-    }
-  });
-
-  it("never paints over enough of a block to change what colour it is", () => {
-    // The rule this guards: a line only pays a spin if every cell shares one
-    // colour, and the eight hues are spaced by lightness for colour-blind
-    // players. A facet wash strong enough to read as a second colour, or a rim
-    // bright enough to pale the body, breaks both — the first version of this
-    // did exactly that at 0.46 and half of every block went white.
-    for (const material of MATERIALS) {
-      expect(material.facetDepth).toBeLessThanOrEqual(0.2);
-      expect(material.rim).toBeLessThanOrEqual(0.45);
-      // And a sparkle on every cell is a texture, not a reward.
-      expect(material.sparkle).toBeLessThanOrEqual(0.35);
-    }
-  });
-
-  it("puts its glints in the same places every frame", () => {
-    // Hashed from the cell, not drawn from the engine's RNG — that stream is
-    // threaded through game state for replay and decoration must never take
-    // from it — and not from the clock, or the sparkle crawls over the board.
-    for (const [r, a] of [[40, 0.5], [12.5, 2.1], [0, 0], [999, 6.28]] as const) {
-      const once = cellNoise(r, a);
-      expect(cellNoise(r, a)).toBe(once);
-      expect(once).toBeGreaterThanOrEqual(0);
-      expect(once).toBeLessThan(1);
-    }
-    // And different cells get different values, or every block sparkles at once.
-    const spread = new Set([cellNoise(40, 0.5), cellNoise(40, 1.1), cellNoise(55, 0.5)]);
-    expect(spread.size).toBe(3);
-  });
-});
+/** One depth inside every world, on the first lap and on a deeper one. */
+function everyWorldDepth(): number[] {
+  const out: number[] = [];
+  for (let lap = 0; lap < 3; lap++) {
+    for (const world of WORLDS) out.push(lap * LAP_SPAN + world.from + 2);
+  }
+  return out;
+}
 
 describe("palette eras", () => {
   /** Hue, saturation and lightness separation of a set of eight blocks. */
@@ -2021,15 +1951,15 @@ describe("palette eras", () => {
     // The rule this protects: a line only pays a spin if every cell shares one
     // colour. Eight colours moving together is safe; one drifting toward a
     // neighbour would make two distinct blocks start reading as a match.
-    for (const era of ERAS) {
-      const palette = paletteFor(SKY, era);
+    for (const depth of everyWorldDepth()) {
+      const palette = paletteFor(SKY, eraAt(depth));
       expect(palette).toHaveLength(SKY.blocks.length);
       expect(new Set(palette.map((c) => c.base)).size).toBe(8);
     }
   });
 
   it("leaves the first era exactly as the game shipped", () => {
-    expect(paletteFor(SKY, ERAS[0]!)).toBe(SKY.blocks);
+    expect(paletteFor(SKY, eraAt(0))).toBe(SKY.blocks);
     expect(themeForDepth(SKY, 0)).toBe(SKY);
     for (const theme of THEMES) expect(themeForDepth(theme, 0)).toBe(theme);
   });
@@ -2043,8 +1973,8 @@ describe("palette eras", () => {
     // them are preserved exactly.
     const bar = separation(SKY.blocks);
     expect(bar.minHue).toBeCloseTo(17.4, 1);
-    for (const era of ERAS) {
-      const era8 = separation(paletteFor(SKY, era));
+    for (const depth of everyWorldDepth()) {
+      const era8 = separation(paletteFor(SKY, eraAt(depth)));
       // Half a degree of slack for the 8-bit hex round-trip, which is the only
       // thing that can move a rigid rotation's spacing at all.
       expect(era8.minHue).toBeGreaterThan(bar.minHue - 0.5);
@@ -2054,8 +1984,8 @@ describe("palette eras", () => {
 
   it("never drifts pale enough to lose the plate, or dark enough to stop being a sweet", () => {
     for (const theme of THEMES) {
-      for (const era of ERAS) {
-        for (const colour of paletteFor(theme, era)) {
+      for (const depth of everyWorldDepth()) {
+        for (const colour of paletteFor(theme, eraAt(depth))) {
           const { l } = toHSL(colour.base)!;
           expect(l).toBeGreaterThanOrEqual(0.35);
           expect(l).toBeLessThanOrEqual(0.75);
@@ -2071,25 +2001,12 @@ describe("palette eras", () => {
     const stone = toHSL(SKY.stone.base)!;
     expect(stone.s).toBeLessThan(0.25);
     for (const theme of THEMES) {
-      for (const era of ERAS) {
-        for (const colour of paletteFor(theme, era)) {
+      for (const depth of everyWorldDepth()) {
+        for (const colour of paletteFor(theme, eraAt(depth))) {
           expect(toHSL(colour.base)!.s).toBeGreaterThan(0.6);
         }
       }
     }
-  });
-
-  it("changes era every ten depths and then goes round again", () => {
-    expect(eraAt(0).id).toBe("candy");
-    expect(eraAt(9).id).toBe("candy");
-    expect(eraAt(10).id).toBe(ERAS[1]!.id);
-    expect(eraAt(20).id).toBe(ERAS[2]!.id);
-    expect(eraAt(30).id).toBe(ERAS[3]!.id);
-    // Depth is unbounded in the engine, so the eras have to cycle rather than
-    // run out. Coming back to candy reads as a lap, like the rim counter.
-    expect(eraAt(40).id).toBe("candy");
-    expect(eraAt(41).id).toBe("candy");
-    expect(eraAt(50).id).toBe(ERAS[1]!.id);
   });
 
   it("notices an era being crossed, and only forwards", () => {
@@ -2121,5 +2038,183 @@ describe("palette eras", () => {
       expect(themeForDepth(theme, -3).blocks).toBe(theme.blocks);
       expect(themeForDepth(theme, Number.NaN).blocks).toBe(theme.blocks);
     }
+  });
+});
+
+describe("depth worlds", () => {
+  it("puts the named boundaries where Marcus asked for them", () => {
+    expect(worldAt(0).id).toBe("candy");
+    expect(worldAt(9).id).toBe("candy");
+    expect(worldAt(10).id).toBe("fruit");
+    expect(worldAt(19).id).toBe("fruit");
+    expect(worldAt(20).id).toBe("woodland");
+    expect(worldAt(30).id).toBe("toybox");
+    expect(worldAt(40).id).toBe("animal");
+    expect(worldAt(50).id).toBe("crystal");
+    expect(worldAt(60).id).toBe("ocean");
+    expect(worldAt(70).id).toBe("space");
+    expect(worldAt(80).id).toBe("arcade");
+    expect(worldAt(90).id).toBe("lava");
+    expect(worldAt(99).id).toBe("lava");
+  });
+
+  it("comes round again past a hundred instead of running out", () => {
+    // Depth is unbounded in the engine — the stone dial keeps tightening for
+    // ever — so a table that ended would leave the deepest players at nothing.
+    expect(worldAt(100).id).toBe("candy");
+    expect(worldAt(110).id).toBe("fruit");
+    expect(lapAt(100)).toBe(1);
+    expect(lapAt(250)).toBe(2);
+    for (const depth of [100, 137, 999, 12_345, 1e6]) {
+      expect(WORLDS.some((w) => w.id === worldAt(depth).id)).toBe(true);
+      expect(materialById(finishAt(depth))).toBeTruthy();
+    }
+  });
+
+  it("survives a depth that is not a number at all", () => {
+    // This runs inside a draw call: a bad value should cost a shade, not a frame.
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, -1e9]) {
+      expect(worldAt(bad).id).toBe("candy");
+      expect(lapAt(bad)).toBe(0);
+      expect(worldIndex(bad)).toBe(0);
+    }
+  });
+
+  it("hardens once halfway through a world, not every depth", () => {
+    expect(finishAt(0)).toBe("candy");
+    expect(finishAt(4)).toBe("candy");
+    expect(finishAt(5)).toBe("glazed");
+    expect(finishAt(9)).toBe("glazed");
+    expect(finishAt(20)).toBe("wood");
+    expect(finishAt(55)).toBe("diamond");
+  });
+
+  it("announces a world only when one is actually entered", () => {
+    expect(worldChanged(9, 10)).toBe(true);
+    expect(worldChanged(10, 11)).toBe(false);
+    expect(worldChanged(99, 100)).toBe(true);
+    // Going nowhere is not a change, and neither is going backwards.
+    expect(worldChanged(20, 20)).toBe(false);
+    expect(worldChanged(30, 10)).toBe(false);
+  });
+
+  it("counts down to the next world correctly", () => {
+    expect(depthsToNextWorld(0)).toBe(10);
+    expect(depthsToNextWorld(7)).toBe(3);
+    expect(depthsToNextWorld(9)).toBe(1);
+    expect(depthsToNextWorld(10)).toBe(10);
+    expect(nextWorld(7).id).toBe("fruit");
+    expect(nextWorld(27).id).toBe("toybox");
+    expect(nextWorld(97).id).toBe("candy");
+  });
+
+  it("keeps eight block colours in every world, on every lap", () => {
+    for (const theme of THEMES) {
+      for (const depth of everyWorldDepth()) {
+        expect(paletteFor(theme, eraAt(depth))).toHaveLength(8);
+      }
+    }
+  });
+
+  it("leaves stone alone in every world", () => {
+    // Stone is the one thing on the disc that is not a sweet to be cleared. No
+    // world may touch it, or the threat stops reading as a threat.
+    for (const theme of THEMES) {
+      for (const depth of everyWorldDepth()) {
+        expect(themeForDepth(theme, depth).stone).toBe(theme.stone);
+      }
+    }
+  });
+
+  it("never draws a pattern that could be mistaken for a striped block", () => {
+    // The striped marker is white at 0.92 alpha, width * 0.2 wide, drawn as a
+    // full arc AND a full radial line. That pair is what it means. A pattern
+    // that came close would cost a player a move, so the caps are data here
+    // rather than an intention somebody has to notice in review.
+    for (const spec of PATTERNS) {
+      const cap = spec.ink === "white" ? WHITE_CAP : SHADE_CAP;
+      expect(spec.alpha).toBeLessThanOrEqual(cap);
+      expect(spec.stroke).toBeLessThanOrEqual(STROKE_CAP);
+      expect(spec.fullArc && spec.fullRadial).toBe(false);
+    }
+    expect(WHITE_CAP).toBeLessThan(0.92 / 2);
+    expect(STROKE_CAP).toBeLessThan(0.2);
+  });
+
+  it("gives every world a pattern that exists and a finish that exists", () => {
+    for (const world of WORLDS) {
+      expect(patternSpec(world.pattern).id).toBe(world.pattern);
+      expect(materialById(world.finish).id).toBe(world.finish);
+      expect(materialById(world.finishLate).id).toBe(world.finishLate);
+      expect(world.patternStrength).toBeGreaterThanOrEqual(0);
+      expect(world.patternStrength).toBeLessThanOrEqual(1);
+      // The ground cap is what keeps an earned Theme recognisable through a
+      // world: Sky plus Ocean still has to feel like Sky.
+      expect(Math.abs(world.ground)).toBeLessThanOrEqual(20);
+    }
+    expect(WORLDS).toHaveLength(10);
+    expect(new Set(WORLDS.map((w) => w.id)).size).toBe(10);
+    expect(WORLDS.map((w) => w.from)).toEqual([0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+  });
+
+  it("keeps the first world exactly as the game already looks", () => {
+    // Candy is what the daily, the levels, the challenges and time attack all
+    // wear. Free play's first ten depths have to match them or the game's own
+    // face would be missing from its own default mode.
+    const candy = WORLDS[0]!;
+    expect(candy.hue).toBe(0);
+    expect(candy.ground).toBe(0);
+    expect(candy.pattern).toBe("none");
+    expect(candy.patternStrength).toBe(0);
+    for (const theme of THEMES) expect(themeForDepth(theme, 0)).toBe(theme);
+  });
+
+  it("never turns a returning world into an unreadable one", () => {
+    // A deeper lap is meant to feel earned, not to become illegible. Pattern
+    // strength deliberately does not climb — it is the one dial that would cost
+    // legibility, which is the thing this system may never spend.
+    for (const depth of [0, 100, 200, 300, 900]) {
+      const trim = lapTrim(depth);
+      expect(trim.sparkle).toBeLessThanOrEqual(0.24);
+      expect(Math.abs(trim.ground)).toBeLessThanOrEqual(9);
+    }
+  });
+
+  it("leaves the daily, the levels and time attack untouched", () => {
+    // All three run without a ramp, so their depth is structurally zero. This
+    // pins the consequence rather than the mechanism.
+    for (const theme of THEMES) {
+      expect(themeForDepth(theme, 0)).toBe(theme);
+      expect(worldAt(0).pattern).toBe("none");
+      expect(finishAt(0)).toBe("candy");
+    }
+  });
+
+  it("never lets decoration touch the gameplay RNG", () => {
+    // Patterns and particles are hashed from position, never drawn from the
+    // engine's stream — that stream is threaded through game state for replay.
+    // Playing the same seed twice with the pattern hash exercised in between
+    // must land on byte-identical state.
+    const play = (touchDecoration: boolean) => {
+      let state = createGame({ seed: 4242, mode: "endless", ramp: FREE_PLAY_RAMP });
+      for (let i = 0; i < 60; i++) {
+        if (touchDecoration) {
+          // Exactly what a frame does between moves.
+          cellNoise(i * 3.3, i * 1.7);
+          worldAt(depthAt(state.ramp, state.stats.piecesPlaced));
+        }
+        const move = chooseMove(state, BOT_POLICY_V2);
+        if (!move) break;
+        const next = applyMove(state, move);
+        if (!next) break;
+        state = next.state;
+      }
+      return state;
+    };
+    const quiet = play(false);
+    const busy = play(true);
+    expect(busy.rngState).toBe(quiet.rngState);
+    expect(busy.score).toBe(quiet.score);
+    expect(Array.from(busy.board.cells)).toEqual(Array.from(quiet.board.cells));
   });
 });

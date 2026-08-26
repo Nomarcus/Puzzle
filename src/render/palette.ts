@@ -39,72 +39,63 @@
 
 import type { BlockColour, Theme } from "./theme.js";
 import { deepen, hslToHex, toHSL } from "./depth.js";
+import { lapAt, lapTrim, worldAt, worldChanged, worldIndex } from "./world.js";
 
-/** Depths between one era and the next. */
-export const ERA_EVERY = 10;
+/**
+ * An era is now a Depth World's colour half.
+ *
+ * This file used to carry its own ten-depth counter and its own table of four
+ * eras. Both are gone: `world.ts` is the single depth-driven table, and a world
+ * carries the rotation it wants. Two systems each deciding when the colours
+ * change is how a board ends up with the palette swapping on one schedule and
+ * the finish on another.
+ *
+ * What has *not* changed is the guarantee, which is the important part: the
+ * rotation is rigid. Hand-picking eight fresh colours per era was tried and
+ * three of four candidates came in worse than what already ships — hues crowded
+ * to 12.6 degrees against a floor of 17.4, saturation down to 49% against 78%.
+ * Turning the existing eight together cannot do that, because every gap between
+ * them is preserved exactly.
+ */
 
+/** A world's colour half, read straight off the world. */
 export interface Era {
   readonly id: string;
   readonly label: string;
-  /**
-   * How far round the colour wheel this era turns every block, in degrees.
-   *
-   * A *rigid* rotation, and that is the whole design. Hand-picking eight fresh
-   * hexes per era was the first attempt and three of the four candidates failed
-   * the floor above — hues crowded to 12.6 degrees and saturation fell to 49%,
-   * both worse than what already ships. Turning the existing eight together
-   * cannot do that: the gaps between them are preserved exactly, so every era
-   * is guaranteed to be as separable as the palette the game shipped with,
-   * without anybody having to check.
-   */
   readonly hueShift: number;
-  /** Saturation added to every block. Never negative — that is the floor. */
   readonly satBoost: number;
-  /** Lightness offset, which is what stops two eras looking like each other. */
   readonly lightShift: number;
-  /**
-   * How far the ground moves, in degrees of hue. Small on purpose: Marcus asked
-   * for the background to keep changing "but not too much", and a theme that
-   * rotates far enough stops being the theme the player chose and earned.
-   */
   readonly groundShift: number;
 }
 
 /**
- * Four eras, evenly spaced round the wheel, then it cycles.
+ * A world's rotation, plus the deeper lap's small extra.
  *
- * Evenly spaced so that consecutive eras are as unlike each other as possible —
- * two eras 30 degrees apart would read as the same board with the lighting
- * changed, which is the opposite of the point.
- *
- * Cycling rather than running out: depth is unbounded in the engine, so there
- * is always a deeper round than the one you planned for. Coming back round to
- * candy after forty depths is not a failure — it reads as a lap, the same way
- * the rim counter starts again in a hotter colour.
+ * Saturation and lightness move a little with the lap rather than with the
+ * world, so a returning world is recognisably itself and still not identical.
  */
-export const ERAS: readonly Era[] = [
-  { id: "candy", label: "Candy", hueShift: 0, satBoost: 0, lightShift: 0, groundShift: 0 },
-  { id: "orchard", label: "Orchard", hueShift: 72, satBoost: 0.04, lightShift: -0.03, groundShift: 14 },
-  { id: "lagoon", label: "Lagoon", hueShift: 144, satBoost: 0.04, lightShift: 0.03, groundShift: -12 },
-  { id: "dusk", label: "Dusk", hueShift: 216, satBoost: 0.06, lightShift: -0.05, groundShift: 9 },
-];
-
-/** Which era a depth is in. Cycles, so there is always one. */
 export function eraAt(depth: number): Era {
-  if (!Number.isFinite(depth) || depth <= 0) return ERAS[0]!;
-  const index = Math.floor(depth / ERA_EVERY) % ERAS.length;
-  return ERAS[index]!;
+  const world = worldAt(depth);
+  const trim = lapTrim(depth);
+  const lap = lapAt(depth);
+  return {
+    id: lap > 0 ? `${world.id}-${lap}` : world.id,
+    label: world.label,
+    hueShift: world.hue,
+    satBoost: Math.min(0.12, lap * 0.03),
+    lightShift: lap % 2 === 1 ? -0.03 : 0,
+    groundShift: world.ground + trim.ground * Math.sign(world.ground || 1),
+  };
 }
 
-/** How many eras deep, counting laps. Zero before the first swap. */
+/** How many worlds deep, counting laps. Zero before the first change. */
 export function eraIndex(depth: number): number {
-  if (!Number.isFinite(depth) || depth <= 0) return 0;
-  return Math.floor(depth / ERA_EVERY);
+  return worldIndex(depth);
 }
 
-/** Whether crossing into `to` started a new era, so the game can announce it. */
+/** Whether crossing into `to` started a new era. */
 export function eraChanged(from: number, to: number): boolean {
-  return eraIndex(to) > eraIndex(from);
+  return worldChanged(from, to);
 }
 
 /**
@@ -183,6 +174,10 @@ function rotate(hex: string, degrees: number): string {
   if (degrees === 0) return hex;
   const hsl = toHSL(hex);
   if (!hsl) return hex;
+  // Marcus's rule, and the reason Themes stay worth earning: a Depth World
+  // *modifies* the player's Theme and never replaces it. Sky plus Ocean has to
+  // still feel like Sky. Twenty degrees is a ground that has visibly moved and
+  // is still unmistakably the one they chose.
   const capped = Math.max(-20, Math.min(20, degrees));
   return hslToHex(hsl.h + capped, hsl.s, hsl.l);
 }

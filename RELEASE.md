@@ -4,6 +4,35 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
+## 1.0 (19)
+
+Free play now travels through ten Depth Worlds. Nothing about how it plays has
+changed.
+
+### What to test
+
+**Play free play and keep going.** Every ten depths the board enters a new world
+— Candy, Fruit, Woodland, Toy Box, Animal, Crystal Cave, Ocean, Space, Arcade,
+Lava. The world's name floats up under the disc when you arrive. A median round
+reaches depth 14, so Fruit is where most rounds end up and Woodland is a good run.
+
+**The thing to report: can you still tell the eight colours apart?** In every
+world. A line only pays a spin if every cell matches, so if a pattern ever makes
+two blocks look like the same colour, that is the bug that matters most.
+
+**Striped blocks and stone.** Striped must still jump out instantly in every
+world, and stone must still read as an obstacle. Both were designed around, but
+your eyes are the test.
+
+**The other modes are untouched.** Daily, Levels, Challenges and Time Attack all
+stay exactly as they were, in the theme you picked.
+
+### Fixed since build 18
+
+- Nothing. This build only adds the above.
+
+---
+
 ## 1.0 (18)
 
 Two things now change as free play goes deeper: the blocks get harder, and every
