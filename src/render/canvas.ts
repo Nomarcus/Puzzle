@@ -16,6 +16,8 @@ import { type BlockColour, type Theme, blockColour } from "./theme.js";
 import { CANDY, type Material, cellNoise, materialById, withSparkle } from "./material.js";
 import { type PatternId, drawPattern } from "./pattern.js";
 import { finishAt, lapTrim, worldAt } from "./world.js";
+import { themeForDepth } from "./palette.js";
+import { SKY } from "./theme.js";
 import { BEZEL_SEGMENTS, bezel, bezelColour } from "./depth.js";
 
 /** Sector 0 sits at twelve o'clock, like a dial. */
@@ -833,4 +835,73 @@ export function fitCanvas(canvas: HTMLCanvasElement, dpr: number): { width: numb
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   return { width: rect.width, height: rect.height };
+}
+
+/**
+ * A small sample of one world's blocks, for the World Passport.
+ *
+ * Draws through the same `drawBlock` the board uses, at the same depth the
+ * world starts at, so a card can never show something the world does not
+ * actually look like. An undiscovered world gets the plate and nothing on it —
+ * the shape of the thing without the answer.
+ */
+export function drawWorldSwatch(
+  canvas: HTMLCanvasElement,
+  depth: number,
+  known: boolean,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const theme = themeForDepth(SKY, known ? depth : 0);
+  ctx.fillStyle = theme.plate;
+  ctx.fillRect(0, 0, w, h);
+
+  if (!known) {
+    ctx.fillStyle = theme.empty;
+    ctx.fillRect(0, 0, w, h);
+    return;
+  }
+
+  // A nearly-flat strip of three cells across the middle.
+  //
+  // The geometry is the board's own — same `computeLayout`, same `drawBlock` —
+  // pushed to a huge radius with almost all of it hollowed out, so the arc
+  // flattens into a band instead of curving off the card. That keeps a swatch
+  // honest: it cannot show something the world does not actually draw.
+  //
+  // The cells come out around 42x32 on a passport card against roughly 16px on
+  // a real board, which is the point of the card: this is where the pattern is
+  // meant to be legible without squinting.
+  const radius = h * 3;
+  const centre = h / 2 + radius * 0.96;
+  const layout = computeLayout({ rings: 1, sectors: 56 }, w / 2, centre, radius, {
+    holeRatio: 0.92,
+  });
+  const material = withSparkle(materialById(finishAt(depth)), lapTrim(depth).sparkle);
+  const world = worldAt(depth);
+  const trim = lapTrim(depth);
+
+  // Four rather than three, and an even count on purpose: sector zero *starts*
+  // straight up rather than being centred on it, so an odd run comes out half a
+  // cell to one side. Four straddles the origin evenly and the outer two clip at
+  // the card's edges, which reads as a strip continuing past it.
+  for (const [i, sector] of [-2, -1, 0, 1].entries()) {
+    drawBlock(
+      ctx,
+      cellGeometry(layout, 0, ((sector % 56) + 56) % 56),
+      i * 3 + 2,
+      theme,
+      1,
+      false,
+      false,
+      material,
+      world.pattern,
+      world.patternStrength,
+      trim.variant,
+    );
+  }
 }

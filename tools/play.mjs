@@ -59,15 +59,40 @@ await page.waitForTimeout(400);
 await shot("01-menu");
 check("menu renders", await page.locator(".title").isVisible());
 
-// --- sound can be switched off, and the choice sticks ----------------------
-const sound = page.locator('[data-action="sound"]');
-const soundLabelBefore = await sound.textContent();
-await sound.click();
+// --- music, effects and haptics are three switches, not one ----------------
+// They have to be independent, and they have to survive a reload: a player who
+// turns music off and finds it back on next launch has effectively no setting.
+for (const key of ["music", "sfx", "haptics"]) {
+  const pill = page.locator(`[data-action="audio-${key}"]`);
+  check(`there is a switch for ${key}`, (await pill.count()) === 1);
+  const before = await pill.getAttribute("aria-pressed");
+  await pill.click();
+  await page.waitForTimeout(120);
+  check(`${key} flips`, (await pill.getAttribute("aria-pressed")) !== before);
+}
+
+// Independence: three taps above left all three off, so the others must still
+// be off when one is turned back on.
+await page.locator('[data-action="audio-sfx"]').click();
+await page.waitForTimeout(120);
+check(
+  "and they are independent of each other",
+  (await page.locator('[data-action="audio-sfx"]').getAttribute("aria-pressed")) === "true" &&
+    (await page.locator('[data-action="audio-music"]').getAttribute("aria-pressed")) === "false",
+);
+
+await page.reload({ waitUntil: "networkidle" });
+await page.waitForTimeout(500);
+check(
+  "and the choice survives a reload",
+  (await page.locator('[data-action="audio-music"]').getAttribute("aria-pressed")) === "false" &&
+    (await page.locator('[data-action="audio-sfx"]').getAttribute("aria-pressed")) === "true",
+);
+
+// Back on, so the rest of the suite runs with the game in its normal state.
+await page.locator('[data-action="audio-music"]').click();
+await page.locator('[data-action="audio-haptics"]').click();
 await page.waitForTimeout(150);
-check("the sound toggle flips", (await sound.textContent()) !== soundLabelBefore);
-await sound.click();
-await page.waitForTimeout(150);
-check("the sound toggle flips back", (await sound.textContent()) === soundLabelBefore);
 
 // --- start a free game -----------------------------------------------------
 // Selected by data-action, not by label — the UI ships in two languages.
@@ -572,8 +597,10 @@ await page.waitForTimeout(250);
   check("and locks the earned ones to begin with", locked === 4, `${locked} locked`);
   check("but never the first three — the opening choice is a real one",
     total - locked === 3);
+  // The progress strip replaced the old unlock line: same information, one bar
+  // instead of two on the same screen.
   check("with one thing named to play toward",
-    (await page.locator(".unlock-line").count()) === 1);
+    (await page.locator(".progress-strip").count()) === 1);
 }
 
 // A lifetime total past the first threshold opens exactly one more.
@@ -587,7 +614,10 @@ await page.evaluate(() => window.__shiftle.setLifetime(9000000));
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 check("and everything eventually", (await page.locator(".swatch.locked").count()) === 0);
-check("with nothing left to chase", (await page.locator(".unlock-line").count()) === 0);
+// Everything earned, so the strip says so rather than naming a next theme.
+check("with nothing left to chase",
+  (await page.locator(".progress-strip").count()) === 1 &&
+    !(await page.locator(".progress-goal").textContent())?.includes("→"));
 
 await page.evaluate(() => window.__shiftle.setLifetime(0));
 

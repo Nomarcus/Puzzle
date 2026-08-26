@@ -43,6 +43,7 @@
  */
 
 import { readString, writeString } from "./storage.js";
+import { MusicPlayer } from "./music.js";
 
 export type Sound =
   | "start"
@@ -858,7 +859,20 @@ export function schedule(bus: Bus, sound: Sound, level = 0, when = 0, at = 0): v
 
 let ctx: AudioContext | null = null;
 let bus: Bus | null = null;
-let muted = readString("muted") === "1";
+let master: GainNode | null = null;
+let music: MusicPlayer | null = null;
+
+/**
+ * Three switches where there used to be one.
+ *
+ * The old `muted` key is still read, once, as the migration: somebody who had
+ * the whole game silenced gets silence across all three rather than being handed
+ * music on first launch because music became its own setting. `main.ts` pushes
+ * the stored preferences in through `applyPrefs` as soon as the save is loaded,
+ * so this default only ever applies for the instant before that happens.
+ */
+const legacyMuted = readString("muted") === "1";
+let prefs = { music: !legacyMuted, sfx: !legacyMuted, haptics: !legacyMuted };
 
 function live(): Bus | null {
   if (bus) return bus;
@@ -869,12 +883,124 @@ function live(): Bus | null {
 
   try {
     ctx = new Ctor();
-    bus = createBus(ctx, ctx.destination);
+
+    // destination <- limiter <- master <- [effects, music]
+    //
+    // The limiter is the answer to several things happening at once: a core
+    // firing over a combo over the music used to be able to push past full
+    // scale, and clipping on a phone speaker is the ugliest sound the game can
+    // make. Set gently — this is a safety net, not a loudness effect.
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -6;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.18;
+    limiter.connect(ctx.destination);
+
+    master = ctx.createGain();
+    master.gain.value = 0.9;
+    master.connect(limiter);
+
+    bus = createBus(ctx, master);
+    music = new MusicPlayer(bus, ctx, master);
     return bus;
   } catch {
     return null;
   }
 }
+
+// --------------------------------------------------------------- settings
+
+export interface AudioPrefs {
+  readonly music: boolean;
+  readonly sfx: boolean;
+  readonly haptics: boolean;
+}
+
+export function prefsOf(): AudioPrefs {
+  return { ...prefs };
+}
+
+/** Applied from the save. Starts or stops the bed to match. */
+export function applyPrefs(next: AudioPrefs): void {
+  const wasMusic = prefs.music;
+  prefs = { ...next };
+  if (!prefs.music && wasMusic) stopMusic();
+  if (prefs.music && !wasMusic && wantsMusic) startMusic();
+}
+
+export function sfxEnabled(): boolean {
+  return prefs.sfx;
+}
+
+export function hapticsEnabled(): boolean {
+  return prefs.haptics;
+}
+
+// ------------------------------------------------------------------ music
+
+/** Whether the current screen wants a bed at all. Menus do not. */
+let wantsMusic = false;
+
+export function startMusic(): void {
+  wantsMusic = true;
+  if (!prefs.music) return;
+  const target = live();
+  if (!target || !ctx || !music) return;
+  if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+  music.start();
+}
+
+export function stopMusic(): void {
+  wantsMusic = false;
+  music?.stop();
+}
+
+/** Queued to the next bar line, so a world change lands musically. */
+export function setMusicWorld(index: number): void {
+  music?.setWorld(index);
+}
+
+export function setMusicIntensity(value: number): void {
+  music?.setIntensity(value);
+}
+
+/** For the tests: how many bars the bed has scheduled, and whether it runs. */
+export function musicState(): { running: boolean; nodes: number } {
+  return { running: music?.running ?? false, nodes: liveNodeCount };
+}
+
+/**
+ * Dips the bed for a moment so a big event has room.
+ *
+ * Only the events that are genuinely big — a placement or a spin ducking the
+ * music would make the whole bed pump in time with ordinary play, which is
+ * exactly the cheap trick this is meant to avoid.
+ */
+const DUCKS: Partial<Record<Sound, number>> = {
+  bonus: 0.22,
+  coreFire: 0.25,
+  coreReady: 0.15,
+  deeper: 0.18,
+};
+
+function duck(amount: number): void {
+  if (!music || !ctx) return;
+  const g = music.gain.gain;
+  const now = ctx.currentTime;
+  try {
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(Math.max(0.2, 1 - amount), now + 0.05);
+    g.linearRampToValueAtTime(1, now + 0.55);
+  } catch {
+    // Automation on a closed context is not worth a thrown turn.
+  }
+}
+
+/** Counts one-shot nodes started, so a long session can be checked for leaks. */
+let liveNodeCount = 0;
 
 /** Call from a real user gesture; browsers refuse to start audio otherwise. */
 export function unlock(): void {
@@ -882,14 +1008,25 @@ export function unlock(): void {
   if (ctx && ctx.state === "suspended") void ctx.resume().catch(() => {});
 }
 
+/** True only when everything is off. Kept for the menu's one-tap toggle. */
 export function isMuted(): boolean {
-  return muted;
+  return !prefs.music && !prefs.sfx;
 }
 
+/**
+ * The old single switch, still here because the menu still offers it.
+ *
+ * It now writes all three, which is the behaviour somebody tapping "sound off"
+ * expects. The legacy key is kept in step so a downgrade does not surprise them.
+ */
 export function setMuted(next: boolean): void {
-  muted = next;
+  prefs = { music: !next, sfx: !next, haptics: !next };
   writeString("muted", next ? "1" : "0");
-  if (!next) unlock();
+  if (next) stopMusic();
+  else {
+    unlock();
+    if (wantsMusic) startMusic();
+  }
 }
 
 /**
@@ -898,14 +1035,62 @@ export function setMuted(next: boolean): void {
  * caller can produce a wrong note.
  */
 export function play(sound: Sound, level = 0, at = 0): void {
-  if (muted) return;
+  if (!prefs.sfx) return;
   const target = live();
   if (!target || !ctx) return;
   if (ctx.state === "suspended") void ctx.resume().catch(() => {});
 
   try {
     schedule(target, sound, level, ctx.currentTime, at);
+    liveNodeCount += 1;
+    const amount = DUCKS[sound];
+    if (amount !== undefined && prefs.music) duck(amount);
   } catch {
     // A voice that will not build is not worth interrupting a turn for.
   }
+}
+
+/**
+ * A short rising run, for the handful of moments that deserve one.
+ *
+ * A personal best, a new world and a theme unlock are the only things loud
+ * enough to interrupt what the player is looking at, and they get three notes
+ * rather than a new voice — the chip already has the sound, it just has not been
+ * asked to play a phrase before.
+ */
+export function fanfare(kind: "record" | "world" | "unlock"): void {
+  if (!prefs.sfx) return;
+  const target = live();
+  if (!target || !ctx) return;
+  if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+
+  const shape: Record<typeof kind, readonly number[]> = {
+    record: [0, 2, 4],
+    world: [0, 3, 5],
+    unlock: [0, 4, 7],
+  };
+  const steps = shape[kind];
+  try {
+    const now = ctx.currentTime;
+    steps.forEach((degree, i) => {
+      schedule(target, "bonus", Math.min(3, i), now + i * 0.11, degree);
+      liveNodeCount += 1;
+    });
+    if (prefs.music) duck(0.25);
+  } catch {
+    // Same rule as a single voice: never worth interrupting a turn.
+  }
+}
+
+/** Called when the app is backgrounded, so nothing keeps running unheard. */
+export function suspendAudio(): void {
+  music?.stop();
+  if (ctx && ctx.state === "running") void ctx.suspend().catch(() => {});
+}
+
+/** Called when the app comes back. Only restarts what was wanted. */
+export function resumeAudio(): void {
+  if (!ctx) return;
+  if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+  if (wantsMusic && prefs.music) startMusic();
 }

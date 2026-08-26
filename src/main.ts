@@ -12,7 +12,8 @@ import { coreReady } from "./engine/core.js";
 import { chooseMove } from "./engine/bot.js";
 import { applyMove } from "./engine/game.js";
 import { FREE_PLAY_RAMP } from "./engine/ramp.js";
-import { finishAt, worldAt } from "./render/world.js";
+import { WORLDS, finishAt, worldAt } from "./render/world.js";
+import { drawWorldSwatch } from "./render/canvas.js";
 import { eraAt } from "./render/palette.js";
 import { TIME_ATTACK } from "./engine/timeattack.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
@@ -48,15 +49,50 @@ import {
   type Unlock,
   UNLOCKS,
   isUnlocked,
-  nextUnlock,
-  unlockProgress,
   unlockedBetween,
 } from "./engine/progress.js";
 import { GameScreen } from "./ui/game-screen.js";
 import { MenuScene } from "./ui/menu-scene.js";
 import { type Lang, type StringKey, hasString, lang, setLang, t } from "./ui/strings.js";
+import { el } from "./ui/dom.js";
+import {
+  type ModeId,
+  type Save,
+  applyRound,
+  discoverWorld,
+  loadSave,
+  recordsFor,
+} from "./engine/save.js";
+import {
+  MASTERY_BONUS,
+  applyMastery,
+  chooseGoal,
+  goalById,
+  offered,
+  tallyOf,
+} from "./engine/mastery.js";
+import {
+  type RoundOutcome,
+  goalText as masteryGoalText,
+  passportGrid,
+  progressStrip,
+  resultLines,
+  secondaryGoal,
+  shortOfRecord,
+} from "./ui/progress-ui.js";
 import { haptic } from "./platform/haptics.js";
-import { isMuted, play as playSound, setMuted, unlock as unlockAudio } from "./platform/audio.js";
+import {
+  applyPrefs,
+  fanfare,
+  play as playSound,
+  resumeAudio,
+  setMusicIntensity,
+  setMusicWorld,
+  startMusic,
+  stopMusic,
+  suspendAudio,
+  unlock as unlockAudio,
+} from "./platform/audio.js";
 import { shareResult } from "./platform/share.js";
 import { type ShareCard, renderShareDataUrl, renderShareImage } from "./render/share-card.js";
 import {
@@ -108,17 +144,6 @@ let menu: MenuScene | null = null;
 let lastVariant: { size: SizeId; pack: PackId } = { size: DEFAULT_SIZE, pack: DEFAULT_PACK };
 
 // ------------------------------------------------------------------ helpers
-
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 /**
  * Replaces whatever screen is up. Every full screen goes through here, so only
@@ -208,6 +233,153 @@ function bankLifetime(score: number): Unlock[] {
 
 function lifetime(): number {
   return readNumber("lifetime", 0);
+}
+
+// ------------------------------------------------------- the versioned save
+
+/**
+ * Read once at boot and kept in memory.
+ *
+ * Held rather than re-read because every screen wants it and a JSON parse per
+ * frame would be silly. Written straight through on every change, so a crash
+ * loses at most the round in progress.
+ */
+let save: Save = loadSave(readJson<unknown>("save", null), readString("muted") === "1");
+
+function storeSave(next: Save): void {
+  save = next;
+  writeJson("save", next);
+}
+
+/** What the player last played, so the menu can name a goal in that mode. */
+let lastMode: ModeId | null = null;
+
+/**
+ * Keeps the bed in step with the board.
+ *
+ * The world index moves the timbre and the depth moves how many layers are
+ * playing. Both are queued inside the player and taken on a bar line, so this
+ * can be called as often as it likes without ever cutting the music.
+ */
+function updateMusic(state: GameState): void {
+  const depth = depthOf(state);
+  setMusicWorld(WORLDS.findIndex((w) => w.id === worldAt(depth).id));
+  // Full by depth 12, which is inside a median round. Past that the bed is as
+  // rich as it gets: deeper should feel like more, never like faster or louder.
+  setMusicIntensity(Math.min(1, depth / 12));
+}
+
+
+const progressCopy = {
+  localeNumber,
+  themeLabel: (id: string) => THEMES.find((theme) => theme.id === id)?.label ?? id,
+};
+
+/**
+ * Everything that happens when a round ends, in one place.
+ *
+ * Records, world discovery and the mastery goal all read the same finished
+ * state, and doing them separately per result screen is how three screens end
+ * up disagreeing about what just happened.
+ *
+ * Deliberately does **not** touch the round's score or anything Game Center
+ * sees: the mastery bonus is added to the lifetime total only, after the score
+ * has already been submitted.
+ */
+function bankRound(mode: ModeId, state: GameState, survived = 0): RoundOutcome {
+  lastMode = mode;
+  const before = recordsFor(save, mode);
+  const depth = depthOf(state);
+  const lifetimeBefore = lifetime();
+
+  const round = {
+    score: state.score,
+    depth,
+    bestCombo: state.stats.bestCombo,
+    ringsCleared: state.stats.ringsCleared,
+    coresFired: state.stats.coresFired,
+    survived: Math.round(survived),
+  };
+
+  const applied = applyRound(save, mode, round);
+  let next = applied.save;
+
+  // Every world the round passed through, not just the one it ended in — a run
+  // that shot from depth 2 to depth 9 visited four of them.
+  const discovered: string[] = [];
+  for (let d = 0; d <= depth; d++) {
+    const world = worldAt(d);
+    const step = discoverWorld(next, world.id, d);
+    next = step.save;
+    if (step.firstTime && !discovered.includes(world.id)) discovered.push(world.id);
+  }
+
+  const goal = goalById(next.mastery.activeId);
+  const mastery = applyMastery(
+    next,
+    tallyOf(mode, state.score, depth, state.stats, survived),
+  );
+  next = mastery.save;
+  storeSave(next);
+
+  // The bonus lands in lifetime, which is the one currency, and only after the
+  // leaderboard has already had the round's own score.
+  if (mastery.bonus > 0) bankLifetime(mastery.bonus);
+
+  return {
+    beaten: applied.beaten,
+    discovered,
+    lifetimeBefore,
+    lifetimeAfter: lifetime(),
+    mastery: {
+      goal,
+      progress: mastery.progress,
+      target: mastery.target,
+      completed: mastery.completed,
+    },
+    shortOfRecord: shortOfRecord(state.score, before.score),
+  };
+}
+
+/**
+ * The three lines, a replay button and the progress strip.
+ *
+ * Appended by every result screen so they cannot drift apart, and capped at
+ * three lines by `resultLines` so no screen can turn into a wall of badges.
+ */
+/**
+ * The short fanfare, and only for things that earned one.
+ *
+ * A record, a new world or a theme unlock. Not a finished round, not a placed
+ * piece, not a combo — the whole point of reserving it is that it still means
+ * something the twentieth time.
+ */
+function celebrate(outcome: RoundOutcome, unlocked: boolean): void {
+  if (unlocked) fanfare("unlock");
+  else if (outcome.discovered.length > 0) fanfare("world");
+  else if (outcome.beaten.length > 0) fanfare("record");
+}
+
+function resultProgress(node: HTMLElement, outcome: RoundOutcome, replay: () => void): void {
+  const lines = resultLines(outcome, progressCopy);
+  if (lines.length > 0) {
+    const box = el("div", "result-lines");
+    for (const line of lines) box.append(el("div", "result-line", line));
+    node.append(box);
+  }
+
+  if (outcome.mastery.completed) {
+    node.append(
+      el("div", "bonus-note", `${t("progressBonus")} · +${localeNumber(MASTERY_BONUS)}`),
+    );
+  }
+
+  node.append(progressStrip(outcome.lifetimeAfter, progressCopy, null));
+
+  const again = el("button", "big", t("playAgainNow"));
+  again.dataset.action = "replay";
+  again.addEventListener("click", replay);
+  node.append(again);
 }
 
 /** Tells the player what they just earned, and switches to it. */
@@ -408,6 +580,7 @@ function titleNode(): HTMLDivElement {
 
 function showMenu(): void {
   stopEverything();
+  stopMusic();
   applyThemeChrome();
 
   menu = new MenuScene(canvas, theme);
@@ -454,6 +627,35 @@ function showMenu(): void {
   const records = recordsRow();
   if (records) node.append(records);
 
+  // Where you are and the one next thing. One primary goal (the bar) and one
+  // secondary (the line under it) — a menu that lists six things to chase is a
+  // menu with nothing to chase.
+  // Strip and the two ways in wrapped together, so the column pays one gap for
+  // them rather than two. Measured: the menu disc came back from radius 116 to
+  // over 120, which is the floor the start-screen work set.
+  const orient = el("div", "orient");
+  orient.append(progressStrip(lifetime(), progressCopy, secondaryGoal(save, lastMode, progressCopy)));
+
+  // Compact pills, not full-size buttons, and their own row class.
+  //
+  // Two reasons, both measured. As `.big` in a `.mode-row` they were counted as
+  // play modes by everything that looks for one, and they pushed the column tall
+  // enough to squeeze the menu disc from radius 154 to 101 — undoing the whole
+  // point of the start-screen work. These are somewhere to go between rounds,
+  // not a fourth way to play, and they are sized to say so.
+  const chases = el("div", "chase-row");
+  for (const [label, action, go] of [
+    [t("passport"), "passport", showPassport],
+    [t("chooseGoal"), "goals", showGoals],
+  ] as const) {
+    const button = el("button", "pill wide", label);
+    button.dataset.action = action;
+    button.addEventListener("click", go);
+    chases.append(button);
+  }
+  orient.append(chases);
+  node.append(orient);
+
   // The themes, earned and unearned. Locked ones are shown rather than hidden:
   // a reward nobody knows about is not a reward, and the row is the only place
   // the lifetime total means anything.
@@ -489,24 +691,6 @@ function showMenu(): void {
   }
   node.append(row);
 
-  const next = nextUnlock(total);
-  if (next) {
-    const line = el("div", "unlock-line");
-    const bar = el("div", "unlock-bar");
-    const fill = el("i");
-    fill.style.width = `${Math.round(unlockProgress(total) * 100)}%`;
-    bar.append(fill);
-    line.append(bar);
-    line.append(
-      el(
-        "span",
-        undefined,
-        `${THEMES.find((o) => o.id === next.theme)?.label ?? next.theme} · ${localeNumber(total)} / ${localeNumber(next.at)}`,
-      ),
-    );
-    node.append(line);
-  }
-
   const langs = el("div", "langs");
   for (const code of ["sv", "en"] as Lang[]) {
     const pill = el("button", "pill", code.toUpperCase());
@@ -517,15 +701,29 @@ function showMenu(): void {
     });
     langs.append(pill);
   }
-  const sound = el("button", "pill wide", isMuted() ? t("soundOff") : t("soundOn"));
-  sound.dataset.action = "sound";
-  sound.setAttribute("aria-pressed", String(!isMuted()));
-  sound.addEventListener("click", () => {
-    setMuted(!isMuted());
-    sound.textContent = isMuted() ? t("soundOff") : t("soundOn");
-    sound.setAttribute("aria-pressed", String(!isMuted()));
-  });
-  langs.append(sound);
+  // Music, effects and haptics are separate now. The old single switch wrote one
+  // key; these write the save, and an old mute has already been migrated into
+  // all three so nobody is handed music they did not ask for.
+  for (const [key, label] of [
+    ["music", t("musicOn")],
+    ["sfx", t("sfxOn")],
+    ["haptics", t("hapticsOn")],
+  ] as const) {
+    const on = () => save.audio[key];
+    const pill = el("button", "pill", label);
+    pill.dataset.action = `audio-${key}`;
+    const paint = () => {
+      pill.setAttribute("aria-pressed", String(on()));
+      pill.classList.toggle("off", !on());
+    };
+    paint();
+    pill.addEventListener("click", () => {
+      storeSave({ ...save, audio: { ...save.audio, [key]: !on() } });
+      applyPrefs(save.audio);
+      paint();
+    });
+    langs.append(pill);
+  }
 
   const help = el("button", "pill wide", t("how"));
   help.addEventListener("click", showHowTo);
@@ -716,6 +914,73 @@ function recordsRow(): HTMLDivElement | null {
   return row.childElementCount > 0 ? row : null;
 }
 
+/**
+ * The World Passport.
+ *
+ * Ten cards. A discovered world shows a real sample of its blocks and how deep
+ * the player has been inside it; an undiscovered one shows its name over an
+ * empty plate. Withholding the look rather than the name is the whole trick —
+ * hiding a world entirely leaves nobody any reason to go one deeper.
+ */
+function showPassport(): void {
+  const node = overlay("levels passport-screen");
+  node.append(el("div", "how-title", t("passport")));
+  node.append(passportGrid(save, progressCopy));
+
+  // Filled after the DOM is up, because each swatch is a real render of that
+  // world's blocks — the same renderer the board uses, so a card can never show
+  // something the world does not actually look like.
+  for (const canvas of node.querySelectorAll<HTMLCanvasElement>(".passport-swatch")) {
+    const id = canvas.dataset.world ?? "";
+    const world = WORLDS.find((w) => w.id === id);
+    if (!world) continue;
+    try {
+      drawWorldSwatch(canvas, world.from, canvas.dataset.known === "1");
+    } catch {
+      // A card that will not draw leaves its name and its status, which is the
+      // part that carries the meaning anyway.
+    }
+  }
+
+  const back = el("button", "big alt", t("menu"));
+  back.dataset.action = "menu";
+  back.addEventListener("click", showMenu);
+  node.append(back);
+}
+
+/**
+ * Three goals to choose between, or the one already chosen.
+ *
+ * Chosen, never assigned: picking none is a perfectly good answer, and the
+ * screen says so by simply having a way out that changes nothing.
+ */
+function showGoals(): void {
+  const node = overlay("levels");
+  node.append(el("div", "how-title", t("chooseGoal")));
+  node.append(el("div", "confirm-body", t("progressBonus")));
+
+  const active = goalById(save.mastery.activeId);
+  for (const goal of offered(save.mastery.round)) {
+    const picked = active?.id === goal.id;
+    const button = el("button", `big ${picked ? "warm" : "alt"}`, masteryGoalText(goal));
+    button.dataset.action = `goal-${goal.id}`;
+    button.setAttribute("aria-pressed", String(picked));
+    if (picked) {
+      button.append(el("span", "goal-progress", ` ${save.mastery.progress}/${goal.target}`));
+    }
+    button.addEventListener("click", () => {
+      storeSave(chooseGoal(save, goal.id));
+      showGoals();
+    });
+    node.append(button);
+  }
+
+  const back = el("button", "big", t("menu"));
+  back.dataset.action = "menu";
+  back.addEventListener("click", showMenu);
+  node.append(back);
+}
+
 function showSetup(): void {
   let size = savedSize();
   let pack = savedPack();
@@ -840,10 +1105,13 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   screen = new GameScreen(canvas, game, {
     theme,
     haptic,
+    onChange: updateMusic,
     onGameOver: (final) => showGameOver(final, mode),
   });
   screen.start();
   gameHud(mode);
+  startMusic();
+  if (screen) updateMusic(game);
 }
 
 // ---------------------------------------------------------------- time attack
@@ -880,9 +1148,11 @@ function startTimeAttack(): void {
     theme,
     haptic,
     clock: TIME_ATTACK,
+    onChange: updateMusic,
     onGameOver: (final) => showTimeResult(final),
   });
   screen.start();
+  startMusic();
   gameHud("time", startTimeAttack);
 }
 
@@ -900,6 +1170,7 @@ function showTimeResult(state: GameState): void {
   const earnedByTime = bankLifetime(state.score);
   if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
   void submitScore(LEADERBOARDS.time, state.score);
+  const timeOutcome = bankRound("time", state, survived);
 
   const node = overlay("result");
   node.append(el("div", "how-title", t("timeUp")));
@@ -918,6 +1189,9 @@ function showTimeResult(state: GameState): void {
   }
   node.append(stats);
   if (!beat) node.append(el("div", "best", `${t("timeBest")} ${localeNumber(readNumber("bestTime", 0))}`));
+
+  resultProgress(node, timeOutcome, startTimeAttack);
+  celebrate(timeOutcome, earnedByTime.length > 0);
 
   const again = el("button", "big hot", t("again"));
   again.dataset.action = "again";
@@ -1251,6 +1525,9 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
   };
   if (mode === "daily") writeJson("daily", result);
   const earned = bankLifetime(state.score);
+  // After the score has gone to Game Center, never before: the mastery bonus is
+  // progression and must not reach a leaderboard.
+  const outcome = bankRound(mode, state);
 
   const node = overlay("result");
   const card = shareCardFor(state, mode, result.puzzle);
@@ -1324,19 +1601,17 @@ function showGameOver(state: GameState, mode: "daily" | "endless"): void {
     node.append(boards);
   }
 
-  if (mode === "endless") {
-    const again = el("button", "big warm", t("again"));
-    again.dataset.action = "again";
-    again.addEventListener("click", () => startGame("endless", lastVariant));
-    node.append(again);
-  }
+  // What actually changed, at most three lines, then the way straight back in.
+  resultProgress(node, outcome, () => startGame(mode, lastVariant));
 
   const back = el("button", "big alt", t("menu"));
+  back.dataset.action = "menu";
   back.addEventListener("click", showMenu);
   node.append(back);
   // Last, so it lands on top of the finished screen rather than under it —
   // earning something is the one thing here worth interrupting for.
   announceUnlocks(earned);
+  celebrate(outcome, earned.length > 0);
 }
 
 // --------------------------------------------------------------------- boot
@@ -1688,6 +1963,16 @@ function challengeFromUrl(): Challenge | null {
   if (!hash.includes("c=")) return null;
   return decodeChallenge(hash.slice(hash.indexOf("c=") + 2));
 }
+
+applyPrefs(save.audio);
+
+// An app in the background must not keep a bed running or an oscillator alive,
+// and one coming back must pick up only what was wanted. Both directions go
+// through audio.ts so there is one place that knows the rule.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) suspendAudio();
+  else resumeAudio();
+});
 
 const invited = challengeFromUrl();
 if (invited) showChallenge(invited);

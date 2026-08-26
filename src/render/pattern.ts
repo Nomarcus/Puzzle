@@ -76,20 +76,20 @@ export interface PatternSpec {
  * red.
  */
 export const WHITE_CAP = 0.3;
-export const SHADE_CAP = 0.6;
+export const SHADE_CAP = 0.78;
 export const STROKE_CAP = 0.12;
 
 export const PATTERNS: readonly PatternSpec[] = [
   { id: "none", ink: "dark", alpha: 0, stroke: 0, fullArc: false, fullRadial: false },
-  { id: "seeds", ink: "dark", alpha: 0.5, stroke: 0.09, fullArc: false, fullRadial: false },
-  { id: "grain", ink: "dark", alpha: 0.55, stroke: 0.1, fullArc: true, fullRadial: false },
-  { id: "studs", ink: "light", alpha: 0.55, stroke: 0.08, fullArc: false, fullRadial: false },
-  { id: "spots", ink: "dark", alpha: 0.42, stroke: 0.1, fullArc: false, fullRadial: false },
-  { id: "facets", ink: "white", alpha: 0.22, stroke: 0.04, fullArc: false, fullRadial: true },
-  { id: "bubbles", ink: "light", alpha: 0.5, stroke: 0.07, fullArc: false, fullRadial: false },
+  { id: "seeds", ink: "dark", alpha: 0.72, stroke: 0.09, fullArc: false, fullRadial: false },
+  { id: "grain", ink: "dark", alpha: 0.7, stroke: 0.1, fullArc: true, fullRadial: false },
+  { id: "studs", ink: "light", alpha: 0.7, stroke: 0.08, fullArc: false, fullRadial: false },
+  { id: "spots", ink: "dark", alpha: 0.7, stroke: 0.1, fullArc: false, fullRadial: false },
+  { id: "facets", ink: "white", alpha: 0.28, stroke: 0.04, fullArc: false, fullRadial: true },
+  { id: "bubbles", ink: "light", alpha: 0.75, stroke: 0.07, fullArc: false, fullRadial: false },
   { id: "speckles", ink: "white", alpha: 0.28, stroke: 0.06, fullArc: false, fullRadial: false },
-  { id: "grid", ink: "light", alpha: 0.34, stroke: 0.05, fullArc: true, fullRadial: false },
-  { id: "cracks", ink: "dark", alpha: 0.58, stroke: 0.09, fullArc: false, fullRadial: true },
+  { id: "grid", ink: "light", alpha: 0.6, stroke: 0.05, fullArc: true, fullRadial: false },
+  { id: "cracks", ink: "dark", alpha: 0.78, stroke: 0.09, fullArc: false, fullRadial: true },
 ];
 
 const BY_ID = new Map(PATTERNS.map((p) => [p.id, p]));
@@ -141,7 +141,7 @@ export function drawPattern(
 
     switch (id) {
       case "seeds":
-        seeds(ctx, g, ri, ro, width, alpha, variant);
+        seeds(ctx, g, colour, ri, ro, width, alpha, variant);
         break;
       case "grain":
         grain(ctx, g, ri, ro, alpha, stroke);
@@ -186,6 +186,7 @@ function at(g: SectorGeometry, radius: number, angle: number): [number, number] 
 function seeds(
   ctx: CanvasRenderingContext2D,
   g: SectorGeometry,
+  colour: BlockColour,
   ri: number,
   ro: number,
   width: number,
@@ -209,9 +210,19 @@ function seeds(
     ctx.translate(x, y);
     ctx.rotate(a + Math.PI / 2);
     ctx.beginPath();
-    ctx.ellipse(0, 0, width * 0.085, width * 0.135, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, width * 0.11, width * 0.17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // A lit sliver along one side. Without it a pip is a flat hole; with it the
+    // seed sits in the flesh, which is the difference between a texture and a
+    // fruit.
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.fillStyle = colour.light;
+    ctx.beginPath();
+    ctx.ellipse(-width * 0.03, -width * 0.03, width * 0.055, width * 0.09, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = colour.dark;
   }
 }
 
@@ -224,15 +235,15 @@ function grain(
   alpha: number,
   stroke: number,
 ): void {
-  const lines = 4;
+  const lines = 6;
   for (let i = 0; i < lines; i++) {
     // Uneven spacing and length, hashed off the cell, so every block is not the
     // same four stripes — that reads as corduroy rather than as timber.
     const jitter = cellNoise(ri + i * 7.3, g.startAngle + i);
     const t = (i + 0.5) / lines + (jitter - 0.5) * 0.12;
     const r = ri + (ro - ri) * Math.max(0.08, Math.min(0.92, t));
-    ctx.globalAlpha = alpha * (0.55 + jitter * 0.45);
-    ctx.lineWidth = stroke * (0.7 + jitter * 0.6);
+    ctx.globalAlpha = alpha * (0.7 + jitter * 0.3);
+    ctx.lineWidth = stroke * (0.85 + jitter * 0.8);
     const trim = (g.endAngle - g.startAngle) * (0.05 + jitter * 0.16);
     ctx.beginPath();
     ctx.arc(g.cx, g.cy, r, g.startAngle + trim, g.endAngle - trim);
@@ -293,14 +304,14 @@ function animalSpots(
 ): void {
   const span = g.endAngle - g.startAngle;
   ctx.globalAlpha = alpha;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     const n = cellNoise(ri * 1.3 + i * 9.1, g.startAngle + i * 1.7);
     const m = cellNoise(ro + i * 4.2, g.startAngle * 2.2 + i);
     const r = ri + width * (0.24 + n * 0.52);
     const a = g.startAngle + span * (0.2 + m * 0.6);
     const [x, y] = at(g, r, a);
     ctx.beginPath();
-    ctx.ellipse(x, y, width * (0.15 + n * 0.08), width * (0.11 + m * 0.07), a, 0, Math.PI * 2);
+    ctx.ellipse(x, y, width * (0.19 + n * 0.09), width * (0.14 + m * 0.08), a, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -398,16 +409,21 @@ function bubbles(
   for (let i = 0; i < 4; i++) {
     const n = cellNoise(ro + i * 5.9, g.startAngle * 1.4 + i);
     const m = cellNoise(ri * 2.1 + i, g.endAngle + i * 3.7);
-    const r = ri + width * (0.2 + n * 0.6);
-    const a = g.startAngle + span * (0.15 + m * 0.7);
-    const [x, y] = at(g, r, a);
+    const [x, y] = at(g, ri + width * (0.2 + n * 0.6), g.startAngle + span * (0.15 + m * 0.7));
     // Rings rather than discs: a bubble is mostly the water behind it, and a
     // filled dot would cover more of the block's colour than it needs to.
-    ctx.globalAlpha = alpha * (0.7 + n * 0.3);
-    ctx.lineWidth = Math.max(1, width * 0.055);
+    const r = width * (0.13 + n * 0.09);
+    ctx.globalAlpha = alpha * (0.8 + n * 0.2);
+    ctx.lineWidth = Math.max(1.2, width * 0.075);
     ctx.beginPath();
-    ctx.arc(x, y, width * (0.1 + n * 0.08), 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.stroke();
+    // The catchlight. A ring alone reads as a hole punched in the block; this is
+    // what makes it a bubble sitting on one.
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(x - r * 0.3, y - r * 0.3, Math.max(0.8, r * 0.24), 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
@@ -421,7 +437,7 @@ function speckles(
   alpha: number,
 ): void {
   const span = g.endAngle - g.startAngle;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 9; i++) {
     const n = cellNoise(ri + i * 3.7, g.startAngle * 2.6 + i * 1.1);
     const m = cellNoise(ro * 1.7 + i * 2.2, g.endAngle + i);
     const r = ri + width * (0.14 + n * 0.72);
@@ -429,7 +445,7 @@ function speckles(
     const [x, y] = at(g, r, a);
     ctx.globalAlpha = alpha * (0.55 + n * 0.45);
     ctx.beginPath();
-    ctx.arc(x, y, width * (0.04 + m * 0.045), 0, Math.PI * 2);
+    ctx.arc(x, y, width * (0.045 + m * 0.06), 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -442,12 +458,21 @@ function grid(
   ro: number,
   alpha: number,
 ): void {
-  const lines = 3;
+  const span = g.endAngle - g.startAngle;
   ctx.globalAlpha = alpha;
-  for (let i = 1; i <= lines; i++) {
-    const r = ri + ((ro - ri) * i) / (lines + 1);
+  for (let i = 1; i <= 3; i++) {
+    const r = ri + ((ro - ri) * i) / 4;
     ctx.beginPath();
     ctx.arc(g.cx, g.cy, r, g.startAngle, g.endAngle);
+    ctx.stroke();
+  }
+  // The other axis, kept short of the edges so the pair never spans the cell
+  // both ways — that shape is the striped marker and belongs to it alone.
+  for (let i = 1; i <= 3; i++) {
+    const a = g.startAngle + (span * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(...at(g, ri + (ro - ri) * 0.16, a));
+    ctx.lineTo(...at(g, ri + (ro - ri) * 0.84, a));
     ctx.stroke();
   }
 }
@@ -461,21 +486,32 @@ function cracks(
   alpha: number,
 ): void {
   const span = g.endAngle - g.startAngle;
-  ctx.globalAlpha = alpha;
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 3; i++) {
     const n = cellNoise(ri * 1.9 + i * 12.3, g.startAngle + i * 4.4);
-    const base = g.startAngle + span * (0.28 + i * 0.4);
-    const from = ri + width * (0.1 + n * 0.12);
-    const to = ri + width * (0.66 + n * 0.2);
-    ctx.beginPath();
-    for (let k = 0; k <= 3; k++) {
-      const t = k / 3;
-      const r = from + (to - from) * t;
-      const a = base + (k % 2 === 0 ? -1 : 1) * span * 0.055;
-      const [x, y] = at(g, r, a);
-      if (k === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
+    const base = g.startAngle + span * (0.22 + i * 0.28);
+    const from = ri + width * (0.08 + n * 0.1);
+    const to = ri + width * (0.7 + n * 0.18);
+    const path = () => {
+      ctx.beginPath();
+      for (let k = 0; k <= 3; k++) {
+        const t = k / 3;
+        const r = from + (to - from) * t;
+        const a = base + (k % 2 === 0 ? -1 : 1) * span * 0.06;
+        const [x, y] = at(g, r, a);
+        if (k === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+    };
+    // The fissure, then the heat inside it. A warm core without a second hue:
+    // a lava block is still its own colour, cracked open.
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = Math.max(1.2, width * 0.1);
+    path();
+    ctx.stroke();
+    ctx.globalAlpha = alpha * 0.75;
+    ctx.strokeStyle = "#FFD08A";
+    ctx.lineWidth = Math.max(0.7, width * 0.04);
+    path();
     ctx.stroke();
   }
 }
