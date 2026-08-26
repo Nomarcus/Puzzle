@@ -317,25 +317,37 @@ looking at that output.
 
 ### Depth Worlds
 
-Ten worlds, one every ten depths, then the same ten again on a deeper lap.
+Ten worlds, one every **two** depths, then the same ten again on a deeper lap.
 `src/render/world.ts` is the **single depth-driven table** in the renderer:
 everything asks `worldAt(depth)` and reads what it needs off the answer. There is
 deliberately no `if (depth < 10)` anywhere in the drawing code.
 
 | Depth | World | Pattern | Finish → late |
 |---|---|---|---|
-| 0–9 | Candy | none | candy → glazed |
-| 10–19 | Fruit | seeds | glazed → matte |
-| 20–29 | Woodland | grain | wood |
-| 30–39 | Toy Box | studs | plastic |
-| 40–49 | Animal | spots | matte → satin |
-| 50–59 | Crystal Cave | facets | crystal → diamond |
-| 60–69 | Ocean | bubbles | pearl |
-| 70–79 | Space | speckles | glass → crystal |
-| 80–89 | Arcade | grid | glow |
-| 90–99 | Lava | cracks | matte → molten |
+| 0–1 | Candy | none | candy → glazed |
+| 2–3 | Fruit | seeds | glazed → matte |
+| 4–5 | Woodland | grain | wood |
+| 6–7 | Toy Box | studs | plastic |
+| 8–9 | Animal | spots | matte → satin |
+| 10–11 | Crystal Cave | facets | crystal → diamond |
+| 12–13 | Ocean | bubbles | pearl |
+| 14–15 | Space | speckles | glass → crystal |
+| 16–17 | Arcade | grid | glow |
+| 18–19 | Lava | cracks | matte → molten |
 
-Past depth 100 the same ten return with a lap trim — a little more sparkle, a
+**Two depths per world, not the ten the brief first asked for, and that is a
+measurement rather than a preference.** `npx vite-node tools/ramp.ts 24` puts the
+median round at 272–347 pieces — depth ~14 — and the browser bot could not be
+driven past 15. At a ten-depth span a normal round saw Candy and Fruit and the
+other eight worlds were content nobody would ever reach. At two, a median round
+travels through **eight** of them and a good one sees all ten. A world lands
+roughly every 44 pieces.
+
+`from` is derived from the world's index rather than written down, so the span
+and the boundaries cannot drift apart — which is exactly what changing ten to two
+would otherwise have done silently.
+
+Past depth 20 the same ten return with a lap trim — a little more sparkle, a
 slightly stronger ground, the alternate pattern variant. Pattern *strength*
 deliberately does not climb: it is the one dial that would cost legibility.
 
@@ -345,8 +357,9 @@ depth 20 came out as grain plus facets plus sparkle. Three signatures on a cell
 sixteen pixels wide is exactly the mush this had to avoid. It is now a vocabulary
 of twelve finishes, and the world names the one it wants.
 
-**The rhythm** is a world every ten depths and a finish step at the halfway mark,
-so something changes every five without a second concept.
+**The rhythm** is a world every two depths and a finish step at the halfway
+mark, which at this span is every odd depth — so *something* changes at every
+single depth, without a second concept being introduced to do it.
 
 #### The readability rule, made enforceable
 
@@ -367,13 +380,15 @@ A pattern may never change what colour a block reads as. Three mechanisms:
 
 #### Which worlds a test can actually reach
 
-`npx vite-node tools/ramp.ts 24` puts the median round at **272–347 pieces**,
-which is **depth ~14**, and the browser bot could not be driven past depth 15. So
-the browser suite checks Candy and Fruit — the worlds real rounds reach — and the
-deeper ones are covered by unit tests plus **`npm run worlds`**, which draws every
-world and a second lap through this same renderer at full size. That contact
-sheet is how each world was tuned; the first pass of seeds and studs was
-invisible on a phone-sized cell and only showed up there.
+The two-depth span is what makes the browser suite able to test this at all: it
+now checks Candy, Fruit, Toy Box and Ocean by playing to them, sampling the drawn
+board in each. `npm run worlds` still draws all ten plus a second lap through the
+same renderer at full size, and that contact sheet is how each world was tuned —
+the first pass of seeds and studs was invisible on a phone-sized cell and only
+showed up there.
+
+The bot's depth varies per deal, so both the dive and the world loop deal again
+rather than judging the renderer on one unlucky board.
 
 #### Free play only, structurally
 

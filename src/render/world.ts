@@ -1,10 +1,10 @@
 /**
  * Depth Worlds: what free play looks like as it goes down.
  *
- * Ten worlds, one every ten depths, then the same ten again on a deeper lap.
+ * Ten worlds, one every two depths, then the same ten again on a deeper lap.
  * This is the single depth-driven table in the renderer — everything else asks
  * `worldAt(depth)` and reads what it needs off the answer. There is deliberately
- * no `if (depth < 10)` anywhere in the drawing code.
+ * no depth branch anywhere in the drawing code.
  *
  * ## Why worlds own the finish
  *
@@ -19,18 +19,21 @@
  * they would overload each other the world wins — which is the brief's rule and
  * also the readable one.
  *
- * Each world hardens once at its halfway mark, so something changes every five
- * depths without introducing a second concept: the world change gets the big
- * moment, the finish step rides the announcement that already exists.
+ * Each world hardens once at its halfway mark, which at a two-depth span means
+ * the finish steps on every odd depth. So *something* changes at every single
+ * depth: the world change gets the big moment on the evens, and the finish step
+ * rides the announcement that already exists on the odds.
  *
  * ## What the depths are actually worth
  *
  * Measured with `npx vite-node tools/ramp.ts 24` across every disc and pack: the
  * median round runs 272–347 pieces, which at 22 pieces per depth is **depth
- * ~14**. So Candy and Fruit are what nearly everybody sees, Woodland is a good
- * run, and the rest belong to people chasing the leaderboard. That is what "how
- * deep can you go" means — but it is also why the first three worlds have to be
- * flawless and the deep ones must never buy their distinctness with legibility.
+ * ~14**, and the browser bot could not be driven past 15.
+ *
+ * That number is why the span is two rather than the ten the brief first asked
+ * for: at ten, a normal round saw two worlds and the other eight were content
+ * nobody would ever reach. At two, a median round travels through eight of them
+ * and a good one sees all ten.
  */
 
 import type { PatternId } from "./pattern.js";
@@ -59,10 +62,22 @@ export interface DepthWorld {
   readonly particle: ParticleShape;
 }
 
-/** Depths per world, and therefore per finish step at half of it. */
-export const WORLD_SPAN = 10;
+/**
+ * Depths per world, and therefore a finish step every other one.
+ *
+ * Two, not ten, and that is a measurement rather than a preference. The brief
+ * asked for a world every ten depths, but `npx vite-node tools/ramp.ts 24` puts
+ * the median round at 272–347 pieces — **depth ~14** — and the browser bot could
+ * not be driven past 15. At ten, a normal round saw Candy and Fruit and the
+ * other eight worlds were content nobody would ever reach.
+ *
+ * At two, a median round travels through **eight** of them and a good one sees
+ * all ten. A world lands roughly every 44 pieces, which is a change often enough
+ * to keep pulling and slow enough that nothing strobes.
+ */
+export const WORLD_SPAN = 2;
 
-/** Worlds in a lap. Ten worlds is one hundred depths. */
+/** Worlds in a lap. Ten worlds, so a lap is twenty depths. */
 export const LAP_SPAN = WORLD_SPAN * 10;
 
 /**
@@ -76,17 +91,16 @@ export const LAP_SPAN = WORLD_SPAN * 10;
  * Woodland and Crystal Cave reuse the grain and facet passes that already exist
  * and were tuned by eye, rather than growing lookalikes of them.
  */
-export const WORLDS: readonly DepthWorld[] = [
+const ORDER: readonly Omit<DepthWorld, "from">[] = [
   {
     id: "candy",
     label: "Candy",
-    from: 0,
     pattern: "none",
     patternStrength: 0,
     finish: "candy",
     finishLate: "glazed",
-    // Zero, and it must stay zero: this is the game's own face, and the first
-    // ten depths of free play have to look like the daily and the levels do.
+    // Zero, and it must stay zero: this is the game's own face, and free play's
+    // opening depths have to look like the daily and the levels do.
     hue: 0,
     ground: 0,
     particle: "confetti",
@@ -94,7 +108,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "fruit",
     label: "Fruit",
-    from: 10,
     pattern: "seeds",
     patternStrength: 0.8,
     finish: "glazed",
@@ -106,7 +119,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "woodland",
     label: "Woodland",
-    from: 20,
     pattern: "grain",
     patternStrength: 0.85,
     finish: "wood",
@@ -118,7 +130,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "toybox",
     label: "Toy Box",
-    from: 30,
     pattern: "studs",
     patternStrength: 0.9,
     finish: "plastic",
@@ -130,7 +141,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "animal",
     label: "Animal",
-    from: 40,
     pattern: "spots",
     patternStrength: 0.75,
     finish: "matte",
@@ -142,7 +152,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "crystal",
     label: "Crystal Cave",
-    from: 50,
     pattern: "facets",
     patternStrength: 1,
     finish: "crystal",
@@ -154,7 +163,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "ocean",
     label: "Ocean",
-    from: 60,
     pattern: "bubbles",
     patternStrength: 0.8,
     finish: "pearl",
@@ -166,7 +174,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "space",
     label: "Space",
-    from: 70,
     pattern: "speckles",
     patternStrength: 0.8,
     finish: "glass",
@@ -178,7 +185,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "arcade",
     label: "Arcade",
-    from: 80,
     pattern: "grid",
     patternStrength: 0.7,
     finish: "glow",
@@ -190,7 +196,6 @@ export const WORLDS: readonly DepthWorld[] = [
   {
     id: "lava",
     label: "Lava",
-    from: 90,
     pattern: "cracks",
     patternStrength: 0.85,
     finish: "matte",
@@ -201,10 +206,22 @@ export const WORLDS: readonly DepthWorld[] = [
   },
 ];
 
+/**
+ * The ten, in order, with `from` derived rather than written down.
+ *
+ * Hand-written boundaries and a separately declared span are two sources of the
+ * same truth, and changing the span from ten to two would have silently left
+ * them disagreeing.
+ */
+export const WORLDS: readonly DepthWorld[] = ORDER.map((world, i) => ({
+  ...world,
+  from: i * WORLD_SPAN,
+}));
+
 export const CANDY_WORLD = WORLDS[0]!;
 
 /**
- * Which lap of the ten a depth is on. Zero for the first hundred.
+ * Which lap of the ten a depth is on. Zero for the first twenty.
  *
  * Depth is unbounded in the engine — the stone dial keeps tightening forever, so
  * there is no depth the game refuses to go past — and a world table that ran out
@@ -249,9 +266,9 @@ export function nextWorld(depth: number): DepthWorld {
 /**
  * Whether a depth is in the back half of its world, where the finish hardens.
  *
- * Half a world is five depths, so something changes on that cadence without a
- * second concept: the world change carries the big moment and this rides the
- * material announcement that already exists.
+ * With a two-depth span this is every odd depth, so something changes at every
+ * depth without a second concept: the world change carries the big moment on the
+ * evens and this rides the material announcement on the odds.
  */
 export function inLateHalf(depth: number): boolean {
   if (!Number.isFinite(depth) || depth <= 0) return false;

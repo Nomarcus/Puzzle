@@ -36,8 +36,8 @@ window.__shots = [];
 // One shot per world at its own opening depth, then the same worlds on a deeper
 // lap, so both what a world looks like and what a lap does to it can be judged.
 const SHOTS = [
-  ...WORLDS.map((w) => ({ id: w.id, label: w.label, depth: w.from + 5 })),
-  ...WORLDS.slice(0, 3).map((w) => ({ id: `lap2-${w.id}`, label: `${w.label} · lap 2`, depth: LAP_SPAN + w.from + 5 })),
+  ...WORLDS.map((w) => ({ id: w.id, label: w.label, depth: w.from })),
+  ...WORLDS.slice(0, 3).map((w) => ({ id: `lap2-${w.id}`, label: `${w.label} · lap 2`, depth: LAP_SPAN + w.from })),
 ];
 
 for (const m of SHOTS) {

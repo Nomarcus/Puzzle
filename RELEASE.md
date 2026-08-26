@@ -4,6 +4,28 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
+## 1.0 (20)
+
+The worlds now change every two depths instead of every ten.
+
+### What to test
+
+**Play free play and watch it change.** A new world every two depths — Candy,
+Fruit, Woodland, Toy Box, Animal, Crystal Cave, Ocean, Space, Arcade, Lava — and
+the finish steps on the depths between, so something changes every single depth.
+A typical round should now travel through eight of the ten. Past depth 20 they
+come round again, a little richer.
+
+**Same thing to report as last build: can you still tell the eight colours
+apart?** In every world, and now you will see far more of them.
+
+### Fixed since build 19
+
+- At ten depths per world a normal round only ever reached two of the ten. That
+  was measured, not guessed: the median round is depth ~14.
+
+---
+
 ## 1.0 (19)
 
 Free play now travels through ten Depth Worlds. Nothing about how it plays has

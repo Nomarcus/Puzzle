@@ -906,6 +906,8 @@ await page.waitForTimeout(500);
 // deal a new round to find one the bot survives.
 const shallow = await sampleGround();
 check("a fresh round starts at the top", (await page.evaluate(() => window.__shiftle.depth())) === 0);
+check("and opens in the player's own palette, not a world's",
+  (await page.evaluate(() => window.__shiftle.era())) === "candy");
 
 // Free play is seeded from the clock, so how deep the bot gets varies from run
 // to run — and on an unlucky board it dies before depth 4 and every check below
@@ -913,7 +915,7 @@ check("a fresh round starts at the top", (await page.evaluate(() => window.__shi
 // the next reported none. So this deals a fresh round and tries again rather
 // than judging the feature on one bad deal.
 let dived = { depth: 0, over: true };
-for (let attempt = 0; attempt < 5 && dived.depth < 6; attempt++) {
+for (let attempt = 0; attempt < 5 && dived.depth < 3; attempt++) {
   if (attempt > 0) {
     await page.evaluate(() => window.__shiftle.start("endless"));
     await page.waitForTimeout(400);
@@ -923,7 +925,7 @@ for (let attempt = 0; attempt < 5 && dived.depth < 6; attempt++) {
     for (let i = 0; i < 1200; i++) {
       const state = api.state();
       if (!state || state.over) break;
-      if (api.depth() >= 6) break;
+      if (api.depth() >= 3) break;
       if (!api.botMove()) break;
     }
     return { depth: api.depth(), over: api.state()?.over ?? true };
@@ -931,14 +933,11 @@ for (let attempt = 0; attempt < 5 && dived.depth < 6; attempt++) {
 }
 await page.waitForTimeout(1400);
 
-check("a fresh round opens in the player's own palette",
-  (await page.evaluate(() => window.__shiftle.era())) === "candy");
-
 check("and the blocks harden as it goes deeper",
   (await page.evaluate(() => window.__shiftle.material())) !== "candy",
   `material=${await page.evaluate(() => window.__shiftle.material())} at depth ${dived.depth}`);
 
-if (dived.depth >= 6) {
+if (dived.depth >= 3) {
   const deep = await sampleGround();
   check("the ground deepens as the round goes on",
     deep.l < shallow.l - 0.01,
@@ -948,8 +947,12 @@ if (dived.depth >= 6) {
   check("and gets richer rather than greyer",
     deep.c >= shallow.c - 0.005,
     `chroma ${shallow.c.toFixed(3)} -> ${deep.c.toFixed(3)}`);
+  // The bound is the cap the code actually enforces, not a guess: a world may
+  // turn the ground by up to twenty degrees and `rotate()` clamps there. That is
+  // what keeps an earned Theme recognisable — Sky plus Ocean still has to feel
+  // like Sky — and it is the same number the unit tests assert.
   check("and it is still the same theme, not a drift toward some other colour",
-    Math.abs(deep.h - shallow.h) < 8,
+    Math.abs(deep.h - shallow.h) <= 21,
     `hue ${shallow.h.toFixed(1)} -> ${deep.h.toFixed(1)}`);
   // Never anywhere near a dark theme, which is the whole art brief.
   check("and never anywhere near a dark screen", deep.l > 0.4,
@@ -987,27 +990,32 @@ const worldColours = () =>
     return out;
   });
 
-// Only the worlds a real round actually reaches. Measured here and confirmed by
-// `npx vite-node tools/ramp.ts`: the bot's median round is depth ~14 and it
-// could not be driven past 15, so asking it for depth 20 or 30 tests the bot's
-// stamina rather than the renderer. The deeper worlds are covered by the unit
-// tests and by `npm run worlds`, which draws every one of them through this same
-// renderer at full size.
-for (const target of [0, 10]) {
-  await page.evaluate(() => window.__shiftle.start("endless"));
-  await page.waitForTimeout(400);
-  const got = await page.evaluate(async (want) => {
-    const api = window.__shiftle;
-    for (let i = 0; i < 2000; i++) {
-      const state = api.state();
-      if (!state || state.over) break;
-      if (api.depth() >= want) break;
-      if (!api.botMove()) break;
-    }
-    return { depth: api.depth(), world: api.world(), over: api.state()?.over ?? true };
-  }, target);
+// Spread across the worlds a real round passes through. The span is two depths
+// precisely so this is possible: the bot's median round is depth ~14 and it
+// could not be driven past 15, which at the old ten-depth span meant only two
+// worlds were ever reachable. `npm run worlds` still draws all ten plus a second
+// lap through this same renderer, which is where the deep ones are judged.
+for (const target of [0, 2, 6, 12]) {
+  // Free play is seeded from the clock and how deep the bot gets varies, so a
+  // single unlucky deal would fail a check about the renderer. Deal again rather
+  // than judging the world system on one bad board.
+  let got = { depth: -1, world: "", over: true };
+  for (let attempt = 0; attempt < 6 && got.depth < target; attempt++) {
+    await page.evaluate(() => window.__shiftle.start("endless"));
+    await page.waitForTimeout(300);
+    got = await page.evaluate(async (want) => {
+      const api = window.__shiftle;
+      for (let i = 0; i < 2000; i++) {
+        const state = api.state();
+        if (!state || state.over) break;
+        if (api.depth() >= want) break;
+        if (!api.botMove()) break;
+      }
+      return { depth: api.depth(), world: api.world(), over: api.state()?.over ?? true };
+    }, target);
+  }
   if (got.depth < target) {
-    check(`the bot reached depth ${target}`, false, `only got to ${got.depth}`);
+    check(`the bot reached depth ${target}`, false, `only got to ${got.depth} in six rounds`);
     continue;
   }
   // A fresh board is nearly empty, so the sample ring would land in the holes

@@ -2042,30 +2042,39 @@ describe("palette eras", () => {
 });
 
 describe("depth worlds", () => {
-  it("puts the named boundaries where Marcus asked for them", () => {
+  it("puts a world every two depths, in the order Marcus named", () => {
+    // Two rather than ten, because the median round is depth ~14: at ten, eight
+    // of the ten worlds were content nobody would ever reach.
     expect(worldAt(0).id).toBe("candy");
-    expect(worldAt(9).id).toBe("candy");
-    expect(worldAt(10).id).toBe("fruit");
-    expect(worldAt(19).id).toBe("fruit");
-    expect(worldAt(20).id).toBe("woodland");
-    expect(worldAt(30).id).toBe("toybox");
-    expect(worldAt(40).id).toBe("animal");
-    expect(worldAt(50).id).toBe("crystal");
-    expect(worldAt(60).id).toBe("ocean");
-    expect(worldAt(70).id).toBe("space");
-    expect(worldAt(80).id).toBe("arcade");
-    expect(worldAt(90).id).toBe("lava");
-    expect(worldAt(99).id).toBe("lava");
+    expect(worldAt(1).id).toBe("candy");
+    expect(worldAt(2).id).toBe("fruit");
+    expect(worldAt(4).id).toBe("woodland");
+    expect(worldAt(6).id).toBe("toybox");
+    expect(worldAt(8).id).toBe("animal");
+    expect(worldAt(10).id).toBe("crystal");
+    expect(worldAt(12).id).toBe("ocean");
+    expect(worldAt(14).id).toBe("space");
+    expect(worldAt(16).id).toBe("arcade");
+    expect(worldAt(18).id).toBe("lava");
+    expect(worldAt(19).id).toBe("lava");
+  });
+
+  it("shows a median round most of the ten", () => {
+    // The whole reason for the two-depth span. A round that reaches depth 14 —
+    // the measured median — must not spend itself inside two worlds.
+    const seen = new Set<string>();
+    for (let depth = 0; depth <= 14; depth++) seen.add(worldAt(depth).id);
+    expect(seen.size).toBeGreaterThanOrEqual(8);
   });
 
   it("comes round again past a hundred instead of running out", () => {
     // Depth is unbounded in the engine — the stone dial keeps tightening for
     // ever — so a table that ended would leave the deepest players at nothing.
-    expect(worldAt(100).id).toBe("candy");
-    expect(worldAt(110).id).toBe("fruit");
-    expect(lapAt(100)).toBe(1);
-    expect(lapAt(250)).toBe(2);
-    for (const depth of [100, 137, 999, 12_345, 1e6]) {
+    expect(worldAt(20).id).toBe("candy");
+    expect(worldAt(22).id).toBe("fruit");
+    expect(lapAt(20)).toBe(1);
+    expect(lapAt(50)).toBe(2);
+    for (const depth of [20, 100, 137, 999, 12_345, 1e6]) {
       expect(WORLDS.some((w) => w.id === worldAt(depth).id)).toBe(true);
       expect(materialById(finishAt(depth))).toBeTruthy();
     }
@@ -2081,31 +2090,31 @@ describe("depth worlds", () => {
   });
 
   it("hardens once halfway through a world, not every depth", () => {
+    // A two-depth span puts the halfway mark on every odd depth.
     expect(finishAt(0)).toBe("candy");
-    expect(finishAt(4)).toBe("candy");
-    expect(finishAt(5)).toBe("glazed");
-    expect(finishAt(9)).toBe("glazed");
-    expect(finishAt(20)).toBe("wood");
-    expect(finishAt(55)).toBe("diamond");
+    expect(finishAt(1)).toBe("glazed");
+    expect(finishAt(2)).toBe("glazed");
+    expect(finishAt(3)).toBe("matte");
+    expect(finishAt(4)).toBe("wood");
+    expect(finishAt(11)).toBe("diamond");
   });
 
   it("announces a world only when one is actually entered", () => {
-    expect(worldChanged(9, 10)).toBe(true);
-    expect(worldChanged(10, 11)).toBe(false);
-    expect(worldChanged(99, 100)).toBe(true);
+    expect(worldChanged(1, 2)).toBe(true);
+    expect(worldChanged(2, 3)).toBe(false);
+    expect(worldChanged(19, 20)).toBe(true);
     // Going nowhere is not a change, and neither is going backwards.
-    expect(worldChanged(20, 20)).toBe(false);
-    expect(worldChanged(30, 10)).toBe(false);
+    expect(worldChanged(4, 4)).toBe(false);
+    expect(worldChanged(6, 2)).toBe(false);
   });
 
   it("counts down to the next world correctly", () => {
-    expect(depthsToNextWorld(0)).toBe(10);
-    expect(depthsToNextWorld(7)).toBe(3);
-    expect(depthsToNextWorld(9)).toBe(1);
-    expect(depthsToNextWorld(10)).toBe(10);
-    expect(nextWorld(7).id).toBe("fruit");
-    expect(nextWorld(27).id).toBe("toybox");
-    expect(nextWorld(97).id).toBe("candy");
+    expect(depthsToNextWorld(0)).toBe(2);
+    expect(depthsToNextWorld(1)).toBe(1);
+    expect(depthsToNextWorld(2)).toBe(2);
+    expect(nextWorld(1).id).toBe("fruit");
+    expect(nextWorld(5).id).toBe("toybox");
+    expect(nextWorld(19).id).toBe("candy");
   });
 
   it("keeps eight block colours in every world, on every lap", () => {
@@ -2154,7 +2163,8 @@ describe("depth worlds", () => {
     }
     expect(WORLDS).toHaveLength(10);
     expect(new Set(WORLDS.map((w) => w.id)).size).toBe(10);
-    expect(WORLDS.map((w) => w.from)).toEqual([0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+    // Derived from the index, so the span and the boundaries cannot disagree.
+    expect(WORLDS.map((w) => w.from)).toEqual([0, 2, 4, 6, 8, 10, 12, 14, 16, 18]);
   });
 
   it("keeps the first world exactly as the game already looks", () => {
@@ -2173,7 +2183,7 @@ describe("depth worlds", () => {
     // A deeper lap is meant to feel earned, not to become illegible. Pattern
     // strength deliberately does not climb — it is the one dial that would cost
     // legibility, which is the thing this system may never spend.
-    for (const depth of [0, 100, 200, 300, 900]) {
+    for (const depth of [0, 20, 40, 60, 900]) {
       const trim = lapTrim(depth);
       expect(trim.sparkle).toBeLessThanOrEqual(0.24);
       expect(Math.abs(trim.ground)).toBeLessThanOrEqual(9);
