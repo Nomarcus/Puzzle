@@ -819,8 +819,16 @@
         display: flex;
         flex-wrap: wrap;
         justify-content: center;
-        gap: 8px;
+        gap: 6px;
         margin-top: 12px;
+      }
+
+      /* Six-plus settings pills share this row on a 390px phone, and every one
+         they gain pushes the menu disc down. Tighter than the general .pill so
+         a wrap here costs less. */
+      .langs .pill {
+        padding: 7px 11px;
+        font-size: 12px;
       }
 
       .pill {

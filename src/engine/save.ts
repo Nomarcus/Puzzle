@@ -69,6 +69,18 @@ export interface AudioPrefs {
   haptics: boolean;
 }
 
+/**
+ * How far a finger has to travel before a picked-up piece starts following it.
+ * "low" asks for more deliberate movement, "high" for almost none — the
+ * player's own thumb and the player's own preference, not something the game
+ * should decide for them.
+ */
+export type Sensitivity = "low" | "standard" | "high";
+
+export interface ControlPrefs {
+  sensitivity: Sensitivity;
+}
+
 export interface Save {
   version: number;
   records: Partial<Record<ModeId, ModeRecords>>;
@@ -76,6 +88,7 @@ export interface Save {
   worlds: Record<string, WorldProgress>;
   mastery: MasteryState;
   audio: AudioPrefs;
+  controls: ControlPrefs;
 }
 
 export function emptyRecords(): ModeRecords {
@@ -89,7 +102,12 @@ export function freshSave(): Save {
     worlds: {},
     mastery: { round: 0, activeId: null, progress: 0, completed: 0 },
     audio: { music: true, sfx: true, haptics: true },
+    controls: { sensitivity: "standard" },
   };
+}
+
+function sensitivity(value: unknown): Sensitivity {
+  return value === "low" || value === "standard" || value === "high" ? value : "standard";
 }
 
 const MODES: readonly ModeId[] = ["daily", "endless", "level", "time"];
@@ -172,6 +190,11 @@ export function loadSave(raw: unknown, wasMuted = false): Save {
   } else if (wasMuted) {
     // First run after the update, and the old switch said silence.
     save.audio = { music: false, sfx: false, haptics: false };
+  }
+
+  const controls = stored.controls;
+  if (controls !== null && typeof controls === "object") {
+    save.controls = { sensitivity: sensitivity((controls as Record<string, unknown>).sensitivity) };
   }
 
   return save;

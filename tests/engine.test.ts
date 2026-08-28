@@ -2273,6 +2273,15 @@ describe("the save record", () => {
     expect(save.mastery).toEqual({ round: 0, activeId: null, progress: 0, completed: 0 });
   });
 
+  it("defaults sensitivity and rejects anything not one of the three levels", () => {
+    expect(freshSave().controls).toEqual({ sensitivity: "standard" });
+    expect(loadSave(null).controls).toEqual({ sensitivity: "standard" });
+    expect(loadSave({ controls: { sensitivity: "high" } }).controls).toEqual({ sensitivity: "high" });
+    expect(loadSave({ controls: { sensitivity: "extreme" } }).controls).toEqual({ sensitivity: "standard" });
+    expect(loadSave({ controls: { sensitivity: 9 } }).controls).toEqual({ sensitivity: "standard" });
+    expect(loadSave({ controls: null }).controls).toEqual({ sensitivity: "standard" });
+  });
+
   it("carries an old mute forward as silence, not as new music", () => {
     // Somebody who had the whole game silenced must not be handed music on
     // first launch just because music became its own setting.

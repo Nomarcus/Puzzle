@@ -725,6 +725,33 @@ function showMenu(): void {
     langs.append(pill);
   }
 
+  // How far the finger has to move before a lifted piece starts following it.
+  // A cycling pill rather than three buttons: it is one preference, not three,
+  // and the row is already full.
+  {
+    const LEVELS = ["low", "standard", "high"] as const;
+    const LEVEL_LABEL = {
+      low: "sensitivityLow",
+      standard: "sensitivityStandard",
+      high: "sensitivityHigh",
+    } as const;
+    const pill = el("button", "pill");
+    pill.dataset.action = "sensitivity";
+    const paint = () => {
+      pill.textContent = t("sensitivity").replace(
+        "%s",
+        t(LEVEL_LABEL[save.controls.sensitivity]),
+      );
+    };
+    paint();
+    pill.addEventListener("click", () => {
+      const next = LEVELS[(LEVELS.indexOf(save.controls.sensitivity) + 1) % LEVELS.length]!;
+      storeSave({ ...save, controls: { ...save.controls, sensitivity: next } });
+      paint();
+    });
+    langs.append(pill);
+  }
+
   const help = el("button", "pill wide", t("how"));
   help.addEventListener("click", showHowTo);
   langs.append(help);
@@ -1105,6 +1132,7 @@ function startGame(mode: "daily" | "endless", variant?: { size: SizeId; pack: Pa
   screen = new GameScreen(canvas, game, {
     theme,
     haptic,
+    sensitivity: save.controls.sensitivity,
     onChange: updateMusic,
     onGameOver: (final) => showGameOver(final, mode),
   });
@@ -1147,6 +1175,7 @@ function startTimeAttack(): void {
   screen = new GameScreen(canvas, game, {
     theme,
     haptic,
+    sensitivity: save.controls.sensitivity,
     clock: TIME_ATTACK,
     onChange: updateMusic,
     onGameOver: (final) => showTimeResult(final),
@@ -1311,6 +1340,7 @@ function startChallenge(challenge: Challenge): void {
   screen = new GameScreen(canvas, game, {
     theme,
     haptic,
+    sensitivity: save.controls.sensitivity,
     onGameOver: (final) => showChallengeResult(challenge, final),
   });
   screen.start();
@@ -1442,6 +1472,7 @@ function startLevel(level: Level): void {
   screen = new GameScreen(canvas, game, {
     theme,
     haptic,
+    sensitivity: save.controls.sensitivity,
     onChange: (state) => {
       hud.refresh(state);
       // Won the moment the goal is met, rather than at the end of the budget.
@@ -1847,6 +1878,20 @@ if (import.meta.env.DEV) {
 
     /** Where the header, tray and disc ended up, for the safe-area checks. */
     layout: () => screen?.getLayout() ?? null,
+
+    /** How far a dragged piece floats above the fingertip. For the drag tests. */
+    dragLift: () => screen?.dragLift() ?? null,
+    /** How far the finger must move before a lifted piece starts following it. */
+    dragSlop: () => screen?.dragSlop() ?? null,
+    /** A tray slot's on-screen box, for tests driving real pixel coordinates. */
+    slotBox: (i: number) => screen?.slotBox(i) ?? null,
+    /** Cycles the sensitivity setting, same as the menu pill. */
+    cycleSensitivity: () => {
+      const levels = ["low", "standard", "high"] as const;
+      const next = levels[(levels.indexOf(save.controls.sensitivity) + 1) % levels.length]!;
+      storeSave({ ...save, controls: { ...save.controls, sensitivity: next } });
+      return save.controls.sensitivity;
+    },
 
     /** Re-measures, so a test can change the insets and see the effect. */
     remeasure: () => {

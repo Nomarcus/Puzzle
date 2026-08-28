@@ -12,7 +12,10 @@ import { mkdir } from "node:fs/promises";
 
 const OUT = "tools/out";
 const VIEWPORT = { width: 390, height: 844 }; // iPhone 14 / 15
-const LIFT = 76; // must match DRAG_LIFT in ui/game-screen.ts
+// Read off the running game once a round exists, rather than duplicated here —
+// a copy of this number has gone stale before and sent every simulated drag
+// aiming at the wrong point, which broke placement in every test downstream.
+let LIFT;
 
 await mkdir(OUT, { recursive: true });
 
@@ -94,6 +97,35 @@ await page.locator('[data-action="audio-music"]').click();
 await page.locator('[data-action="audio-haptics"]').click();
 await page.waitForTimeout(150);
 
+// --- how much finger travel it takes to move a lifted piece ----------------
+// The player's own choice, cycled one tap at a time, and it has to stick.
+{
+  const pill = page.locator('[data-action="sensitivity"]');
+  check("there is a sensitivity setting", (await pill.count()) === 1);
+
+  const start = (await pill.textContent()) ?? "";
+  await pill.click();
+  await page.waitForTimeout(80);
+  const afterOne = (await pill.textContent()) ?? "";
+  check("tapping it changes the level", afterOne !== start, `"${start}" -> "${afterOne}"`);
+
+  await pill.click();
+  await pill.click();
+  await page.waitForTimeout(80);
+  const afterThree = (await pill.textContent()) ?? "";
+  check("three taps is a full cycle, back to the start", afterThree === start, `"${start}" vs "${afterThree}"`);
+
+  // Move it off the default and check the choice survives a reload, the same
+  // bar the audio switches have to clear.
+  await pill.click();
+  await page.waitForTimeout(80);
+  const chosen = (await pill.textContent()) ?? "";
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  const afterReload = (await page.locator('[data-action="sensitivity"]').textContent()) ?? "";
+  check("and the choice survives a reload", afterReload === chosen, `"${chosen}" vs "${afterReload}"`);
+}
+
 // --- start a free game -----------------------------------------------------
 // Selected by data-action, not by label — the UI ships in two languages.
 await page.locator('[data-action="endless"]').click();
@@ -105,6 +137,8 @@ await page.locator('.choices [data-choice="mixed"]').click();
 await page.locator('[data-action="start"]').click();
 await page.waitForTimeout(500);
 await shot("02-fresh-board");
+
+LIFT = await page.evaluate(() => window.__shiftle.dragLift());
 
 let before = await state();
 check("game started with a full tray", before && before.tray.every((s) => s !== null));
@@ -142,6 +176,74 @@ for (let slot = 0; slot < 3; slot++) {
 }
 check("dragging pieces onto the disc places them", placed > 0, `${placed}/3 landed`);
 await shot("03-after-placing");
+
+// --- a tap must never place a piece -----------------------------------------
+// At this lift, the resting aim (finger position minus lift) already lands on
+// the board — that is the whole point of the lift. Without a deadzone, a
+// plain tap on a tray piece would place it the instant it was picked up. This
+// is what the slop threshold in game-screen.ts exists to prevent.
+{
+  const snapshot = await state();
+  const slot = snapshot.tray.findIndex((s) => s !== null);
+  const at = slotCentre(slot);
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.waitForTimeout(80);
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+  const after = await state();
+  check(
+    "a tap on a tray piece never places it",
+    after.stats.piecesPlaced === snapshot.stats.piecesPlaced,
+    `placed ${snapshot.stats.piecesPlaced} -> ${after.stats.piecesPlaced}`,
+  );
+}
+
+// A drag that moves less than the slop threshold is the same as a tap.
+{
+  const slop = await page.evaluate(() => window.__shiftle.dragSlop());
+  const snapshot = await state();
+  const slot = snapshot.tray.findIndex((s) => s !== null);
+  const at = slotCentre(slot);
+  await drag(at, { x: at.x + Math.max(1, slop - 2), y: at.y });
+  const after = await state();
+  check(
+    "a drag under the sensitivity threshold does not place either",
+    after.stats.piecesPlaced === snapshot.stats.piecesPlaced,
+    `slop=${slop}, placed ${snapshot.stats.piecesPlaced} -> ${after.stats.piecesPlaced}`,
+  );
+}
+
+// --- the lift means barely any travel is needed to reach the board ---------
+// This is the geometry the lift actually governs: the aim point (finger minus
+// lift) lands within a few pixels of the disc's edge the instant a piece
+// leaves the tray, rather than requiring most of a hand's travel first.
+// Tested as pure geometry off the real layout and the real lift, not against
+// board state, so it cannot flake on a crowded board — a multi-cell piece can
+// legally have nowhere to land near a given cell even when the cell itself is
+// squarely on the disc.
+{
+  const layout = await page.evaluate(() => window.__shiftle.layout());
+  // The middle slot, not the first: it is the one whose x already sits under
+  // the board's centre, so this measures what the lift governs (the vertical
+  // reach) without an unrelated horizontal offset mixed in.
+  const slotBox = await page.evaluate(() => window.__shiftle.slotBox(1));
+  const restY = slotBox.y + slotBox.height / 2;
+  const aimY = restY - LIFT;
+  const aimX = slotBox.x + slotBox.width / 2;
+  const distance = Math.hypot(aimX - cx, aimY - layout.boardCy);
+  // Measured: at the old lift of 76 this fell short by ~72px; at 140 it falls
+  // short by ~8px. Not zero — the resting aim is a hair below the board's
+  // bottom edge by design, so a plain tap still cannot place a piece — but a
+  // small, deliberate movement is all that is left to reach it.
+  const shortfall = distance - boardRadius;
+  check(
+    "barely any travel is needed to reach the board from a resting thumb",
+    shortfall > 0 && shortfall <= 15,
+    `shortfall=${shortfall.toFixed(1)}px (was ~72px at the old lift)`,
+  );
+}
+
 
 // --- spin a ring -----------------------------------------------------------
 const spun = await state();
@@ -1200,6 +1302,34 @@ check(
   (await page.locator('[data-action="leaderboard"]').count()) === 1,
 );
 await shot("12-game-center");
+
+// The setting has to actually reach the drag. It is only read when a round's
+// GameScreen is built — same as the theme — so changing it takes hold on the
+// next round, and that is what this checks: cycle the setting, start a fresh
+// round, and confirm the real threshold `onMove` checks against moved in the
+// direction the label promises: "low" sensitivity asking for more travel than
+// "high".
+{
+  const seen = {};
+  for (let i = 0; i < 3; i++) {
+    const level = await page.evaluate(() => window.__shiftle.cycleSensitivity());
+    await page.evaluate(() => window.__shiftle.start("endless"));
+    await page.waitForTimeout(200);
+    seen[level] = await page.evaluate(() => window.__shiftle.dragSlop());
+  }
+  check(
+    "the sensitivity setting changes the real drag threshold",
+    seen.low > seen.standard && seen.standard > seen.high,
+    JSON.stringify(seen),
+  );
+  // Back to the default, in a fresh round, so the rest of the suite sees
+  // standard behaviour.
+  while ((await page.evaluate(() => window.__shiftle.cycleSensitivity())) !== "standard") {
+    /* keep cycling */
+  }
+  await page.evaluate(() => window.__shiftle.start("endless"));
+  await page.waitForTimeout(200);
+}
 
 await browser.close();
 await server.close();

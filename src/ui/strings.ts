@@ -83,6 +83,12 @@ const TABLE = {
   sfxOn: { sv: "Ljudeffekter", en: "Sound effects" },
   hapticsOn: { sv: "Vibration", en: "Haptics" },
   settings: { sv: "Ljud", en: "Sound" },
+  /** The drag sensitivity pill. %s is the current level's label. Kept short: it
+   *  shares a row with five other pills on a 390px phone. */
+  sensitivity: { sv: "Käns: %s", en: "Sens: %s" },
+  sensitivityLow: { sv: "Låg", en: "Low" },
+  sensitivityStandard: { sv: "Normal", en: "Standard" },
+  sensitivityHigh: { sv: "Hög", en: "High" },
   /** Shown under the world's name the moment a new Depth World is entered. */
   newLayer: { sv: "Nytt lager upptäckt", en: "New layer discovered" },
   /** The hint in the header, in the last few depths of a world. %s is its name. */

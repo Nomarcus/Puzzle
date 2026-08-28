@@ -73,6 +73,7 @@ import { play as playSound, unlock as unlockAudio } from "../platform/audio.js";
 import { type Box, drawPiece } from "../render/tray.js";
 import { themeForDepth } from "../render/palette.js";
 import { worldAt, worldChanged } from "../render/world.js";
+import type { Sensitivity } from "../engine/save.js";
 import {
   angleAt,
   angleTravelled,
@@ -88,8 +89,33 @@ import {
 /** Chunky and rounded on iOS; degrades to the system sans elsewhere. */
 const FONT = '"SF Pro Rounded", ui-rounded, -apple-system, system-ui, sans-serif';
 
-/** How far above the fingertip a dragged piece floats, so the thumb never hides it. */
-const DRAG_LIFT = 76;
+/**
+ * How far above the fingertip a dragged piece floats, so the thumb never
+ * hides it.
+ *
+ * Measured on a 390×844 phone: the board runs y=220 to y=598, and the thumb
+ * comes to rest at y=746 the moment a tray piece is picked up (a slot is 168
+ * tall from y=662). Reaching the board's bottom row needs the thumb at
+ * `598 + lift`, so the travel before the nearest cell is even reachable is
+ * `746 - (598 + lift)`. At the old 76 that was 72 pixels on every placement;
+ * at 140 it is essentially none, and the thumb still stays a comfortable 62
+ * pixels clear of the 810 the home indicator leaves at the bottom of its
+ * travel.
+ */
+const DRAG_LIFT = 140;
+
+/**
+ * How far the finger has to move, in pixels, before a lifted piece starts
+ * following it — the player's own choice, since a thumb and a preference both
+ * vary. Below `standard`, at a lift of 140 the resting aim already lands on
+ * the board, so without some deadzone a plain tap on a tray piece would place
+ * it before the player ever meant to drag.
+ */
+export const SLOP_BY_SENSITIVITY: Readonly<Record<Sensitivity, number>> = {
+  low: 18,
+  standard: 8,
+  high: 3,
+};
 
 /** How long the dead board is left on screen before the result card. */
 const DEATH_BEAT = 1250;
@@ -108,6 +134,8 @@ export interface GameScreenOptions {
   readonly onChange?: (state: GameState) => void;
   readonly onGameOver?: (state: GameState) => void;
   readonly haptic?: (kind: HapticKind) => void;
+  /** How much the finger has to move before a lifted piece starts following it. */
+  readonly sensitivity?: Sensitivity;
   /**
    * Runs a clock against the round. Time attack only. It lives here rather
    * than in the engine because the engine is a pure function of moves and
@@ -128,7 +156,23 @@ interface RunningClock {
 
 type Pointer =
   | { kind: "none" }
-  | { kind: "drag"; slot: number; piece: Piece; x: number; y: number; target: Cell | null }
+  | {
+      kind: "drag";
+      slot: number;
+      piece: Piece;
+      x: number;
+      y: number;
+      target: Cell | null;
+      /** Where the finger first touched down, so movement can be measured from it. */
+      fromX: number;
+      fromY: number;
+      /**
+       * Whether the slop threshold has been crossed. Latches on once true —
+       * a piece that started following the finger keeps following it even if
+       * the finger drifts back within the threshold, so it never flickers.
+       */
+      aiming: boolean;
+    }
   /**
    * One gesture on the disc, whose axis is decided by the first few pixels of
    * travel and then locked: around the rings is a spin, in and out is a push.
@@ -668,8 +712,10 @@ export class GameScreen {
         return;
       }
       if (piece) {
-        this.pointer = { kind: "drag", slot, piece, x, y, target: null };
-        this.updateDragTarget();
+        // Not aiming yet: the target stays null until the finger has moved
+        // past the slop threshold, so picking a piece up and releasing again
+        // without moving — a tap — never places it.
+        this.pointer = { kind: "drag", slot, piece, x, y, fromX: x, fromY: y, aiming: false, target: null };
         this.options.haptic?.("light");
       }
       return;
@@ -704,7 +750,11 @@ export class GameScreen {
     if (this.pointer.kind === "drag") {
       this.pointer.x = x;
       this.pointer.y = y;
-      this.updateDragTarget();
+      if (!this.pointer.aiming) {
+        const travelled = Math.hypot(x - this.pointer.fromX, y - this.pointer.fromY);
+        if (travelled >= this.dragSlop()) this.pointer.aiming = true;
+      }
+      if (this.pointer.aiming) this.updateDragTarget();
       return;
     }
 
@@ -806,6 +856,21 @@ export class GameScreen {
       this.pointer.x,
       this.pointer.y - DRAG_LIFT,
     );
+  }
+
+  /** How far above the fingertip a dragged piece floats. Exposed for tests. */
+  dragLift(): number {
+    return DRAG_LIFT;
+  }
+
+  /** How far the finger must move before a lifted piece starts following it. */
+  dragSlop(): number {
+    return SLOP_BY_SENSITIVITY[this.options.sensitivity ?? "standard"];
+  }
+
+  /** The tray slot's on-screen box, for tests that drive real pixel coordinates. */
+  slotBox(i: number): Box | null {
+    return this.layout.slots[i] ?? null;
   }
 
   // -------------------------------------------------------------- committing
