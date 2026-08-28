@@ -66,13 +66,34 @@ const allSwift = sources.map(({ text }) => text).join("\n");
 
 for (const plugin of localPlugins) {
   const listed = packageClassList.includes(plugin.className);
+
   // The only other way it can reach the bridge: explicit registration in a
-  // CAPBridgeViewController subclass's capacitorDidLoad().
-  const registered = new RegExp(`registerPluginInstance\\(\\s*${plugin.className}\\(\\)`).test(allSwift);
+  // CAPBridgeViewController subclass's capacitorDidLoad(). That can be either
+  // an inline `registerPluginInstance(GameConnectPlugin())`, or a stored
+  // instance kept as a `let`/`var` property — e.g.
+  //   private let gameConnectPlugin = GameConnectPlugin()
+  //   bridge?.registerPluginInstance(gameConnectPlugin)
+  // The stored form is a perfectly good pattern (it keeps a strong reference
+  // for the bridge's lifetime), but this check used to only recognise the
+  // inline one — so build 24 registered the plugin correctly and the check
+  // reported "NOTHING registers it" anyway.
+  const inline = new RegExp(`registerPluginInstance\\(\\s*${plugin.className}\\(\\s*\\)\\s*\\)`).test(allSwift);
+  const storedArgs = [...allSwift.matchAll(/registerPluginInstance\(\s*(\w+)\s*\)/g)].map((m) => m[1]);
+  const stored = storedArgs.some((arg) =>
+    new RegExp(`(?:let|var)\\s+${arg}\\s*(?::\\s*\\w+)?\\s*=\\s*${plugin.className}\\s*\\(`).test(allSwift),
+  );
+  const registered = inline || stored;
+
   check(
     `${plugin.className} is registered with the bridge`,
     listed || registered,
-    listed ? "via packageClassList" : registered ? "via registerPluginInstance" : "NOTHING registers it — it will silently not exist",
+    listed
+      ? "via packageClassList"
+      : inline
+        ? "via registerPluginInstance (inline)"
+        : stored
+          ? "via registerPluginInstance (stored instance)"
+          : "NOTHING registers it — it will silently not exist",
   );
   check(`${plugin.className} declares a jsName`, plugin.jsName !== null, plugin.jsName ?? "");
 }
