@@ -19,10 +19,17 @@
  * ## Why it does not loop
  *
  * A bar is generated from its own index rather than read out of a fixed
- * sequence. The arpeggio walks an eight-bar chord cycle, the octave drifts on a
- * seventeen-bar cycle and the percussion is hashed per bar, so the pattern only
- * truly repeats after a length nobody sits through. It is cheap: one small
- * array of numbers per bar, built two bars ahead.
+ * sequence. The chord progression is an eight-bar cycle and the octave drifts
+ * on a seventeen-bar cycle, so the harmony alone only comes home after 136
+ * bars — about five and a half minutes. On top of that, the arpeggio's holes
+ * and the percussion hits are hashed per bar rather than read from any cycle,
+ * so there is no short block that repeats for a listener to catch (measured:
+ * none of the 48 bars after any given bar, about two minutes, exactly repeat
+ * it). Two individual bars can still land on the same hash pattern by chance,
+ * same as two coin flips landing the same way now and then, but that is a
+ * coincidence, not a loop, and it is inaudible against a bed this sparse. It
+ * is cheap either way: one small array of numbers per bar, built two bars
+ * ahead.
  *
  * ## How depth reaches it
  *
@@ -264,6 +271,11 @@ export class MusicPlayer {
     return this.timer !== null;
   }
 
+  /** Bars handed to the graph since `start`. The leak check reads this. */
+  get scheduledBars(): number {
+    return this.nextBar;
+  }
+
   /** Takes effect on the next bar line, never mid-bar. */
   setWorld(world: number): void {
     this.pendingWorld = world;
@@ -275,6 +287,15 @@ export class MusicPlayer {
 
   private pump(): void {
     if (this.ctx.state !== "running") return;
+
+    // Backgrounding the app suspends the context, and on resume the audio clock
+    // has moved on while this cursor has not. Catching up would mean scheduling
+    // every missed bar at once, all with a start time already in the past —
+    // which the graph plays immediately, as one very loud noise on returning to
+    // the game. So the cursor is dragged forward to now first, and the bed
+    // simply picks up where the player is rather than where they left.
+    if (this.nextTime < this.ctx.currentTime) this.nextTime = this.ctx.currentTime + 0.05;
+
     const horizon = this.ctx.currentTime + BAR * LOOKAHEAD_BARS;
     let guard = 0;
     while (this.nextTime < horizon && guard++ < 8) {
@@ -289,8 +310,5 @@ export class MusicPlayer {
       this.nextBar += 1;
       this.nextTime += BAR;
     }
-    // A context that was suspended and resumed can leave the cursor in the
-    // past, which would schedule a burst of bars all at once.
-    if (this.nextTime < this.ctx.currentTime) this.nextTime = this.ctx.currentTime + 0.05;
   }
 }
