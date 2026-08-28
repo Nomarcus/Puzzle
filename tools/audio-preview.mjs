@@ -95,6 +95,99 @@ const TAKES = [
   },
 ];
 
+/**
+ * The music bed. Rendered with `scheduleBar()` directly rather than the live
+ * `MusicPlayer` — a bar is a pure function of its index, so this is the same
+ * graph the game plays, just driven by hand instead of a lookahead timer.
+ *
+ * `worldSchedule` is a list of `[atBar, world]` breakpoints — the world in
+ * effect at a given bar is whichever breakpoint's `atBar` is the largest one
+ * not after it. `intensityRamp` is `[start, end]`, interpolated linearly
+ * across the take. `extra` layers one-shot sounds on top, same shape as
+ * `events` above. `fanfare` reproduces what `fanfare()` in audio.ts schedules
+ * — that function only knows the live singleton context, so the shape is
+ * copied here rather than called.
+ */
+const FANFARE_SHAPES = { record: [0, 2, 4], world: [0, 3, 5], unlock: [0, 4, 7] };
+
+const MUSIC_TAKES = [
+  {
+    name: "18-music-2min",
+    // Marcus asked for at least two minutes of the adaptive bed on its own,
+    // sweeping through depth so every layer gets heard: bare at the top,
+    // full by the end, with the world's timbre changing along the way.
+    bars: 56, // 56 * 2.4s = 134.4s
+    worldSchedule: [[0, 0], [14, 1], [28, 2], [42, 3]],
+    intensityRamp: [0.05, 1],
+  },
+  {
+    name: "19-music-normal-play",
+    // A steady mid-round bed with ordinary placements landing on it — what
+    // most of a session actually sounds like.
+    bars: 8,
+    worldSchedule: [[0, 4]],
+    intensityRamp: [0.55, 0.55],
+    extra: [
+      ["place", 0, 1.1, 4],
+      ["place", 0, 3.4, 2],
+      ["spoke", 0, 6.0, 3],
+      ["place", 0, 8.2, 5],
+      ["spin", 0, 11.0, 2],
+      ["ring", 1, 14.5, 4],
+      ["place", 0, 17.0, 1],
+    ],
+  },
+  {
+    name: "20-music-combo",
+    // The six-clear combo run, over the bed, so the duck can be judged
+    // against something playing rather than silence.
+    bars: 5,
+    worldSchedule: [[0, 1]],
+    intensityRamp: [0.6, 0.6],
+    extra: [0, 1, 2, 3, 4, 5].map((level) => ["spoke", level, 1.0 + level * 0.42, 0]),
+  },
+  {
+    name: "21-music-deeper",
+    // One depth deeper: the floor moving under a bed already playing.
+    bars: 4,
+    worldSchedule: [[0, 2]],
+    intensityRamp: [0.5, 0.5],
+    extra: [["deeper", 0, 3.5, 0]],
+  },
+  {
+    name: "22-music-world-transition",
+    // A world change lands on a bar line, so the timbre visibly (audibly)
+    // moves at the boundary rather than at a random point mid-bar.
+    bars: 8,
+    worldSchedule: [[0, 0], [4, 5]],
+    intensityRamp: [0.6, 0.6],
+    extra: [["deeper", 0, 9.6, 0]],
+  },
+  {
+    name: "23-music-record",
+    bars: 4,
+    worldSchedule: [[0, 3]],
+    intensityRamp: [0.5, 0.5],
+    fanfare: { kind: "record", atSeconds: 3.5 },
+  },
+  {
+    name: "24-music-unlock",
+    bars: 4,
+    worldSchedule: [[0, 3]],
+    intensityRamp: [0.5, 0.5],
+    fanfare: { kind: "unlock", atSeconds: 3.5 },
+  },
+  {
+    name: "25-music-corefire",
+    // The biggest thing the chip does, over the bed — the duck is largest
+    // here (0.25) and this is the take that shows whether that is enough.
+    bars: 4,
+    worldSchedule: [[0, 6]],
+    intensityRamp: [0.7, 0.7],
+    extra: [["coreFire", 0, 3.5, 0]],
+  },
+];
+
 await mkdir(OUT, { recursive: true });
 
 const server = await createServer({ server: { port: 5218, host: "127.0.0.1" }, logLevel: "warn" });
@@ -105,15 +198,44 @@ await page.goto("http://127.0.0.1:5218/", { waitUntil: "networkidle" });
 
 const results = [];
 
-for (const take of TAKES) {
+for (const take of [...TAKES, ...MUSIC_TAKES]) {
   const rendered = await page.evaluate(
-    async ({ take, rate }) => {
+    async ({ take, rate, fanfareShapes }) => {
       const audio = await import("/src/platform/audio.ts");
-      const ctx = new OfflineAudioContext(2, Math.ceil(rate * take.seconds), rate);
+      const music = await import("/src/platform/music.ts");
+
+      // Music takes give a bar count rather than a duration, so the real BAR
+      // length (not a copy of it) decides how long the render needs to be.
+      const seconds = take.bars ? take.bars * music.BAR + 1.0 : take.seconds;
+      const ctx = new OfflineAudioContext(2, Math.ceil(rate * seconds), rate);
       const bus = audio.createBus(ctx, ctx.destination);
 
-      for (const [sound, level, at, degree] of take.events) {
+      for (const [sound, level, at, degree] of take.events ?? []) {
         audio.schedule(bus, sound, level, at, degree ?? 0);
+      }
+
+      if (take.bars) {
+        const worldAt = (bar) => {
+          let current = take.worldSchedule[0][1];
+          for (const [atBar, world] of take.worldSchedule) {
+            if (atBar <= bar) current = world;
+          }
+          return current;
+        };
+        const [i0, i1] = take.intensityRamp;
+        for (let bar = 0; bar < take.bars; bar++) {
+          const intensity = take.bars > 1 ? i0 + ((i1 - i0) * bar) / (take.bars - 1) : i0;
+          music.scheduleBar(bus, bus.ctx.destination, bar, worldAt(bar), intensity, bar * music.BAR);
+        }
+        for (const [sound, level, at, degree] of take.extra ?? []) {
+          audio.schedule(bus, sound, level, at, degree ?? 0);
+        }
+        if (take.fanfare) {
+          const steps = fanfareShapes[take.fanfare.kind];
+          steps.forEach((degree, i) => {
+            audio.schedule(bus, "bonus", Math.min(3, i), take.fanfare.atSeconds + i * 0.11, degree);
+          });
+        }
       }
 
       const buffer = await ctx.startRendering();
@@ -186,7 +308,7 @@ for (const take of TAKES) {
         low: Math.sqrt(lowSum / frames),
       };
     },
-    { take, rate: RATE },
+    { take, rate: RATE, fanfareShapes: FANFARE_SHAPES },
   );
 
   await writeFile(`${OUT}/${take.name}.wav`, Buffer.from(rendered.wav, "base64"));

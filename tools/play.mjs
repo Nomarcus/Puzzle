@@ -126,6 +126,52 @@ await page.waitForTimeout(150);
   check("and the choice survives a reload", afterReload === chosen, `"${chosen}" vs "${afterReload}"`);
 }
 
+// --- the World Passport, on a save where nothing has been discovered yet ---
+// The withheld-look trick only works if the ungrown state actually renders:
+// ten named cards and no crash, rather than an empty grid or a page error.
+{
+  await page.locator('[data-action="passport"]').click();
+  await page.waitForTimeout(200);
+  const cards = page.locator(".passport-card");
+  check("the passport shows all ten worlds", (await cards.count()) === 10, `${await cards.count()}`);
+  check(
+    "none are discovered yet on a fresh save",
+    (await page.locator(".passport-card:not(.locked)").count()) === 0,
+  );
+  await shot("19-passport-blank");
+  await page.locator('.passport-screen [data-action="menu"]').click();
+  await page.waitForTimeout(150);
+}
+
+// --- choosing a mastery goal ------------------------------------------------
+// Chosen, never assigned: three on offer, and picking one has to stick.
+{
+  await page.locator('[data-action="goals"]').click();
+  await page.waitForTimeout(200);
+  const options = page.locator('[data-action^="goal-"]');
+  check("three goals are on offer", (await options.count()) === 3, `${await options.count()}`);
+  await shot("20-goals");
+
+  const first = options.first();
+  check("none is picked yet", (await first.getAttribute("aria-pressed")) === "false");
+  await first.click();
+  await page.waitForTimeout(150);
+  check("picking one marks it picked", (await page.locator('[data-action^="goal-"]').first().getAttribute("aria-pressed")) === "true");
+
+  // Leave and come back: the choice has to have actually been saved, not just
+  // painted on the button that was clicked.
+  await page.locator('.levels [data-action="menu"]').click();
+  await page.waitForTimeout(150);
+  await page.locator('[data-action="goals"]').click();
+  await page.waitForTimeout(200);
+  check(
+    "and it is still picked after leaving and coming back",
+    (await page.locator('[data-action^="goal-"]').first().getAttribute("aria-pressed")) === "true",
+  );
+  await page.locator('.levels [data-action="menu"]').click();
+  await page.waitForTimeout(150);
+}
+
 // --- start a free game -----------------------------------------------------
 // Selected by data-action, not by label — the UI ships in two languages.
 await page.locator('[data-action="endless"]').click();
@@ -449,6 +495,54 @@ check(
 );
 check("there is a share button", (await page.locator('[data-action="share"]').count()) === 1);
 await shot("11-game-over");
+
+// --- the result screen: what changed, and the way straight back in ---------
+{
+  const lines = await page.locator(".result-line").count();
+  check("the result shows at most three lines", lines <= 3, `${lines} lines`);
+  // At minimum: the first round on a fresh save always discovers Candy.
+  check("and at least one, on a round that discovered a world", lines >= 1, `${lines} lines`);
+  check(
+    "there is an immediate replay button",
+    (await page.locator('[data-action="replay"]').count()) === 1,
+  );
+
+  const beforeReplay = await state();
+  await page.locator('[data-action="replay"]').click();
+  await page.waitForTimeout(400);
+  const afterReplay = await state();
+  check(
+    "tapping it starts a fresh round without going through the menu",
+    afterReplay !== null && !afterReplay.over && afterReplay.score === 0,
+    `over=${afterReplay?.over}, score=${afterReplay?.score}`,
+  );
+  // Not the round that was showing a moment ago.
+  check(
+    "the fresh round is not the dead board reused",
+    beforeReplay?.over === true && afterReplay?.over === false,
+  );
+}
+
+// --- the World Passport, with a real discovered world on it ----------------
+// The card that matters is the one drawing a real render of a world's blocks,
+// which is the one part of this screen that can actually fail — a canvas draw
+// throwing would leave a card with a name and nothing under it.
+{
+  await page.evaluate(() => window.__shiftle.menu());
+  await page.waitForTimeout(200);
+  await page.locator('[data-action="passport"]').click();
+  await page.waitForTimeout(250);
+  const discovered = await page.locator(".passport-card:not(.locked)").count();
+  check(
+    "at least one world is discovered after a finished round",
+    discovered >= 1,
+    `${discovered}/10`,
+  );
+  check("no errors drawing the discovered swatches", problems.length === 0, problems.join(" | "));
+  await shot("21-passport-discovered");
+  await page.locator('.passport-screen [data-action="menu"]').click();
+  await page.waitForTimeout(200);
+}
 
 // --- levels ----------------------------------------------------------------
 // The level flow is where a mode-switching bug would hide: a goal that never
