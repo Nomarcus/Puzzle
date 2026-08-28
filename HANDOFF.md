@@ -312,7 +312,7 @@ five materials times twelve rim segments is sixty visibly different states per
 lap, and the rim starts a new lap in a hotter colour each time it fills. A tier
 lands every three depths, roughly every 66 pieces.
 
-`npm run materials` renders all five on the real disc. Every tier was tuned by
+`npm run worlds` renders all five on the real disc. Every tier was tuned by
 looking at that output.
 
 ### Depth Worlds
@@ -1266,7 +1266,8 @@ tools/          bot, balance sweeps, browser tests, icon generation
                 `npm run balance` sweeps every disc and pack; `npm run endless`
                 asks whether a round ever ends at all; `npm run ramp` measures
                 the difficulty ramp; `npm run levels` the forty levels;
-                `npm run materials` renders the five block materials
+                `npm run worlds` the ten Depth Worlds and five materials;
+                `npm run audio` every sound effect and the adaptive music
 ios/            the Xcode project
 ```
 
