@@ -6,10 +6,16 @@
  * directly, as this used to, found nothing even on a device, because only
  * `registerPlugin()` ever puts anything there. Every buzz in the game was
  * silently dropped.
+ *
+ * Also gated on the player's own Haptics switch, the same `save.audio.haptics`
+ * that Music and SFX each get their own copy of. That switch used to only ever
+ * change what `audio.ts` itself did — nothing here ever read it, so turning
+ * Vibration off in settings left the phone buzzing exactly as before.
  */
 
 import type { HapticKind } from "../ui/game-screen.js";
 import { hasPlugin, isNative, registerPlugin } from "./native.js";
+import { hapticsEnabled } from "./audio.js";
 
 interface CapacitorHaptics {
   impact(options: { style: string }): Promise<void>;
@@ -30,6 +36,7 @@ const IMPACT: Record<string, string> = {
 };
 
 export function haptic(kind: HapticKind): void {
+  if (!hapticsEnabled()) return;
   const haptics = plugin();
   if (!haptics) return;
 
