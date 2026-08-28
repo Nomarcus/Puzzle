@@ -370,13 +370,21 @@ A pattern may never change what colour a block reads as. Three mechanisms:
    lightness a little and hue not at all.
 2. **Caps are data, not intentions.** Every pattern is a row in `PATTERNS`
    carrying its ink, alpha and stroke width, and a test checks them. White is
-   capped at **0.30** — for scale, the striped marker is white at **0.92** across
-   the full width of the cell. No pattern may draw both a full arc and a full
-   radial line, because that pair *is* the striped mark.
+   capped at **`WHITE_CAP` = 0.30** — for scale, the striped marker is white at
+   **0.92** across the full width of the cell. No pattern may draw both a full
+   arc and a full radial line, because that pair *is* the striped mark.
 3. **Measured on the canvas.** `npm run play` samples the drawn board in each
-   reachable world and asserts the blocks keep their chroma. Measured: depth 0
-   mean chroma **0.861**, depth 10 **0.530** — both far above the 0.25 floor that
-   separates a block from the plate.
+   reachable world and asserts the blocks keep their chroma. Measured: Candy
+   mean chroma **0.784**, Fruit **0.920**, Toy Box **0.818**, Ocean **0.620** —
+   all far above the 0.25 floor that separates a block from the plate.
+
+   `SHADE_CAP` (a mark in the block's own dark shade, which cannot move hue)
+   was raised from 0.6 to **0.78** for the "block structures still look almost
+   the same" pass — Marcus's own words after playing build 20 were "ser nästan
+   likadana ut". `STROKE_CAP` (**0.12**) is new alongside it, so a bolder mark
+   thickens rather than turning into a second colour. The chroma numbers above
+   are measured *after* that change, which is the point: bolder did not cost
+   readability.
 
 #### Which worlds a test can actually reach
 
@@ -458,6 +466,224 @@ saturation: HSL saturation is scale-invariant, so a blue washed halfway to white
 still reports 100% and the bleaching failure sails straight past it. Measured
 between depth 0 and depth 4 on a real round: lightness 75.7% → 72.4%, chroma
 0.486 → 0.522, hue 199.4 → 198.5. Deeper, more colourful, same theme.
+
+## A next goal everywhere, a Passport, and chosen mastery goals
+
+Marcus's night-shift brief asked for five things at once, in priority order:
+safe storage first, then a visible next goal and a better result screen, then
+clearer worlds and a World Passport, then adaptive music, then mastery goals as
+polish if the budget allowed. All five landed. Four things had to be true of
+every one of them: the game keeps working fully offline, nothing here can ever
+reach the Game Center leaderboards, no existing storage key changes shape, and
+none of it touches `ios/App/App/MainViewController.swift` or the audio session
+category.
+
+### A versioned save, because six loose keys had nowhere to grow
+
+Before this, progress lived in six separate `localStorage` keys —
+`best`, `bestTime`, `levels`, `history`, `lifetime`, `theme` — written the day
+each feature landed, plus `muted`, `daily`, `size` and `pack`. That was fine at
+six keys. Per-mode records, world discovery, a mastery goal and three audio
+switches would have been another dozen loose keys with no way to migrate them
+together and no way to tell a half-written save from an old one.
+
+`src/engine/save.ts` adds one more key, `save`, holding one versioned JSON
+value (`SAVE_VERSION = 1`) with `records`, `worlds`, `mastery` and `audio`.
+**The old ten keys are untouched and still work** — a player updating from the
+last build keeps their high score, streak, cleared levels and theme exactly as
+before, because nothing reads or writes them differently.
+
+The rule that matters most: `loadSave()` validates every field by hand and
+never throws. Junk in, a fresh default out — `loadSave(junk)` is asserted
+against `null`, `undefined`, `0`, `""`, `"not json"`, `[]`, `true` and a
+`{ version: 99 }` from some hypothetical future build, and every one comes back
+a playable save. World ids are filtered through `/^[a-z0-9-]{1,24}$/` before
+ever being used as an object key — a hand-edited or corrupted store can hold
+anything, and an id used as a key is a cheap injection route. The old single
+`muted` switch migrates forward as silence across all three new audio prefs,
+never as new music somebody did not ask for — tested both directions.
+
+### The progression surface: one bar, one line
+
+`src/ui/progress-ui.ts` owns the rule that a menu listing six things to chase
+is a menu with nothing to chase. The strip under the menu buttons shows exactly
+one primary goal (a bar toward the next theme unlock, with the exact number
+remaining) and at most one secondary line — whichever the player is genuinely
+closest to in the mode they last played: an active mastery goal if one is
+chosen, otherwise the nearest undiscovered world, otherwise nothing invented.
+A first-ever score is never described as "nearly a record" — there was nothing
+to be near, and calling it one is the fabricated milestone the brief rules out.
+
+### The World Passport
+
+Ten cards, one per world, in the order they are met. An undiscovered world
+shows its name over an empty plate rather than being hidden — hiding it would
+leave nobody any reason to go one deeper. A discovered card draws a **real**
+render of that world's blocks through the same renderer the board uses
+(`drawWorldSwatch` in `src/render/canvas.ts`), so a card can never show
+something the world does not actually look like, and its own best depth.
+Reached from the menu's compact pill row, alongside "choose a goal" — full-size
+buttons there would have squeezed the start-screen disc, so these are
+deliberately smaller than a mode button.
+
+### Mastery goals: chosen, never assigned
+
+`src/engine/mastery.ts`. Three goals offered at a time, picked deterministically
+from a hash of a round counter — no clock, no server, no stored list. Picking
+none is a perfectly good answer. The round only advances when a goal is
+**completed**, never with the date, because a goal that expired overnight would
+punish somebody for having a life — exactly the mechanic the brief rules out.
+Every goal is something worth doing anyway (reach a depth, clear rings, fire
+the core), never "score under X" or "avoid a spin", so a goal can never be a
+reason to play worse. Progress only ever goes up: the best value ever seen
+toward the active goal, not the latest, so one bad round cannot undo what a
+good one showed.
+
+The reward is **`MASTERY_BONUS = 5,000`** lifetime points — the one currency
+the game already had, never a new one, never touching the round's own score,
+and it never reaches Game Center. A free-play round is worth roughly 100,000
+lifetime on measured play, so the bonus is about a twentieth of one round:
+enough to feel like something, far too little to be a better way of earning
+than playing.
+
+### The result screen: at most three lines
+
+`resultLines()` in `progress-ui.ts` picks the three things that actually
+mattered — a beaten record, a discovered world, mastery progress, a genuine
+near-miss (within a fifth of the record, otherwise not shown at all) — ranked,
+and drops the rest on the floor. The cap is the point: a wall of badges is what
+turns a result screen into a slot machine. `[data-action="replay"]` on that
+screen starts a fresh round immediately, without a trip back through the menu.
+
+### Bolder world patterns
+
+Covered above, in [the readability rule](#the-readability-rule-made-enforceable).
+
+## Adaptive music
+
+`src/platform/music.ts`, built on the exact same chip `src/platform/audio.ts`
+already synthesises sound effects with — the pulse waves, the stepped
+triangle, the LFSR noise all come off the same `Bus`, so the music is the same
+instrument as the effects, not a second one playing alongside them. No audio
+files, nothing licensed, same as everything else in the game.
+
+**100 BPM, D pentatonic** — the scale every sound effect is already tuned to,
+so a placement or a clear lands *in key* rather than over the top of one. No
+lead line and no melody: that would compete with the effects for the player's
+attention, and the effects are the part that carries information. No intro, no
+chorus, no drop — it is meant to be left on for an hour.
+
+**Depth moves intensity, and intensity gates layers, not volume.** Bass is
+always there. Depth adds the arpeggio filling in, then percussion, then a long
+air note into the echo. Going deeper makes the bed richer, never louder — the
+brief is explicit the game must never turn stressful, and a puzzle you are
+concentrating on is not helped by a track that keeps climbing. The **world**
+moves timbre only — duty cycle, how the arpeggio spins, whether the bass
+syncopates — and it always lands on a bar line, so a world change reads as the
+same music having moved somewhere, not a new track starting.
+
+**Why it does not sound like a loop.** The chord progression is an eight-bar
+cycle and the octave drifts on a seventeen-bar cycle, so the harmony alone
+only repeats every 136 bars — about five and a half minutes. On top of that,
+the arpeggio's holes and the percussion hits are hashed straight from the raw
+bar index rather than read from any cycle, so there is no short block for a
+listener to catch — measured directly: none of the 48 bars (about two minutes)
+after any given bar exactly repeats it. Two individual bars can still land on
+the same hash pattern by coincidence now and then, the same way two coin flips
+occasionally agree, but that is a coincidence, not a loop, and it is inaudible
+against a bed this sparse.
+
+**A lookahead scheduler, not a loop of nodes.** `MusicPlayer` builds bars two
+ahead on a 400ms timer rather than looping a fixed graph, so there is no seam
+to click at and the pattern can change without stopping. Every node it creates
+is one-shot with its own `stop()` already scheduled. Measured with a simulated
+10-minute session (`tests/music.test.ts`): every node started gets a matching
+stop, the bar count tracks wall clock (250 bars expected at 100 BPM, landed
+inside a couple of bars either side), and the amount of work done per minute
+stays flat rather than climbing — the actual leak test the brief asked for,
+not a claim.
+
+That test caught a real bug: after the audio context is suspended and resumed
+(the app backgrounded and returned to), the scheduler's time cursor was left in
+the past, and the old code let a whole backlog of missed bars through as one
+burst scheduled all at once — a loud noise on returning to the game. Fixed by
+dragging the cursor forward to "now" at the top of every scheduling tick,
+before deciding what to build next.
+
+`npm run audio` renders 25 takes to `tools/out/audio/`, eight of them music:
+a continuous 135-second take sweeping through depth and world on its own, plus
+short takes layering ordinary play, a six-clear combo, a depth change, a world
+transition, and each fanfare (a personal record, a theme unlock) and a core
+fire over the bed, so the ducking can be judged against something actually
+playing rather than silence. All 25 render clean: nothing clips, nothing is
+silent.
+
+## Audio settings: Music, SFX and Haptics, separately
+
+One switch used to control everything. Now `save.audio` holds three
+independent booleans, and turning one off never touches the other two — tested
+both for independence and for surviving a reload.
+
+The signal chain grew a stage: `destination ← limiter ← master(0.9) ← [sfx bus,
+music]`. The limiter (`DynamicsCompressor`, threshold -6dB, ratio 12) is the
+answer to several loud things landing at once — a core firing over a combo over
+the music used to be able to push past full scale, and clipping on a phone
+speaker is the ugliest sound the game can make. It is a safety net, set gently,
+not a loudness effect.
+
+**Ducking is deliberately selective.** Only genuinely big moments dip the bed —
+a bonus, a core firing, the core reaching charge, going a depth deeper. An
+ordinary placement or a spin does **not** duck, because ducking on every
+placement would make the whole bed audibly pump in time with normal play,
+which is exactly the cheap trick this avoids.
+
+**A real bug, found by reading rather than by a test that could catch it:**
+`hapticsEnabled()` existed in `audio.ts` for exactly this purpose and nothing
+ever called it. `src/platform/haptics.ts` gated only on whether the native
+plugin existed — the Vibration switch updated `save.audio.haptics` correctly,
+but nothing downstream ever read it, so turning it off silently did nothing.
+One `if (!hapticsEnabled()) return;`, now wired the same way Music and SFX
+already were. This could not be verified live from this environment — there is
+no real device or Capacitor bridge in a Playwright browser or in `vitest`, so
+both paths return early regardless of the setting — so it is fixed by
+inspection and by matching the working pattern exactly, not confirmed on a
+phone. Worth an actual device check.
+
+## The drag lift, and sensitivity as a player setting
+
+Marcus, after playing build 20: picking up one of the three tray pieces should
+sit higher above the thumb, the way Block Blast does, so the thumb never
+covers the piece and there is barely any travel to reach the board.
+
+**Measured on a 390×844 phone:** the board runs y=220 to y=598, and the thumb
+comes to rest at y=746 the instant a piece is picked up (a tray slot is 168
+tall from y=662). Reaching the board's bottom row needs the thumb at
+`598 + lift`, so the travel needed before the nearest cell is even reachable is
+`746 - (598 + lift)`. At the old lift of 76, that was **72 pixels on every
+single placement**. `DRAG_LIFT` in `src/ui/game-screen.ts` is now **140**,
+which brings that down to **~8 pixels** — while keeping the thumb's deepest
+point (746) a comfortable 62 pixels clear of the 810 the home indicator
+leaves.
+
+That ~8px is deliberately not zero. At a lift high enough to close it
+completely, the resting aim the instant a piece is touched would already sit
+on the board, and a plain tap — no drag at all — would place a piece nobody
+meant to move. So a drag does not start "aiming" until the finger has moved
+past a threshold, and once it does, it latches: the target keeps updating even
+if the finger drifts back within the threshold, so nothing flickers.
+
+That threshold is now **a player setting**, not a fixed number — Marcus asked
+for it directly: how much the finger has to move before a lifted piece starts
+following it should be something the player can choose themselves. Three
+levels (`SLOP_BY_SENSITIVITY` in `game-screen.ts`): **low = 18px, standard =
+8px, high = 3px**. It cycles on tap from a pill in the settings row, persists
+in `save.controls.sensitivity`, and is picked up on the next round the same way
+the theme is — not live mid-round. `npm run play` drives all of it: a tap never
+places a piece at any level, a drag under the current threshold does not
+either, the real aim-point geometry lands within ~15px of the board's edge
+(down from ~72px at the old lift), and cycling the setting and starting a fresh
+round moves the real threshold `onMove` checks against, in the direction the
+labels promise.
 
 ## Wild blocks
 
@@ -749,7 +975,7 @@ Game Center boards stay for the daily and free play.
 
 | Area | Status |
 |---|---|
-| Game engine | Done. Pure, deterministic, 134 unit tests. |
+| Game engine | Done. Pure, deterministic, 191 unit tests across two files. |
 | Levels | Done. Forty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
 | Time attack | Done. Clock tuned against five modelled standards of play. |
@@ -759,13 +985,19 @@ Game Center boards stay for the daily and free play.
 | Progression | Done. Seven themes, four of them earned. Cosmetic only. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, seven themes. |
-| Depth visuals | Done. Rim counter, deepening ground, arrival sweep, a five-tier material ladder from candy to diamond, and a palette era every ten depths. Free play only; the clock mode is untouched by construction. |
+| Depth visuals | Done. Rim counter, deepening ground, arrival sweep, a five-tier material ladder from candy to diamond, ten Depth Worlds every two depths, and patterns strengthened (`SHADE_CAP` 0.6→0.78) so block structures read apart. Free play only; the clock mode is untouched by construction. |
+| Versioned save | Done. `save.ts`, `SAVE_VERSION = 1`, on top of the ten existing keys rather than replacing them. Never throws on a broken store. |
+| Progression surface, Passport, mastery goals | Done. One bar and one line on the menu, ten discoverable world cards, three chosen (never assigned) goals worth a small lifetime bonus, never a leaderboard point. |
+| Result screen | Done. At most three ranked lines, an immediate replay button. |
+| Adaptive music | Done. `music.ts`, same chip as the effects, depth gates layers not volume. Leak-tested over a simulated 10-minute session; `npm run audio` renders 135s of it plus 7 highlight takes. |
+| Audio settings | Done. Music/SFX/Haptics as three independent switches, plus a limiter on the shared output. |
+| Drag sensitivity | Done. Lift raised 76→140px (measured: ~72px of travel down to ~8px), the "how much finger movement" threshold now a three-level player setting. |
 | Start screen | Done. The disc fits the band the column leaves it; records on one row. Pinned by `npm run play` in both languages. |
 | iPad | Done. The playable column is capped and centred; the background fills the rest. |
 | Balance | Measured with `npm run balance` and `npm run ramp`. |
 | iOS project | Generated and committed at `ios/`. |
 | App icon and splash | Generated from the game's own renderer. |
-| Particles and sound | Done. 8-bit chip synthesis — pulse, triangle and LFSR noise — tuned to a D major pentatonic, with pitch following the disc. `npm run audio` renders every voice to WAV. |
+| Particles and sound | Done. 8-bit chip synthesis — pulse, triangle and LFSR noise — tuned to a D major pentatonic, with pitch following the disc. `npm run audio` renders every voice to WAV, plus the adaptive music bed. |
 | Game Center | Native plugin written and committed. Needs two leaderboards created in App Store Connect. |
 | Share image | Done. The final disc renders to a 1080px card. |
 

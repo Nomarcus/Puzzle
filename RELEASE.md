@@ -4,6 +4,67 @@ Paste the relevant section into TestFlight's **What to Test**. Newest first.
 
 ---
 
+## 1.0 (21)
+
+A clear next goal everywhere, a World Passport, chosen mastery goals, a much
+better result screen, adaptive music, and a lighter touch on the tray.
+
+### What to test
+
+**The menu now shows one bar and one line: what's next.** A bar toward the
+next theme, and under it whichever is closest — a chosen goal's progress, or
+the next world you haven't discovered yet. Does it feel like there is always
+something worth one more round, without it turning into a checklist?
+
+**World Passport**, reached from the new pill row under the menu buttons. Ten
+cards — an undiscovered one shows its name over an empty plate, a discovered
+one shows a real sample of that world's blocks and how deep you've been in it.
+Play a round or two and check the cards you've earned actually look like the
+world you just played.
+
+**Choose a goal**, the pill next to Passport. Three on offer, pick one or
+none — nothing is assigned to you. It should feel like "something I feel like
+doing next", never a demand, and finishing one should read as a small bonus,
+never as a leaderboard score.
+
+**The result screen after a round.** At most three lines — records beaten, a
+world found, goal progress — and a "play again" button that starts a fresh
+round immediately. Does it feel like it's telling you what mattered, not
+throwing badges at you?
+
+**Block structures should read apart now, world to world.** This was the
+specific complaint last build: "the blocks look almost the same." Same
+question as always — can you tell all eight colours apart, in every world, at
+a glance, without the new patterns making two colours look alike?
+
+**Music.** There is a bed now, under everything, that changes gently with
+depth and with the world — never louder, never faster, just fuller. Leave it
+on for a while: does it stay pleasant, or does it start to grate or repeat?
+There are now three separate switches — Music, SFX, Haptics — in the settings
+row. Check each one actually does only what it says, and that turning
+Haptics off actually stops the phone buzzing (that one's new — it silently
+did nothing in earlier builds).
+
+**Picking up a tray piece.** It should sit higher above your thumb than
+before — barely any travel needed to reach the board. There's also a new
+**Sensitivity** setting, same row: it controls how far your finger has to move
+before a lifted piece starts following it. Try all three levels and see which
+feels right; a plain tap on a piece should never place it, at any level.
+
+**Nothing about how the game plays changed.** Same scoring, same clear rules,
+same striped blocks and jackpot, same difficulty ramp, same Game Center
+leaderboards and levels, same gestures for placing and spinning.
+
+### Fixed since build 20
+
+- The disc squeezed by the new menu content is back to full size.
+- The Haptics setting did nothing at all — it toggled a saved preference that
+  nothing downstream ever read. Now wired the same way Music and SFX are.
+- After the app is backgrounded and returned to, the music no longer bursts
+  through a backlog of missed bars at once.
+
+---
+
 ## 1.0 (20)
 
 The worlds now change every two depths instead of every ten.
