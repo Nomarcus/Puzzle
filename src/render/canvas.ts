@@ -808,10 +808,26 @@ export function drawGhost(
   s: number,
   colourId: number,
   theme: Theme,
+  stripedCell?: number,
+  wildCell?: number,
 ): void {
-  for (const [dr, ds] of piece.cells) {
-    drawBlock(ctx, cellGeometry(layout, r + dr, s + ds), colourId, theme, 0.45);
-  }
+  // Every cell, not just the block colour: a striped or wild piece snapped
+  // onto the board used to preview as a plain block, so the one thing worth
+  // knowing before committing — which piece this actually is — was the one
+  // thing the preview hid. Same per-cell logic drawPiece() already uses for
+  // the piece riding above the thumb, so the two views of the same drag never
+  // disagree about what it is.
+  piece.cells.forEach(([dr, ds], i) => {
+    drawBlock(
+      ctx,
+      cellGeometry(layout, r + dr, s + ds),
+      i === wildCell ? WILD : colourId,
+      theme,
+      0.45,
+      false,
+      i === stripedCell,
+    );
+  });
 }
 
 export function paintBackdrop(
