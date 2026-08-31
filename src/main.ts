@@ -6,7 +6,7 @@
  * hand-draw those.
  */
 
-import { type GameState, createGame, depthOf, isGameOver } from "./engine/game.js";
+import { type GameState, type TraySlot, createGame, depthOf, isGameOver } from "./engine/game.js";
 import { filledCount, stoneCount } from "./engine/board.js";
 import { coreReady } from "./engine/core.js";
 import { chooseMove } from "./engine/bot.js";
@@ -125,9 +125,6 @@ interface DailyResult {
 
 const ICON_QUIT =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
-/** Three podium bars. A trophy or a star reads as mud at 21 pixels; this does not. */
-const ICON_LEADERBOARD =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V13h5v8M9.5 21V4h5v17M15 21v-6h5v6M2.5 21h19" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const ICON_RESTART =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-2.49-6.01" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M20.5 2.5v5.5H15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -653,6 +650,24 @@ function showMenu(): void {
     button.addEventListener("click", go);
     chases.append(button);
   }
+
+  // A labelled pill, not the small corner icon this used to be — the icon was
+  // easy to miss entirely, and "is it there or not" is exactly the question a
+  // player asking where Game Center went needs answered without doubt. Only
+  // when there is a native side to open: a button that does nothing is worse
+  // than no button, so the browser build simply never shows one.
+  if (gameCenterAvailable()) {
+    const boards = el("button", "pill wide", t("leaderboard"));
+    boards.dataset.action = "leaderboard";
+    // Game Center refuses to show anything to a signed-out player, and a tap
+    // that does nothing at all is the thing this button was supposed to avoid.
+    boards.addEventListener("click", () => {
+      void showLeaderboard().then((shown) => {
+        if (!shown) notice(t("gameCenter"), t("gameCenterSignedOut"));
+      });
+    });
+    chases.append(boards);
+  }
   orient.append(chases);
   node.append(orient);
 
@@ -757,29 +772,6 @@ function showMenu(): void {
   help.addEventListener("click", showHowTo);
   langs.append(help);
   node.append(langs);
-
-  // Only when there is a native side to open. A button that does nothing is
-  // worse than no button, so the browser build simply never shows one.
-  //
-  // In the corner rather than down among the language pills: this is the way
-  // in to the leaderboards, not a setting, and it has to be findable without
-  // reading the whole menu.
-  if (gameCenterAvailable()) {
-    const hud = el("div", "hud menu-hud");
-    const boards = el("button", "icon");
-    boards.innerHTML = ICON_LEADERBOARD;
-    boards.dataset.action = "leaderboard";
-    boards.setAttribute("aria-label", t("leaderboard"));
-    // Game Center refuses to show anything to a signed-out player, and a tap
-    // that does nothing at all is the thing this button was supposed to avoid.
-    boards.addEventListener("click", () => {
-      void showLeaderboard().then((shown) => {
-        if (!shown) notice(t("gameCenter"), t("gameCenterSignedOut"));
-      });
-    });
-    hud.append(boards);
-    node.append(hud);
-  }
 
   // The column knows how tall it turned out; the disc does not. So the column
   // measures itself and the disc takes what is left, rather than being sized
@@ -1843,6 +1835,45 @@ if (import.meta.env.DEV) {
       return jammed;
     },
 
+    /** Sets the core's charge directly, for testing the stuck-but-not-over rescue. */
+    primeCore: (charge?: number) => {
+      const current = screen?.getState();
+      if (!current || !screen) return null;
+      const next: GameState = {
+        ...current,
+        charge: charge ?? current.core.capacity,
+        over: isGameOver(
+          current.board,
+          current.tray,
+          current.spins,
+          current.pushes,
+          current.core,
+          charge ?? current.core.capacity,
+        ),
+      };
+      screen.replaceState(next);
+      return next;
+    },
+
+    /**
+     * An empty board with a known striped piece in slot 0, for testing that a
+     * drag actually shows the striped marker — the ghost preview used to
+     * silently drop it.
+     */
+    primeStripedDrag: () => {
+      const current = screen?.getState();
+      if (!current || !screen) return null;
+      const board = { spec: current.spec, cells: new Uint8Array(current.board.cells.length) };
+      const tray: (TraySlot | null)[] = [
+        { pieceId: "wedge3", colour: 1, striped: 1 },
+        null,
+        null,
+      ];
+      const primed: GameState = { ...current, board, tray };
+      screen.replaceState(primed);
+      return primed;
+    },
+
     /**
      * Sets the disc one cell short of a bullseye, with a single-cell piece in
      * the tray, so the burst and the sweep can be captured without playing a
@@ -1879,6 +1910,7 @@ if (import.meta.env.DEV) {
     dragLift: () => screen?.dragLift() ?? null,
     /** How far the finger must move before a lifted piece starts following it. */
     dragSlop: () => screen?.dragSlop() ?? null,
+    dragDebug: () => screen?.dragDebug() ?? null,
     /** A tray slot's on-screen box, for tests driving real pixel coordinates. */
     slotBox: (i: number) => screen?.slotBox(i) ?? null,
     /** Cycles the sensitivity setting, same as the menu pill. */

@@ -1469,6 +1469,81 @@ await shot("12-game-center");
   await page.waitForTimeout(200);
 }
 
+// --- a striped piece keeps its marker while it is being dragged ------------
+// The ghost preview used to draw every piece as a plain block once it found a
+// legal home — the one thing worth knowing before committing (that this is
+// the striped piece, not a plain one) was the one thing it dropped. Measured
+// directly: the piece's own material is the same "wedge" shape used
+// elsewhere, cell index 1 of "wedge3" is [dr,ds]=[1,0], so once a target is
+// found the striped cell sits at (target.r+1, target.s).
+{
+  await page.evaluate(() => window.__shiftle.start("endless"));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => window.__shiftle.primeStripedDrag());
+  await page.waitForTimeout(150);
+
+  const layout = await page.evaluate(() => window.__shiftle.layout());
+  const slotBox = await page.evaluate(() => window.__shiftle.slotBox(0));
+  const from = { x: slotBox.x + slotBox.width / 2, y: slotBox.y + slotBox.height / 2 };
+
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 2, from.y - 2);
+  await page.waitForTimeout(40);
+  // Straight up onto the board — an empty disc, so anywhere on it is legal.
+  await page.mouse.move(from.x, layout.boardCy);
+  await page.waitForTimeout(120);
+
+  const debug = await page.evaluate(() => window.__shiftle.dragDebug());
+  check("a target is found for the striped drag", debug?.hasTarget === true, JSON.stringify(debug));
+
+  if (debug?.hasTarget) {
+    const brightness = await page.evaluate(
+      async ({ r, s, dpr }) => {
+        const canvasModule = await import("/src/render/canvas.ts");
+        const layout = window.__shiftle.layout();
+        const spec = window.__shiftle.state().spec;
+        const board = canvasModule.computeLayout(
+          spec,
+          window.innerWidth / 2,
+          layout.boardCy,
+          layout.boardRadius,
+        );
+        const g = canvasModule.cellGeometry(board, r, s);
+        const midR = (g.innerRadius + g.outerRadius) / 2;
+        const midA = (g.startAngle + g.endAngle) / 2;
+        const x = Math.round((g.cx + midR * Math.cos(midA)) * dpr);
+        const y = Math.round((g.cy + midR * Math.sin(midA)) * dpr);
+        const canvas = document.querySelector("canvas");
+        const ctx = canvas.getContext("2d");
+        const size = 14;
+        const data = ctx.getImageData(x - size / 2, y - size / 2, size, size).data;
+        let max = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          max = Math.max(max, (data[i] + data[i + 1] + data[i + 2]) / 3);
+        }
+        return max;
+      },
+      { r: debug.targetR + 1, s: debug.targetS, dpr: 2 },
+    );
+    // The striped marker is white at 0.92 alpha over the block's own colour —
+    // bright enough that its brightest pixel sits well above 220/255 even
+    // blended at the ghost's 45% preview alpha. A plain block's brightest
+    // point (a bevel highlight) does not reach that.
+    check(
+      "and the striped marker is actually visible in the ghost preview",
+      brightness > 200,
+      `brightest pixel ${brightness.toFixed(0)}/255 at the striped cell`,
+    );
+  }
+
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.__shiftle.start("endless"));
+  await page.waitForTimeout(200);
+}
+
 await browser.close();
 await server.close();
 

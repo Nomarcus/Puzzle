@@ -873,6 +873,32 @@ export class GameScreen {
     return this.layout.slots[i] ?? null;
   }
 
+  /** The live drag pointer's state, for tests diagnosing what is actually rendered. */
+  dragDebug(): {
+    aiming: boolean;
+    hasTarget: boolean;
+    x: number;
+    y: number;
+    targetR: number | null;
+    targetS: number | null;
+    slot: number;
+    striped: number | null | undefined;
+    wild: number | null | undefined;
+  } | null {
+    if (this.pointer.kind !== "drag") return null;
+    return {
+      aiming: this.pointer.aiming,
+      hasTarget: this.pointer.target !== null,
+      x: this.pointer.x,
+      y: this.pointer.y,
+      targetR: this.pointer.target?.r ?? null,
+      targetS: this.pointer.target?.s ?? null,
+      slot: this.pointer.slot,
+      striped: this.state.tray[this.pointer.slot]?.striped,
+      wild: this.state.tray[this.pointer.slot]?.wild,
+    };
+  }
+
   // -------------------------------------------------------------- committing
 
   private commit(move: Move, target: Cell | null, piece: Piece | null): void {
@@ -1163,12 +1189,18 @@ export class GameScreen {
    * The rescue prompt. Nothing fits but spins remain — this is the moment the
    * whole game is built around, so it gets said plainly rather than left for
    * the player to work out from pieces that refuse to move.
+   *
+   * A charged core rescues a stuck board exactly the way a spin or a push
+   * does (see isGameOver in engine/game.ts), so it gets the same prompt —
+   * otherwise a player stuck with nothing but a full core would have no idea
+   * the round was not simply about to end.
    */
   private drawStuckHint(ctx: CanvasRenderingContext2D): void {
     if (!this.stuck || this.diedAt) return;
-    if (this.state.spins <= 0 && this.state.pushes <= 0) return;
+    if (this.state.spins <= 0 && this.state.pushes <= 0 && !this.coreReadyNow()) return;
 
-    const text = this.state.spins > 0 ? t("stuckHint") : t("stuckPush");
+    const text =
+      this.state.spins > 0 ? t("stuckHint") : this.state.pushes > 0 ? t("stuckPush") : t("stuckCore");
     const y = this.layout.trayTop - 26;
     const pulse = 1 + Math.sin(performance.now() / 260) * 0.03;
 
@@ -1534,8 +1566,19 @@ export class GameScreen {
 
     if (target) {
       // Over a legal home: snap the piece into the board so the player sees
-      // exactly what they are about to get.
-      drawGhost(ctx, board, piece, target.r, target.s, colour, this.theme);
+      // exactly what they are about to get — a striped or wild cell included,
+      // not just the block colour.
+      drawGhost(
+        ctx,
+        board,
+        piece,
+        target.r,
+        target.s,
+        colour,
+        this.theme,
+        this.state.tray[slot]?.striped,
+        this.state.tray[slot]?.wild,
+      );
       return;
     }
 

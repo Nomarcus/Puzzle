@@ -215,6 +215,7 @@ const TABLE = {
 
   stuckHint: { sv: "Inget passar — snurra en ring", en: "Nothing fits — spin a ring" },
   stuckPush: { sv: "Inget passar — skjut en eke", en: "Nothing fits — push a spoke" },
+  stuckCore: { sv: "Inget passar — avfyra kärnan", en: "Nothing fits — fire the core" },
   stuckOver: { sv: "Inget passar längre", en: "Nothing fits any more" },
   bullseye: { sv: "FULLTRÄFF!", en: "BULLSEYE!" },
   pure: { sv: "ENFÄRGAT!", en: "ALL ONE COLOUR!" },
