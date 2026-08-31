@@ -412,15 +412,34 @@ export function levelSeed(level: Level): number {
  */
 const vettedSeeds = new Map<number, number>();
 
-/** A deal the bot cannot get this far through is not the same puzzle for everyone. */
-const MIN_BUDGET_FRACTION = 0.75;
 const MAX_SEED_ATTEMPTS = 8;
+
+/**
+ * Ranks two vetting attempts. A seed the bot actually wins on always beats
+ * one it does not, regardless of how many pieces either spent; among two
+ * seeds with the same win/lose outcome, more goal progress is better, then
+ * more pieces placed.
+ *
+ * This is the whole fix for a real bug: the old version only asked whether
+ * the bot avoided dying early, never whether the goal was reachable at all.
+ * Level 7 shipped on a seed where the weak bot spent its entire budget and
+ * still fell two stripes short — "not stuck" and "winnable" are different
+ * questions, and only the first one was ever being asked.
+ */
+function better(
+  a: { placed: number; met: boolean; done: number },
+  b: { placed: number; met: boolean; done: number },
+): boolean {
+  if (a.met !== b.met) return a.met;
+  if (a.done !== b.done) return a.done > b.done;
+  return a.placed > b.placed;
+}
 
 function vetLevelSeed(level: Level): number {
   const base = hashSeed(`shiftle:level:${level.number}`);
   const spec = sizeById(level.size).spec;
   let seed = base;
-  let best = { seed: base, placed: -1 };
+  let best = { seed: base, placed: -1, met: false, done: -1 };
 
   for (let attempt = 0; attempt < MAX_SEED_ATTEMPTS; attempt++) {
     const result = playOut(
@@ -437,8 +456,14 @@ function vetLevelSeed(level: Level): number {
       BOT_POLICY_LEVELS,
     );
     const placed = result.state.stats.piecesPlaced;
-    if (placed > best.placed) best = { seed, placed };
-    if (placed >= level.budget * MIN_BUDGET_FRACTION) break;
+    const progress = goalProgress(level.goal, result.state);
+    const candidate = { seed, placed, met: progress.met, done: progress.done };
+    if (better(candidate, best)) best = candidate;
+    // Once a seed is actually winnable there is nothing left worth searching
+    // for. Otherwise keep trying up to the attempt limit — stopping early
+    // just because a seed avoided dying, the old behaviour, is exactly what
+    // let an unwinnable-but-not-stuck seed through.
+    if (candidate.met) break;
     seed = hashSeed(`shiftle:level:reseed:${level.number}:${attempt}`);
   }
 

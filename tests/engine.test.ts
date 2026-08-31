@@ -414,6 +414,22 @@ describe("game reducer", () => {
     expect(isGameOver(board, [{ pieceId: "brick33", colour: 1 }], 0)).toBe(false);
   });
 
+  it("keeps playing on a stuck board while the core is charged, the same as a spin or a push", () => {
+    // A stuck player used to be told the round was over even sitting on a
+    // fully charged core — firing it clears the whole disc and is exactly as
+    // valid a way out as a spin or a push, so it has to count the same way.
+    const board = boardWithHoles([]);
+    const tray = [{ pieceId: "dot", colour: 1 }];
+    expect(isGameOver(board, tray, 0, 0, DEFAULT_CORE, DEFAULT_CORE.capacity)).toBe(false);
+    // Under capacity, it is over exactly like before.
+    expect(isGameOver(board, tray, 0, 0, DEFAULT_CORE, DEFAULT_CORE.capacity - 1)).toBe(true);
+    // A level with the core turned off must not be rescued by a stray charge.
+    expect(isGameOver(board, tray, 0, 0, { ...DEFAULT_CORE, capacity: 0 }, 999)).toBe(true);
+    // Omitting core/charge is untouched — every existing caller that never
+    // passes them keeps its old behaviour exactly.
+    expect(isGameOver(board, tray, 0)).toBe(true);
+  });
+
   it("replays a move log to exactly the same state", () => {
     let state = createGame({ seed: 99, mode: "daily" });
     const log: Move[] = [];
@@ -1070,6 +1086,26 @@ describe("levels", () => {
     expect(goalProgress({ kind: "combo", target: 4 }, state).met).toBe(true);
   });
 
+  it("vets a shipped seed the bot can actually win, not just survive", () => {
+    // Level 7 (stripes, target 5) shipped on a seed where the bot spent its
+    // whole 34-piece budget and still fell short at 3 — a real report of
+    // getting stuck there matched exactly. The seed search only ever checked
+    // "did the bot avoid dying early", never "can the goal be reached at
+    // all", so an unwinnable-but-not-stuck seed sailed straight through.
+    const level = LEVELS.find((l) => l.number === 7)!;
+    const state = createGame({
+      seed: levelSeed(level),
+      mode: "level",
+      spec: sizeById(level.size).spec,
+      pack: level.pack,
+      board: levelBoard(level),
+      core: levelCore(level),
+      rules: { ...level.rules, pieceLimit: level.budget },
+    });
+    const result = playOut(state, level.budget * 4, BOT_POLICY_LEVELS);
+    expect(goalProgress(level.goal, result.state).met).toBe(true);
+  });
+
   it("every level is playable to the end of its budget", () => {
     // Not "winnable" — that is what the measurement tool is for, and some
     // goals need planning the bot does not do. This is the weaker claim that
@@ -1205,6 +1241,13 @@ describe("the free play ramp", () => {
   it("ends a round that would otherwise run forever", () => {
     // The measurement in one assertion. Free play on curves finished 0 of 20
     // bot rounds inside 4,000 pieces before the ramp existed.
+    //
+    // BOT_POLICY_V2, not the default V1: V1 never fires the core at all (that
+    // is specifically so core-vetting the daily is unaffected by the core
+    // existing), and a stuck board with a charged core is correctly no longer
+    // "over" — a real player would fire it and keep going, so a bot that
+    // structurally never can is not a fair stand-in for one. It sat at a
+    // ready core, unused, for the rest of the turn budget every time.
     for (const pack of ["curves", "mixed"] as const) {
       const game = createGame({
         seed: hashSeed(`ramp-test:${pack}`),
@@ -1213,7 +1256,7 @@ describe("the free play ramp", () => {
         pack,
         ramp: FREE_PLAY_RAMP,
       });
-      const result = playOut(game, 3000);
+      const result = playOut(game, 3000, BOT_POLICY_V2);
       expect(result.state.over, `${pack} never ended`).toBe(true);
       expect(result.state.stats.piecesPlaced, `${pack} ended too early`).toBeGreaterThan(40);
     }

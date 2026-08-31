@@ -421,13 +421,25 @@ export function slotPiece(slot: TraySlot | null): Piece | null {
  * must also be out of spins. That is what turns spins into lives and makes a
  * doomed board survivable — if you can see the rescue.
  */
+/**
+ * `core`/`charge` are optional: every existing caller that only cares about
+ * spins and pushes keeps working unchanged, and a level with the core turned
+ * off (`capacity: 0`) never has `coreReady` return true regardless.
+ *
+ * A charged core is a move exactly the way a spin or a push is one — it can
+ * open the board back up — so a stuck board with nothing left to place still
+ * is not over while it sits there unfired.
+ */
 export function isGameOver(
   board: Board,
   tray: readonly (TraySlot | null)[],
   spins: number,
   pushes = 0,
+  core?: CoreSpec,
+  charge = 0,
 ): boolean {
   if (spins > 0 || pushes > 0) return false;
+  if (core && coreReady(core, charge)) return false;
   for (const slot of tray) {
     const piece = slotPiece(slot);
     if (piece && hasPlacement(board, piece)) return false;
@@ -678,7 +690,7 @@ function applyPlace(
   }
 
   const outOfPieces = rules.pieceLimit > 0 && piecesPlaced >= rules.pieceLimit;
-  const over = outOfPieces || isGameOver(board, nextTray, spins, pushes);
+  const over = outOfPieces || isGameOver(board, nextTray, spins, pushes, state.core, charge);
 
   const stats: GameStats = {
     ...state.stats,
@@ -776,7 +788,7 @@ function applySpin(state: GameState, move: Extract<Move, { type: "spin" }>): Mov
     bestClear: Math.max(state.stats.bestClear, gained),
   };
 
-  const over = isGameOver(board, state.tray, spins, pushes);
+  const over = isGameOver(board, state.tray, spins, pushes, state.core, charge);
 
   return {
     state: {
@@ -861,7 +873,7 @@ function applyPush(state: GameState, move: Extract<Move, { type: "push" }>): Mov
     bestClear: Math.max(state.stats.bestClear, gained),
   };
 
-  const over = isGameOver(board, state.tray, spins, pushes);
+  const over = isGameOver(board, state.tray, spins, pushes, state.core, charge);
 
   return {
     state: {
