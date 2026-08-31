@@ -2380,9 +2380,11 @@ describe("the save record", () => {
 });
 
 describe("mastery goals", () => {
+  const NOTHING_DISCOVERED = new Set<string>();
+
   it("offers three different kinds every round, for ever", () => {
     for (let round = 0; round < 200; round++) {
-      const three = offered(round);
+      const three = offered(round, NOTHING_DISCOVERED);
       expect(three).toHaveLength(3);
       expect(new Set(three.map((g) => g.id)).size).toBe(3);
       for (const goal of three) expect(goalById(goal.id)).toBe(goal);
@@ -2391,8 +2393,47 @@ describe("mastery goals", () => {
 
   it("is deterministic, so the same round always offers the same three", () => {
     for (const round of [0, 3, 17, 99]) {
-      expect(offered(round).map((g) => g.id)).toEqual(offered(round).map((g) => g.id));
+      expect(offered(round, NOTHING_DISCOVERED).map((g) => g.id)).toEqual(
+        offered(round, NOTHING_DISCOVERED).map((g) => g.id),
+      );
     }
+  });
+
+  it("never offers a world goal for a world nobody has discovered", () => {
+    for (let round = 0; round < 200; round++) {
+      for (const goal of offered(round, NOTHING_DISCOVERED)) {
+        expect(goal.id.startsWith("world-")).toBe(false);
+      }
+    }
+  });
+
+  it("has no goal for Candy — everyone is already standing on it", () => {
+    expect(GOALS.some((g) => g.id === "world-candy")).toBe(false);
+  });
+
+  it("offers a world goal once, and only once, its world is discovered", () => {
+    // A round where the hash lands on "world" needs a discovered world to
+    // find — this searches for one rather than assuming a specific round
+    // number, so it survives the pool or the hash shape changing later.
+    const oneWorld = new Set(["ocean"]);
+    let sawWorldGoal = false;
+    for (let round = 0; round < 300; round++) {
+      for (const goal of offered(round, oneWorld)) {
+        if (!goal.id.startsWith("world-")) continue;
+        expect(goal.id).toBe("world-ocean");
+        sawWorldGoal = true;
+      }
+    }
+    expect(sawWorldGoal).toBe(true);
+  });
+
+  it("reads a world goal as met once the round's depth reaches that world, not before", () => {
+    const goal = goalById("world-ocean")!;
+    const oceanFrom = WORLDS.find((w) => w.id === "ocean")!.from;
+    const zeroStats = { ringsCleared: 0, spokesCleared: 0, bestCombo: 0, coresFired: 0, stripesFired: 0, pureClears: 0 };
+    expect(goal.read(tallyOf("endless", 0, oceanFrom - 1, zeroStats))).toBe(0);
+    expect(goal.read(tallyOf("endless", 0, oceanFrom, zeroStats))).toBe(1);
+    expect(goal.read(tallyOf("endless", 0, oceanFrom + 50, zeroStats))).toBe(1);
   });
 
   it("never asks for depth outside free play, the only mode that ramps", () => {

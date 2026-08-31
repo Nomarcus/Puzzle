@@ -980,7 +980,7 @@ function showGoals(): void {
   node.append(el("div", "confirm-body", t("progressBonus")));
 
   const active = goalById(save.mastery.activeId);
-  for (const goal of offered(save.mastery.round)) {
+  for (const goal of offered(save.mastery.round, new Set(Object.keys(save.worlds)))) {
     const picked = active?.id === goal.id;
     const button = el("button", `big ${picked ? "warm" : "alt"}`, masteryGoalText(goal));
     button.dataset.action = `goal-${goal.id}`;
@@ -1746,6 +1746,20 @@ if (import.meta.env.DEV) {
 
     /** Where the menu's disc ended up, for the browser tests. */
     menuDisc: () => menu?.discBox() ?? null,
+
+    /**
+     * Marks a world discovered and forces the mastery round, for the browser
+     * tests — the only way to reach a "world" goal on the Goals screen without
+     * actually playing to that depth.
+     */
+    discoverWorld: (worldId: string, depth: number) => {
+      storeSave(discoverWorld(save, worldId, depth).save);
+      return true;
+    },
+    setMasteryRound: (round: number) => {
+      storeSave({ ...save, mastery: { ...save.mastery, round, activeId: null, progress: 0 } });
+      return true;
+    },
 
     /** The core, for the browser tests. */
     charge: () => screen?.getState()?.charge ?? 0,

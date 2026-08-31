@@ -122,7 +122,14 @@ export function secondaryGoal(
 }
 
 export function goalText(goal: Goal): string {
-  return t(goal.text as Parameters<typeof t>[0]).replace("%n", String(goal.target));
+  const text = t(goal.text as Parameters<typeof t>[0]).replace("%n", String(goal.target));
+  // World goals carry no number worth showing (the target is always "you got
+  // there once") — their id names the world instead, and the world's own
+  // label is the one place that name lives, so it is looked up here rather
+  // than duplicated onto the goal itself.
+  if (!goal.id.startsWith("world-")) return text;
+  const world = WORLDS.find((w) => w.id === goal.id.slice(6));
+  return text.replace("%s", world?.label ?? "");
 }
 
 // ------------------------------------------------------------- result lines

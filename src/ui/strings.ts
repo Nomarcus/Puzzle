@@ -59,6 +59,7 @@ const TABLE = {
   goalCoreCount: { sv: "Avfyra kärnan %n gånger", en: "Fire the core %n times" },
   goalStripeCount: { sv: "Utlös %n randiga block", en: "Set off %n striped blocks" },
   goalPureCount: { sv: "Gör %n enfärgade rensningar", en: "Make %n single-colour clears" },
+  goalWorld: { sv: "Nå %s", en: "Reach %s" },
   passport: { sv: "Världspass", en: "World Passport" },
   undiscovered: { sv: "Oupptäckt", en: "Undiscovered" },
   bestDepthIn: { sv: "Bästa djup", en: "Best depth" },

@@ -172,6 +172,31 @@ await page.waitForTimeout(150);
   await page.waitForTimeout(150);
 }
 
+// --- a world goal names the world, once one has actually been found --------
+// offered() only ever shows this kind once a world is in the save — round 5
+// is the first round the deterministic hash offers one for Toy Box, found by
+// searching offered() directly rather than guessed.
+{
+  await page.evaluate(() => {
+    window.__shiftle.discoverWorld("toybox", 6);
+    window.__shiftle.setMasteryRound(5);
+  });
+  await page.locator('[data-action="goals"]').click();
+  await page.waitForTimeout(200);
+  const texts = await page.locator('[data-action^="goal-"]').allTextContents();
+  const worldGoal = texts.find((t) => t.includes("Toy Box"));
+  check(
+    "a discovered world's goal names it, not a bare %s",
+    worldGoal !== undefined && !worldGoal.includes("%s"),
+    JSON.stringify(texts),
+  );
+  await shot("20b-goals-world");
+  await page.locator('.levels [data-action="menu"]').click();
+  await page.waitForTimeout(150);
+  // Back to a clean slate — later tests assume no goal picked and round 0.
+  await page.evaluate(() => window.__shiftle.setMasteryRound(0));
+}
+
 // --- how to play: nine steps are taller than a phone ------------------------
 // This screen reused .overlay.result, which centres its content with no
 // scrolling — fine for a short result card, but nine steps plus a title and a

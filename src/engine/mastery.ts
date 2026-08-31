@@ -34,6 +34,7 @@
  */
 
 import type { ModeId, ModeRecords, Save } from "./save.js";
+import { WORLDS } from "../render/world.js";
 
 /** Lifetime points for finishing a goal. Progression only — never a score. */
 export const MASTERY_BONUS = 5_000;
@@ -132,6 +133,24 @@ function pool(): Goal[] {
       read: (t) => t.pureClears,
     });
   }
+
+  // A world already discovered, offered back as somewhere to go, not as
+  // "discover it" — depth already does that on its own, and turning what
+  // already happened automatically into a goal is not a choice. Candy is
+  // excluded: everyone is standing on it from the first piece placed, so
+  // reaching it is not a goal either. `offered()` only ever shows one of
+  // these for a world already in the player's own save.
+  for (const world of WORLDS) {
+    if (world.from === 0) continue;
+    goals.push({
+      id: `world-${world.id}`,
+      text: "goalWorld",
+      target: 1,
+      modes: DEEP,
+      read: (t) => (t.depth >= world.from ? 1 : 0),
+    });
+  }
+
   return goals;
 }
 
@@ -155,27 +174,41 @@ function hash(a: number, b: number): number {
  * Picked without replacement so the player never sees the same goal twice in one
  * trio, and spread across kinds so the choice is a real one — three flavours of
  * "clear more rings" is not a choice, it is a number to agree with.
+ *
+ * `discoveredWorldIds` gates the "world" kind: a world goal only exists to be
+ * offered once the player has actually been there, so on a save with nothing
+ * discovered yet the family is empty and the other kinds fill all three slots,
+ * exactly as they did before this kind existed.
  */
-export function offered(round: number): Goal[] {
-  const kinds = ["depth", "rings", "combo", "core", "stripe", "pure"];
+export function offered(round: number, discoveredWorldIds: ReadonlySet<string>): Goal[] {
+  const kinds = ["depth", "rings", "combo", "core", "stripe", "pure", "world"];
   const chosen: Goal[] = [];
   const usedKinds = new Set<string>();
+
+  const familyOf = (kind: string): Goal[] =>
+    kind === "world"
+      ? GOALS.filter((g) => g.id.startsWith("world-") && discoveredWorldIds.has(g.id.slice(6)))
+      : GOALS.filter((g) => g.id.startsWith(`${kind}-`));
 
   for (let slot = 0; chosen.length < 3 && slot < 24; slot++) {
     const kind = kinds[Math.floor(hash(round + 1, slot + 1) * kinds.length) % kinds.length]!;
     if (usedKinds.has(kind)) continue;
-    const family = GOALS.filter((g) => g.id.startsWith(`${kind}-`));
+    const family = familyOf(kind);
     if (family.length === 0) continue;
     const pick = family[Math.floor(hash(slot + 7, round + 3) * family.length) % family.length]!;
     usedKinds.add(kind);
     chosen.push(pick);
   }
 
-  // A hash can, in principle, keep landing on kinds already used. Topping up in
-  // order is not elegant, but three goals that exist beat an empty screen.
+  // A hash can, in principle, keep landing on kinds already used or on "world"
+  // with nothing discovered yet. Topping up in order is not elegant, but three
+  // goals that exist beat an empty screen — skipping any undiscovered-world
+  // goal here too, for the same reason the loop above does.
   for (const goal of GOALS) {
     if (chosen.length >= 3) break;
-    if (!chosen.some((g) => g.id === goal.id)) chosen.push(goal);
+    if (chosen.some((g) => g.id === goal.id)) continue;
+    if (goal.id.startsWith("world-") && !discoveredWorldIds.has(goal.id.slice(6))) continue;
+    chosen.push(goal);
   }
   return chosen.slice(0, 3);
 }
