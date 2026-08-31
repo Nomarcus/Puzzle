@@ -5,11 +5,12 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
-        guard let windowScene = scene as? UIWindowScene else { return }
+        guard scene is UIWindowScene else { return }
 
-        window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = CAPBridgeViewController()
-        window?.makeKeyAndVisible()
+        // Main.storyboard owns this window and creates MainViewController.
+        // Do not replace it with a bare CAPBridgeViewController: doing so
+        // bypasses MainViewController.capacitorDidLoad(), so app-local plugins
+        // such as GameConnect are never registered with the native bridge.
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }

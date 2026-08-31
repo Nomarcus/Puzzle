@@ -153,6 +153,21 @@ if (registrars.length > 0) {
     module === "App",
     `customModule=${module}`,
   );
+
+  // A scene delegate can silently undo a correct storyboard by replacing its
+  // root controller at runtime. That is exactly what made GameConnect absent
+  // in signed builds even though every registration and entitlement check
+  // above passed: Main.storyboard named MainViewController, then SceneDelegate
+  // discarded it and installed a bare CAPBridgeViewController instead.
+  const sceneDelegate = sources.find(({ file }) => file === "SceneDelegate.swift")?.text ?? "";
+  const replacesWithBareBridge = /rootViewController\s*=\s*CAPBridgeViewController\s*\(/.test(sceneDelegate);
+  check(
+    "the scene delegate does not bypass the plugin-registering view controller",
+    !replacesWithBareBridge,
+    replacesWithBareBridge
+      ? "it replaces the storyboard root with CAPBridgeViewController"
+      : "storyboard root remains in use",
+  );
 }
 
 // --- entitlements reach both configurations --------------------------------
