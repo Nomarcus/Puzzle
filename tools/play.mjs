@@ -172,6 +172,44 @@ await page.waitForTimeout(150);
   await page.waitForTimeout(150);
 }
 
+// --- how to play: nine steps are taller than a phone ------------------------
+// This screen reused .overlay.result, which centres its content with no
+// scrolling — fine for a short result card, but nine steps plus a title and a
+// button ran off the bottom of the screen with no way to reach the rest.
+{
+  await page.locator('[data-action="how"]').click();
+  await page.waitForTimeout(250);
+  const metrics = await page.evaluate(() => {
+    const el = document.querySelector(".overlay.how-screen");
+    if (!el) return null;
+    const style = getComputedStyle(el);
+    return { overflowY: style.overflowY, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
+  });
+  check("the how-to-play screen is present and scrollable", metrics?.overflowY === "auto", JSON.stringify(metrics));
+  check(
+    "and its content is actually taller than the screen (the bug this guards)",
+    (metrics?.scrollHeight ?? 0) > (metrics?.clientHeight ?? 0),
+    JSON.stringify(metrics),
+  );
+  await shot("24-how-to-play");
+
+  // The close button has to be reachable by scrolling, not just present in the
+  // DOM — that is the actual bug, not merely whether overflow is set.
+  const reached = await page.evaluate(() => {
+    const el = document.querySelector(".overlay.how-screen");
+    if (!el) return false;
+    el.scrollTop = el.scrollHeight;
+    const button = el.querySelector("button");
+    if (!button) return false;
+    const box = button.getBoundingClientRect();
+    return box.top >= 0 && box.bottom <= window.innerHeight;
+  });
+  check("scrolling to the bottom brings \"Got it\" fully into view", reached === true);
+
+  await page.locator(".overlay.how-screen button").click();
+  await page.waitForTimeout(200);
+}
+
 // --- start a free game -----------------------------------------------------
 // Selected by data-action, not by label — the UI ships in two languages.
 await page.locator('[data-action="endless"]').click();
@@ -742,6 +780,12 @@ const ended = await page.evaluate(async () => {
 });
 check("running out of time ends the round", ended.ranOut === true);
 check("and the result says time, not game over", ended.title === "Time!" || ended.title === "Tiden är ute!", ended.title);
+
+// resultProgress() draws its own "play again" button; the time result screen
+// used to also draw a second, older one by hand, so the card showed two.
+const replayButtons = await page.locator('[data-action="replay"], [data-action="again"]').count();
+check("the time result shows exactly one play-again button", replayButtons === 1, `${replayButtons} found`);
+await shot("22-time-result");
 
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);

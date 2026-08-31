@@ -753,6 +753,7 @@ function showMenu(): void {
   }
 
   const help = el("button", "pill wide", t("how"));
+  help.dataset.action = "how";
   help.addEventListener("click", showHowTo);
   langs.append(help);
   node.append(langs);
@@ -1071,7 +1072,7 @@ function showSetup(): void {
 }
 
 function showHowTo(): void {
-  const node = overlay("result");
+  const node = overlay("result how-screen");
   node.append(el("div", "how-title", t("howTitle")));
 
   const steps = el("div", "how");
@@ -1221,11 +1222,6 @@ function showTimeResult(state: GameState): void {
 
   resultProgress(node, timeOutcome, startTimeAttack);
   celebrate(timeOutcome, earnedByTime.length > 0);
-
-  const again = el("button", "big hot", t("again"));
-  again.dataset.action = "again";
-  again.addEventListener("click", startTimeAttack);
-  node.append(again);
 
   if (gameCenterAvailable()) {
     const boards = el("button", "big alt", t("leaderboard"));

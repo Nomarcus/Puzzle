@@ -78,6 +78,26 @@
       }
 
       /*
+       * Nine steps plus a title and a button are taller than a phone, and this
+       * screen had no scroll at all — the same clipping the level grid already
+       * fixed below, just never applied here. Anchored to the top rather than
+       * centred, same reason: a centred column that overflows crops equally at
+       * both ends, which is what put "Got it" half off the bottom of the
+       * screen instead of scrolling to it.
+       */
+      .overlay.how-screen {
+        justify-content: flex-start;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        padding-top: calc(var(--safe-top) + 24px);
+      }
+
+      .overlay.how-screen > * {
+        flex-shrink: 0;
+      }
+
+      /*
        * Twenty tiles are taller than a phone, so this one scrolls. Anchored to
        * the top rather than centred — a centred list that overflows crops
        * equally at both ends, which put the first tiles under the status bar.

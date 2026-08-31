@@ -7,10 +7,16 @@
 //  chain — it is about a hundred lines of GameKit, and owning it means the
 //  build never breaks because somebody else's plugin stopped being maintained.
 //
-//  Capacitor finds this class through the Objective-C runtime, so there is no
-//  registration step. The web side (src/platform/gamecenter.ts) resolves it off
-//  Capacitor.Plugins.GameConnect and no-ops when it is not there, which is what
-//  keeps the browser build running.
+//  Capacitor does NOT find this class on its own — an app-local plugin like
+//  this one is invisible to it unless something explicitly registers an
+//  instance. That registration lives in MainViewController.swift's
+//  capacitorDidLoad(), via bridge?.registerPluginInstance(gameConnectPlugin).
+//  Skip that step and every call from the web side silently does nothing, no
+//  error anywhere — this is exactly the bug that shipped in build 12 and is
+//  now covered by tools/verify-ios.mjs. The web side
+//  (src/platform/gamecenter.ts) resolves this plugin off Capacitor's plugin
+//  registry and no-ops when it is not there, which is what keeps the browser
+//  build running.
 //
 
 import Capacitor
