@@ -15,8 +15,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { BAR, MusicPlayer, planBar, scheduleBar } from "../src/platform/music.js";
-import type { Bus } from "../src/platform/audio.js";
+import { BAR, MIX, MusicPlayer, flutter, planBar, scheduleBar } from "../src/platform/music.js";
+import { type Bus, note } from "../src/platform/audio.js";
 
 // --------------------------------------------------------------- a fake ctx
 
@@ -54,6 +54,11 @@ function fakeAudio(): { ctx: any; bus: Bus; counts: Counts; dest: any } {
       Q: param(),
       frequency: param(),
       gain: param(),
+      // The bed plays its drums through the chip's own `noise()` now, which
+      // steps the playback rate the way the real channel steps its period. A
+      // real AudioBufferSourceNode always has this; the double did not, which
+      // is the only thing that had to change here.
+      playbackRate: param(),
       buffer: null,
       setPeriodicWave() {},
       connect(next: any) {
@@ -142,14 +147,17 @@ describe("the music plan", () => {
         .filter((e) => e.layer === "bass")
         .map((e) => e.degree)
         .join(",");
-    // The chord cycle is eight bars long and it moves inside that.
+    // The chord cycle is sixteen bars long and it moves inside that. Bars 0-1
+    // and 8-9 deliberately match, so the octave drift below can be read off
+    // bar 0 against bar 16 without two changes landing at once.
     expect(roots(0)).not.toBe(roots(2));
     expect(roots(0)).toBe(roots(8));
 
     // Over the top of it the octave drifts on a seventeen-bar cycle, which
-    // shares no factor with eight. Bar 16 is the same chord as bar 0, an
-    // octave up — so the two only agree again after 136 bars, five and a half
-    // minutes at 100 BPM.
+    // shares no factor with sixteen. Bar 16 is the same chord as bar 0, an
+    // octave up — so the two only agree again after 16 × 17 = 272 bars, about
+    // eleven minutes at 100 BPM, which is roughly a whole median round rather
+    // than half of one.
     const top = (bar: number) => Math.max(...planBar(bar, 0, 1).filter((e) => e.layer === "arp").map((e) => e.degree));
     expect(top(16) - top(0)).toBe(5);
 
@@ -172,6 +180,133 @@ describe("the music plan", () => {
         expect(shape(start + offset)).not.toBe(base);
       }
     }
+  });
+
+  it("walks more than one melodic shape, which is the whole variation fix", () => {
+    // The bed used to hold a single eight-note figure per world — measured,
+    // four shapes existed in the entire game and all four were rotations of
+    // the same cell, so a whole round was one idea with holes punched in it.
+    // Shapes are read relative to the bar's own root so a chord change does
+    // not count as a new shape; the lift is on so dropouts cannot inflate it.
+    const shapes = new Set<string>();
+    for (let world = 0; world < 10; world++) {
+      for (let bar = 0; bar < 64; bar++) {
+        const events = planBar(bar, world, 1, 1);
+        const root = events.find((e) => e.layer === "bass")!.degree + 5;
+        shapes.add(
+          events
+            .filter((e) => e.layer === "arp")
+            .map((e) => e.degree - root)
+            .join(","),
+        );
+      }
+    }
+    expect(shapes.size).toBeGreaterThan(20);
+  });
+
+  it("moves the bass inside the bar instead of repeating one note", () => {
+    // Two notes on the same pitch twice a bar is a pulse, not a bass line.
+    // Somewhere in the cycle the second note has to differ from the first.
+    const bass = (bar: number) => planBar(bar, 0, 1).filter((e) => e.layer === "bass");
+    let moved = 0;
+    for (let bar = 0; bar < 16; bar++) {
+      const [first, second] = bass(bar);
+      if (first!.degree !== second!.degree) moved += 1;
+    }
+    expect(moved).toBeGreaterThan(0);
+  });
+
+  it("never asks the chip for a level it quantises to silence", () => {
+    // The bug this exists for, and it is invisible in the source: `stair()`
+    // rounds to sixteen levels, so a peak under 0.5/15 rounds to zero on every
+    // step and the voice plays *nothing*. Folding the bed's overall level into
+    // the per-layer mix did exactly that — every layer looked right, the code
+    // typechecked, the plan tests passed, and the rendered bed was silent. The
+    // absolute level belongs on a gain node after the staircase; these are only
+    // ever ratios between layers.
+    const FLOOR = 0.5 / 15;
+    let faintest = Infinity;
+    for (let world = 0; world < 10; world++) {
+      for (let bar = 0; bar < 32; bar++) {
+        for (const lift of [0, 1]) {
+          for (const event of planBar(bar, world, 1, lift)) {
+            faintest = Math.min(faintest, MIX[event.layer] * event.gain);
+          }
+        }
+      }
+    }
+    expect(faintest).toBeGreaterThan(FLOOR);
+  });
+
+  it("never lets the flutter land outside the pentatonic", () => {
+    // This is the one genuinely risky part of playing the bed on the chip:
+    // `pulse()`'s flutter is in semitones and the scale is in degrees, so a
+    // hand-written [0,4,7] triad off the wrong root plays a note the game has
+    // never allowed. Going through `note()` at both ends cannot, and this is
+    // the proof rather than the claim — every offset must land exactly on the
+    // pitch its degree names.
+    for (let base = -12; base <= 24; base++) {
+      for (const chord of [[0, 2, 4], [0, 2, 4, 6]]) {
+        flutter(base, chord).forEach((semitones, i) => {
+          const played = note(base) * Math.pow(2, semitones / 12);
+          expect(played).toBeCloseTo(note(base + chord[i]!), 6);
+        });
+      }
+    }
+  });
+});
+
+// -------------------------------------------------------------------- lifts
+
+describe("the bed answering the player", () => {
+  it("fills the arpeggio's holes and brings the air note in", () => {
+    // A lift has to be audible without adding a note the bed could not
+    // already play: the holes close and the long note arrives early.
+    const plain = planBar(5, 0, 0.5);
+    const lifted = planBar(5, 0, 0.5, 1);
+
+    const arp = (events: ReturnType<typeof planBar>) =>
+      events.filter((e) => e.layer === "arp").length;
+    expect(arp(lifted)).toBeGreaterThan(arp(plain));
+
+    // The air note is gated on depth 0.7 normally, and this bar is at 0.5.
+    expect(plain.some((e) => e.layer === "air")).toBe(false);
+    expect(lifted.some((e) => e.layer === "air")).toBe(true);
+  });
+
+  it("never makes a lifted bar louder in the bass", () => {
+    // The same rule depth obeys: richer, never louder. A bonus that made the
+    // bed climb would turn every good moment into a stressful one, which is
+    // the exact mechanic the brief rules out.
+    const bass = (lift: number) =>
+      planBar(5, 0, 1, lift)
+        .filter((e) => e.layer === "bass")
+        .map((e) => e.gain);
+    expect(bass(1)).toEqual(bass(0));
+  });
+
+  it("lifts whole bars only, and stops on its own", () => {
+    vi.useFakeTimers();
+    const { ctx, bus, dest } = fakeAudio();
+    const player = new MusicPlayer(bus, ctx as AudioContext, dest);
+    player.start();
+    player.setIntensity(1);
+
+    // A lift raised now reaches the bars not yet built, and no others. Two
+    // bars later nothing is lifted any more without anybody clearing it.
+    player.lift();
+    expect(() => {
+      for (let tick = 0; tick < 40; tick++) {
+        ctx.currentTime += 0.4;
+        vi.advanceTimersByTime(400);
+      }
+    }).not.toThrow();
+
+    player.stop();
+    vi.useRealTimers();
+    // Sixteen seconds of ticks is well past a two-bar lift, and the bed is
+    // still running rather than stuck in a lifted state or thrown out of it.
+    expect(player.scheduledBars).toBeGreaterThan(4);
   });
 });
 

@@ -285,7 +285,7 @@ function stair(
 
 // ----------------------------------------------------------------- voices
 
-interface PulseOptions {
+export interface PulseOptions {
   readonly at?: number;
   readonly freq: number;
   readonly duty?: number;
@@ -303,7 +303,7 @@ interface PulseOptions {
   readonly vibrato?: number;
 }
 
-function pulse(bus: Bus, when: number, options: PulseOptions): void {
+export function pulse(bus: Bus, when: number, options: PulseOptions): void {
   const start = safe(when + (options.at ?? 0));
   const osc = bus.ctx.createOscillator();
   const wave = bus.pulses.get(options.duty ?? 0.25);
@@ -352,7 +352,7 @@ function pulse(bus: Bus, when: number, options: PulseOptions): void {
  * On the real chip the triangle has no volume control at all — it is on or it
  * is off — so this only steps it coarsely, which keeps the flat, boxy low end.
  */
-function tri(
+export function tri(
   bus: Bus,
   when: number,
   options: {
@@ -396,7 +396,7 @@ function tri(
   sub.stop(end);
 }
 
-interface NoiseOptions {
+export interface NoiseOptions {
   readonly at?: number;
   readonly peak: number;
   readonly decay: number;
@@ -409,7 +409,7 @@ interface NoiseOptions {
   readonly send?: number;
 }
 
-function noise(bus: Bus, when: number, options: NoiseOptions): void {
+export function noise(bus: Bus, when: number, options: NoiseOptions): void {
   const start = safe(when + (options.at ?? 0));
   const source = bus.ctx.createBufferSource();
   source.buffer = options.short ? bus.noiseShort : bus.noiseLong;
@@ -985,6 +985,18 @@ const DUCKS: Partial<Record<Sound, number>> = {
   deeper: 0.18,
 };
 
+/**
+ * The events the bed answers by lifting for a couple of bars.
+ *
+ * The same set that ducks, and that is not a coincidence: the thing that earns
+ * a moment of room is the thing worth answering. The bed dips for the event and
+ * comes back *lifted*, so the duck is the run-up rather than a hole.
+ *
+ * Deliberately the big four only. A lift on every placement or spin would be
+ * the same pumping trick the ducking rules out, one layer further up.
+ */
+const LIFTS: ReadonlySet<Sound> = new Set<Sound>(["bonus", "coreFire", "coreReady", "deeper"]);
+
 function duck(amount: number): void {
   if (!music || !ctx) return;
   const g = music.gain.gain;
@@ -1045,6 +1057,7 @@ export function play(sound: Sound, level = 0, at = 0): void {
     liveNodeCount += 1;
     const amount = DUCKS[sound];
     if (amount !== undefined && prefs.music) duck(amount);
+    if (prefs.music && LIFTS.has(sound)) music?.lift();
   } catch {
     // A voice that will not build is not worth interrupting a turn for.
   }

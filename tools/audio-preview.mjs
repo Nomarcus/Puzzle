@@ -186,6 +186,19 @@ const MUSIC_TAKES = [
     intensityRamp: [0.7, 0.7],
     extra: [["coreFire", 0, 3.5, 0]],
   },
+  {
+    name: "26-music-bonus-lift",
+    // The bed answering the player. Two plain bars, a pure clear landing at
+    // the end of the second, then the two bars it lifts, then plain again —
+    // so the lift can be heard against the thing it is a change *from*,
+    // inside one file. In the game the lift always lands on the next bar
+    // line, which is what this spacing reproduces.
+    bars: 8,
+    worldSchedule: [[0, 2]],
+    intensityRamp: [0.6, 0.6],
+    liftBars: [3, 4],
+    extra: [["pure", 1, 2.4 * 2 + 1.9, 3]],
+  },
 ];
 
 await mkdir(OUT, { recursive: true });
@@ -225,7 +238,16 @@ for (const take of [...TAKES, ...MUSIC_TAKES]) {
         const [i0, i1] = take.intensityRamp;
         for (let bar = 0; bar < take.bars; bar++) {
           const intensity = take.bars > 1 ? i0 + ((i1 - i0) * bar) / (take.bars - 1) : i0;
-          music.scheduleBar(bus, bus.ctx.destination, bar, worldAt(bar), intensity, bar * music.BAR);
+          const lift = (take.liftBars ?? []).includes(bar) ? 1 : 0;
+          music.scheduleBar(
+            bus,
+            bus.ctx.destination,
+            bar,
+            worldAt(bar),
+            intensity,
+            bar * music.BAR,
+            lift,
+          );
         }
         for (const [sound, level, at, degree] of take.extra ?? []) {
           audio.schedule(bus, sound, level, at, degree ?? 0);
