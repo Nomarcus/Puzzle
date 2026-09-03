@@ -261,9 +261,14 @@ let lastMode: ModeId | null = null;
 function updateMusic(state: GameState): void {
   const depth = depthOf(state);
   setMusicWorld(WORLDS.findIndex((w) => w.id === worldAt(depth).id));
-  // Full by depth 12, which is inside a median round. Past that the bed is as
-  // rich as it gets: deeper should feel like more, never like faster or louder.
-  setMusicIntensity(Math.min(1, depth / 12));
+  // Full at depth 18 rather than 12. Measured, the old mapping put the bed's
+  // *last* arrangement change 62% into a median round and left the remaining
+  // ~112 bars — four and a half minutes — identical: the ramp kept going and
+  // the music stopped answering it. Stretching this to 18 keeps every early
+  // change where it already landed (the thresholds in planBar moved with it)
+  // and buys two more further up, so a median round to depth 14 now hears four
+  // changes instead of three and a deep one hears five.
+  setMusicIntensity(Math.min(1, depth / 18));
 }
 
 

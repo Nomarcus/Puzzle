@@ -236,18 +236,26 @@ for (const take of [...TAKES, ...MUSIC_TAKES]) {
           return current;
         };
         const [i0, i1] = take.intensityRamp;
+        // Bars are walked with a running clock rather than `bar * BAR`: the bed
+        // speeds up a little with depth, so a bar is not always the same length
+        // and multiplying by the nominal one would slide the take out of time
+        // with itself exactly where the tempo moves.
+        let when = 0;
         for (let bar = 0; bar < take.bars; bar++) {
           const intensity = take.bars > 1 ? i0 + ((i1 - i0) * bar) / (take.bars - 1) : i0;
           const lift = (take.liftBars ?? []).includes(bar) ? 1 : 0;
+          const bpm = music.tempoAt(intensity);
           music.scheduleBar(
             bus,
             bus.ctx.destination,
             bar,
             worldAt(bar),
             intensity,
-            bar * music.BAR,
+            when,
             lift,
+            bpm,
           );
+          when += music.barSeconds(bpm);
         }
         for (const [sound, level, at, degree] of take.extra ?? []) {
           audio.schedule(bus, sound, level, at, degree ?? 0);

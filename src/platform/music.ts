@@ -45,11 +45,41 @@
 
 import { type Bus, note, noise, pulse, tri } from "./audio.js";
 
-/** Beats a minute. Slow enough to think over. */
+/** Beats a minute at the top of a round. Slow enough to think over. */
 export const BPM = 100;
 export const BEAT = 60 / BPM;
 /** Four beats. Everything that changes, changes here. */
 export const BAR = BEAT * 4;
+
+/**
+ * The fastest the bed ever gets, at the bottom of the deepest round.
+ *
+ * Twelve per cent over the whole depth range, and the cap is the point rather
+ * than a limitation. Tempo is the strongest arousal lever music has and the
+ * most fatiguing; by the time a player is this deep they already have stone on
+ * the rim, one spin instead of three and a board filling up, so the bed's job
+ * is to say the room tightened, not to add pressure to pressure. Measured
+ * against play this is about +9 BPM by the end of a median round — felt rather
+ * than noticed, which is the whole difference between tension and stress.
+ */
+export const BPM_DEEP = 112;
+
+/**
+ * The tempo for a given intensity, in whole steps of two.
+ *
+ * Stepped, never glided, and that is authentic as well as safer: a tracker
+ * changed its tempo by writing a new number in a register between rows, and a
+ * bed that slides continuously would be a bed the player can hear chasing them.
+ */
+export function tempoAt(intensity: number): number {
+  const t = Math.max(0, Math.min(1, intensity));
+  return Math.round((BPM + (BPM_DEEP - BPM) * t) / 2) * 2;
+}
+
+/** How long a bar lasts at a tempo. */
+export function barSeconds(bpm: number): number {
+  return (60 / bpm) * 4;
+}
 
 /** How far ahead bars are built. Two is enough to survive a stalled frame. */
 const LOOKAHEAD_BARS = 2;
@@ -149,9 +179,22 @@ export function planBar(
   world: number,
   intensity: number,
   lift = 0,
+  bpm = BPM,
 ): MusicEvent[] {
   const events: MusicEvent[] = [];
   const t = Math.max(0, Math.min(1, intensity));
+  // Beat and bar are read off the tempo rather than the module constant, so a
+  // deeper round's slightly quicker bed still has its notes in the right
+  // places. Nothing here knows or cares what the tempo is.
+  const beat = 60 / bpm;
+  const bar4 = beat * 4;
+  // The two arrangement steps that used to be missing. Everything past the air
+  // note used to be flat: measured, the last change landed 62% into a median
+  // round and the remaining ~112 bars — four and a half minutes — never changed
+  // again. These are material rather than volume, which is the same rule depth
+  // has always obeyed here.
+  const groove = t >= 0.65;
+  const settled = t >= 0.85;
   const step = ((bar % CYCLE.length) + CYCLE.length) % CYCLE.length;
   const root = CYCLE[step]!;
   const next = CYCLE[(step + 1) % CYCLE.length]!;
@@ -168,19 +211,31 @@ export function planBar(
   // somewhere, and where it goes says what is coming.
   const syncopated = world % 3 === 2;
   const moving = next !== root;
-  events.push({ layer: "bass", at: 0, degree: root - 5, seconds: BEAT * 1.7, gain: 1 });
+  events.push({ layer: "bass", at: 0, degree: root - 5, seconds: beat * 1.7, gain: 1 });
   events.push({
     layer: "bass",
-    at: syncopated ? BEAT * 2.5 : BEAT * 2,
+    at: syncopated ? beat * 2.5 : beat * 2,
     degree: (moving ? next : root + 3) - 5,
-    seconds: BEAT * 1.3,
+    seconds: beat * 1.3,
     gain: 0.8,
   });
+  if (groove && moving) {
+    // A pickup on the last half-beat, leaning into the chord that is about to
+    // arrive. It only exists where the chord actually changes, so it reads as
+    // the line pointing somewhere rather than as an extra note.
+    events.push({
+      layer: "bass",
+      at: beat * 3.5,
+      degree: next - 5,
+      seconds: beat * 0.4,
+      gain: 0.55,
+    });
+  }
 
   // --- arpeggio: the pulse that carries the movement ---------------------
   // Sparse at the top of a round and filling in as it goes deeper. Sixteenths
   // are deliberately never reached; this is a bed, not a driver.
-  const steps = t < 0.3 ? 4 : 8;
+  const steps = t < 0.2 ? 4 : 8;
   const contour = CONTOURS[step % CONTOURS.length]!;
   const spin = world % 4;
   for (let i = 0; i < steps; i++) {
@@ -192,9 +247,9 @@ export function planBar(
     const shape = contour[(i + spin) % contour.length]!;
     events.push({
       layer: "arp",
-      at: (i * BAR) / steps,
+      at: (i * bar4) / steps,
       degree: root + shape + octave,
-      seconds: BEAT * 0.42,
+      seconds: beat * 0.42,
       gain: i % 2 === 0 ? 0.85 : 0.55,
     });
   }
@@ -203,30 +258,38 @@ export function planBar(
   // Two drums where there was one. `degree` names which: 0 is the kick, 1 the
   // hat. A single bandpassed blip on beats one and three is a metronome; a
   // kick and a hat playing off each other is a groove, at the same note count.
-  if (t >= 0.45) {
+  if (t >= 0.3) {
     events.push({ layer: "perc", at: 0, degree: 0, seconds: 0.09, gain: 0.85 });
     if (hash(bar, 13) < 0.55) {
-      events.push({ layer: "perc", at: BEAT * 2.5, degree: 0, seconds: 0.08, gain: 0.6 });
+      events.push({ layer: "perc", at: beat * 2.5, degree: 0, seconds: 0.08, gain: 0.6 });
     }
     if (lifted) {
       // The fill: two hats into the top of the next bar, which is how every
       // tracker has ever said "something just happened".
-      events.push({ layer: "perc", at: BEAT * 3.5, degree: 1, seconds: 0.04, gain: 0.7 });
-      events.push({ layer: "perc", at: BEAT * 3.75, degree: 1, seconds: 0.04, gain: 0.9 });
+      events.push({ layer: "perc", at: beat * 3.5, degree: 1, seconds: 0.04, gain: 0.7 });
+      events.push({ layer: "perc", at: beat * 3.75, degree: 1, seconds: 0.04, gain: 0.9 });
+    } else if (groove) {
+      // Deep enough that the groove opens up: the hat moves off the beat and
+      // answers itself. Same two drums, same level — a different feel is the
+      // one thing that can keep changing without ever getting bigger.
+      events.push({ layer: "perc", at: beat * 1.5, degree: 1, seconds: 0.04, gain: 0.5 });
+      events.push({ layer: "perc", at: beat * 3.5, degree: 1, seconds: 0.04, gain: 0.55 });
     } else if (hash(bar, 29) < 0.6) {
-      events.push({ layer: "perc", at: BEAT * 3, degree: 1, seconds: 0.04, gain: 0.55 });
+      events.push({ layer: "perc", at: beat * 3, degree: 1, seconds: 0.04, gain: 0.55 });
     }
   }
 
   // --- air: one long note into the echo, occasionally --------------------
-  // A lift buys it outright, whatever the depth: the bed answering something
-  // the player did is the one place this is allowed to arrive early.
-  if ((t >= 0.7 && bar % 4 === 2) || lifted) {
+  // Every fourth bar to begin with, every other bar once the round has really
+  // settled in, and a lift buys it outright whatever the depth — the bed
+  // answering something the player did is the one place it may arrive early.
+  const airBar = settled ? bar % 2 === 0 : bar % 4 === 2;
+  if ((t >= 0.47 && airBar) || lifted) {
     events.push({
       layer: "air",
-      at: BEAT * 1.5,
+      at: beat * 1.5,
       degree: root + 7 + octave,
-      seconds: BEAT * 2.4,
+      seconds: beat * 2.4,
       gain: lifted ? 0.65 : 0.5,
     });
   }
@@ -297,7 +360,7 @@ function dutyOf(world: number): number {
  * cannot drift away from how the rest of the game sounds, because there is only
  * one chip now instead of two.
  */
-function voice(bus: Bus, event: MusicEvent, when: number, world: number, lift: number): void {
+function voice(bus: Bus, event: MusicEvent, when: number, world: number, wide: boolean): void {
   const level = MIX[event.layer] * event.gain;
 
   switch (event.layer) {
@@ -346,7 +409,7 @@ function voice(bus: Bus, event: MusicEvent, when: number, world: number, lift: n
         duty: dutyOf(world),
         peak: level,
         decay: event.seconds,
-        arp: flutter(event.degree, lift > 0 ? CHORD_WIDE : CHORD),
+        arp: flutter(event.degree, wide ? CHORD_WIDE : CHORD),
         arpRate: 2,
       });
     }
@@ -369,14 +432,19 @@ export function scheduleBar(
   intensity: number,
   when: number,
   lift = 0,
+  bpm = BPM,
 ): void {
   const dry = bus.ctx.createGain();
   dry.gain.value = BED_LEVEL;
   dry.connect(dest);
   const local: Bus = { ...bus, dry };
 
-  for (const event of planBar(bar, world, intensity, lift)) {
-    voice(local, event, when + event.at, world, lift);
+  // Deep enough and the flutter opens from a triad to a wider voicing — the
+  // same note count spread further apart, which is the last thing that changes
+  // in a round and the cheapest way to say "this has been going a while".
+  const wide = lift > 0 || intensity >= 0.85;
+  for (const event of planBar(bar, world, intensity, lift, bpm)) {
+    voice(local, event, when + event.at, world, wide);
   }
 }
 
@@ -488,6 +556,10 @@ export class MusicPlayer {
       // A bar is lifted if it *starts* inside the window, so a lift raised now
       // reaches whichever bars have not been built yet and no others.
       const lift = this.nextTime < this.liftUntil ? 1 : 0;
+      // Taken here, which is by definition a bar line — a tempo that changed
+      // mid-bar would drag the notes already scheduled out of position, and a
+      // tempo that glided would be a bed the player can hear chasing them.
+      const bpm = tempoAt(this.intensity);
       try {
         scheduleBar(
           this.bus,
@@ -497,12 +569,13 @@ export class MusicPlayer {
           this.intensity,
           this.nextTime,
           lift,
+          bpm,
         );
       } catch {
         // A bar that will not build is not worth stopping the music for.
       }
       this.nextBar += 1;
-      this.nextTime += BAR;
+      this.nextTime += barSeconds(bpm);
     }
   }
 }

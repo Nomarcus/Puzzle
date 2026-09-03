@@ -15,7 +15,18 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { BAR, MIX, MusicPlayer, flutter, planBar, scheduleBar } from "../src/platform/music.js";
+import {
+  BAR,
+  BPM,
+  BPM_DEEP,
+  MIX,
+  MusicPlayer,
+  barSeconds,
+  flutter,
+  planBar,
+  scheduleBar,
+  tempoAt,
+} from "../src/platform/music.js";
 import { type Bus, note } from "../src/platform/audio.js";
 
 // --------------------------------------------------------------- a fake ctx
@@ -256,6 +267,97 @@ describe("the music plan", () => {
   });
 });
 
+// ------------------------------------------------------------ depth and tempo
+
+describe("what depth does to the bed", () => {
+  it("keeps changing the arrangement all the way down, not just at the top", () => {
+    // The bug this pins: the bed used to make its last change 62% into a
+    // median round and then repeat itself for four and a half minutes while
+    // the ramp carried on getting harder. Every step here has to bring
+    // something the step below it did not have.
+    const shapeAt = (t: number) =>
+      JSON.stringify(
+        [0, 1, 2, 3].flatMap((bar) =>
+          planBar(bar, 0, t).map((e) => `${e.layer}@${e.at.toFixed(2)}:${e.degree}`),
+        ),
+      );
+
+    const steps = [0, 0.2, 0.3, 0.47, 0.65, 0.85].map(shapeAt);
+    for (let i = 1; i < steps.length; i++) {
+      expect(steps[i]).not.toBe(steps[i - 1]);
+    }
+    // And they are all different from each other, not a pair swapping back.
+    expect(new Set(steps).size).toBe(steps.length);
+  });
+
+  it("is richer with depth and never louder, on every layer", () => {
+    // The rule the whole bed obeys, checked across all of them rather than
+    // only the bass: depth may add notes, and may never raise a level. This
+    // replaces a narrower check that compared the bass note-for-note, which
+    // would have forbidden the deep pickup that is the point of the change.
+    const loudest = (t: number, lift = 0) => {
+      const peak: Record<string, number> = {};
+      for (let bar = 0; bar < 16; bar++) {
+        for (const e of planBar(bar, 0, t, lift)) {
+          peak[e.layer] = Math.max(peak[e.layer] ?? 0, e.gain);
+        }
+      }
+      return peak;
+    };
+
+    const calm = loudest(0);
+    for (const t of [0.3, 0.65, 0.85, 1]) {
+      const deep = loudest(t);
+      for (const [layer, level] of Object.entries(deep)) {
+        if (calm[layer] !== undefined) expect(level).toBeLessThanOrEqual(calm[layer]!);
+      }
+    }
+  });
+
+  it("speeds the bed up a little with depth, and caps it hard", () => {
+    // Tempo is the strongest arousal lever music has and the most fatiguing.
+    // A deep round already has stone, one spin and a filling board; the bed
+    // says the room tightened, it does not add pressure to pressure.
+    expect(tempoAt(0)).toBe(BPM);
+    expect(tempoAt(1)).toBe(BPM_DEEP);
+    expect(BPM_DEEP / BPM).toBeLessThanOrEqual(1.2);
+
+    // Monotonic, and in steps rather than a glide — a chip wrote a new number
+    // in a register between rows, it could not slide.
+    let previous = -Infinity;
+    const seen = new Set<number>();
+    for (let i = 0; i <= 20; i++) {
+      const bpm = tempoAt(i / 20);
+      expect(bpm).toBeGreaterThanOrEqual(previous);
+      previous = bpm;
+      seen.add(bpm);
+      expect(bpm % 2).toBe(0);
+    }
+    // Genuinely stepped: far fewer distinct tempos than samples taken.
+    expect(seen.size).toBeLessThan(10);
+  });
+
+  it("puts the notes in the right places whatever the tempo", () => {
+    // A quicker bar is a shorter bar, not the same bar with the notes left
+    // where they were. Every note has to stay inside its own bar at any tempo.
+    for (const bpm of [BPM, 106, BPM_DEEP]) {
+      const length = barSeconds(bpm);
+      for (let bar = 0; bar < 16; bar++) {
+        for (const event of planBar(bar, 0, 1, 0, bpm)) {
+          expect(event.at).toBeGreaterThanOrEqual(0);
+          expect(event.at).toBeLessThan(length);
+        }
+      }
+    }
+    // And the whole bar scales: the same plan at the top tempo is shorter.
+    const last = (bpm: number) => {
+      const events = planBar(3, 0, 1, 0, bpm);
+      return Math.max(...events.map((e) => e.at));
+    };
+    expect(last(BPM_DEEP)).toBeLessThan(last(BPM));
+  });
+});
+
 // -------------------------------------------------------------------- lifts
 
 describe("the bed answering the player", () => {
@@ -346,11 +448,16 @@ describe("the music player over a long session", () => {
     expect(counts.started).toBeGreaterThan(0);
     expect(counts.stopped).toBe(counts.started);
 
-    // Ten minutes at 100 BPM is 250 bars. Allow the lookahead its couple of
-    // spare bars, but nothing like a runaway.
-    const bars = Math.round((10 * 60) / BAR);
+    // Ten minutes of bars, counted at the tempo the bed actually ran at rather
+    // than the nominal one — this session sat at intensity 0.8, which is 110
+    // BPM, not 100. Allow the lookahead its couple of spare bars, but nothing
+    // like a runaway. Deriving the expectation this way means the check also
+    // proves the tempo reached the graph: at the nominal 100 BPM this lands at
+    // 250 bars and fails.
+    const bars = Math.round((10 * 60) / barSeconds(tempoAt(0.8)));
     expect(player.scheduledBars).toBeGreaterThanOrEqual(bars - 2);
     expect(player.scheduledBars).toBeLessThanOrEqual(bars + 4);
+    expect(bars).toBeGreaterThan(Math.round((10 * 60) / BAR));
 
     // And the work per minute is flat. This is the growth check: a scheduler
     // that leaks does more in its tenth minute than its first.
