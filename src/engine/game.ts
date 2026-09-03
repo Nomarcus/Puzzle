@@ -104,7 +104,7 @@ export const DEFAULT_RULES: RuleSet = {
   pieceLimit: 0,
 };
 
-export type GameMode = "daily" | "endless" | "level" | "challenge" | "time";
+export type GameMode = "daily" | "endless" | "level" | "challenge" | "time" | "belt";
 
 export interface TraySlot {
   readonly pieceId: string;
@@ -397,6 +397,90 @@ export function dealFreshTray(state: GameState): GameState {
     state.rules.wildChance,
   );
   return { ...state, tray, rngState };
+}
+
+/**
+ * The tray a belt round opens on: one piece, not the usual three.
+ *
+ * The tray *is* the belt here, so a full one has nowhere to deliver into. Left
+ * at three, the very first arrival overflows and an ordinary player takes a
+ * stone a few seconds into the round having done nothing wrong — measured in
+ * `npm run belt` before it could ship, which is the only reason it is not a
+ * bug somebody found on a device.
+ */
+export function openBelt(state: GameState): GameState {
+  const tray = state.tray.map((slot, i) => (i === 0 ? slot : null));
+  return { ...state, tray };
+}
+
+/** What one turn of the belt did. */
+export interface BeltDelivery {
+  readonly state: GameState;
+  /** True when the tray was already full and the piece could not be taken. */
+  readonly overflowed: boolean;
+  /** Where the overflow's stone landed, if one did. */
+  readonly stoneDropped: Cell | null;
+}
+
+/**
+ * The belt handing over one piece.
+ *
+ * Every other mode refills the tray only once all three slots are spent, which
+ * is what makes the third piece a planning problem. The belt is the opposite
+ * discipline on purpose: a piece arrives on a clock the player does not
+ * control, into whichever slot happens to be free.
+ *
+ * A piece arriving with all three slots full is an **overflow**, and it drops a
+ * stone rather than ending the round. Free play already uses stone to make a
+ * board slowly unplayable — a line containing it does not clear — so the disc
+ * degrades a cell at a time and the round still ends the ordinary way, when
+ * nothing fits and no spin or push is left. Ending on the first overflow would
+ * make the mode one mistake long and give a player no way to see it coming.
+ *
+ * Pure, like everything else in here: the belt's *timing* belongs to the screen
+ * for the same reason the clock does, and what lives in the engine is only what
+ * a delivery does to the board.
+ */
+export function deliverToBelt(state: GameState): BeltDelivery {
+  if (state.over) return { state, overflowed: false, stoneDropped: null };
+
+  const slot = state.tray.findIndex((s) => s === null);
+  if (slot === -1) {
+    // Overflow. The stone is the warning, and the board is what eventually
+    // ends the round.
+    const drop = dropStone(state.board, state.rngState);
+    if (!drop) return { state, overflowed: true, stoneDropped: null };
+    const board = drop.board;
+    const next: GameState = {
+      ...state,
+      board,
+      rngState: drop.rngState,
+      over: isGameOver(board, state.tray, state.spins, state.pushes, state.core, state.charge),
+    };
+    return { state: next, overflowed: true, stoneDropped: drop.cell };
+  }
+
+  const [drawn, rngState] = drawTray(
+    state.rngState,
+    bagAt(state.spec, state.pack, state.ramp, depthAt(state.ramp, state.stats.piecesPlaced)),
+    state.rules.stripeChance,
+    state.rules.wildChance,
+  );
+  const tray = [...state.tray];
+  tray[slot] = drawn[0]!;
+
+  // A delivery can revive a dead-looking board: the round is only over when
+  // nothing in the tray fits, and this just put something new in it.
+  return {
+    state: {
+      ...state,
+      tray,
+      rngState,
+      over: isGameOver(state.board, tray, state.spins, state.pushes, state.core, state.charge),
+    },
+    overflowed: false,
+    stoneDropped: null,
+  };
 }
 
 /** How deep the round has got. 0 unless free play's ramp is running. */

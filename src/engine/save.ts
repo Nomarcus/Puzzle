@@ -29,7 +29,7 @@ export const SAVE_VERSION = 1;
 
 /** The modes that keep records. `challenge` is deliberately absent: it is */
 /** somebody else's board, so a record there would not be comparable. */
-export type ModeId = "daily" | "endless" | "level" | "time";
+export type ModeId = "daily" | "endless" | "level" | "time" | "belt";
 
 export interface ModeRecords {
   /** Highest score in this mode. */
@@ -110,7 +110,7 @@ function sensitivity(value: unknown): Sensitivity {
   return value === "low" || value === "standard" || value === "high" ? value : "standard";
 }
 
-const MODES: readonly ModeId[] = ["daily", "endless", "level", "time"];
+const MODES: readonly ModeId[] = ["daily", "endless", "level", "time", "belt"];
 
 function num(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;

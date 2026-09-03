@@ -121,10 +121,13 @@ import {
   applyMove,
   createGame,
   dealFreshTray,
+  deliverToBelt,
   isGameOver,
+  openBelt,
   replay,
   slotPiece,
 } from "../src/engine/game.js";
+import { BELT, beltInterval } from "../src/engine/belt.js";
 
 /**
  * Pinned rather than taken from DEFAULT_SPEC: these tests are about wrapping
@@ -1738,6 +1741,89 @@ describe("time attack", () => {
     // Even someone clearing a spoke every second and a ring every five — far
     // beyond human — has to run out. A mode that does not end ranks patience.
     expect(survives(1, 5)).toBeLessThan(3600);
+  });
+});
+
+describe("the belt", () => {
+  const beltGame = () =>
+    openBelt(
+      createGame({
+        seed: 12345,
+        mode: "belt",
+        spec: sizeById("standard").spec,
+        pack: "mixed",
+        fairDeal: true,
+      }),
+    );
+
+  it("opens with room to deliver into, not a full tray", () => {
+    // The bug this pins, found by modelling before it could ship: the tray
+    // *is* the belt, so opening with the usual three pieces means the very
+    // first arrival overflows and an ordinary player takes a stone a few
+    // seconds in having done nothing wrong.
+    const game = beltGame();
+    expect(game.tray.filter((s) => s !== null)).toHaveLength(1);
+    expect(game.tray[0]).not.toBeNull();
+  });
+
+  it("fills the empty slots one piece at a time", () => {
+    let game = beltGame();
+    for (const expected of [2, 3]) {
+      const delivery = deliverToBelt(game);
+      expect(delivery.overflowed).toBe(false);
+      expect(delivery.stoneDropped).toBeNull();
+      game = delivery.state;
+      expect(game.tray.filter((s) => s !== null)).toHaveLength(expected);
+    }
+  });
+
+  it("drops a stone rather than ending the round when it overflows", () => {
+    // A cliff would make the whole mode one mistake long and give the player
+    // no way to see the ending coming. Stone is the warning: a line containing
+    // it does not clear, so the disc degrades where you can watch it happen.
+    let game = beltGame();
+    game = deliverToBelt(game).state;
+    game = deliverToBelt(game).state;
+    expect(game.tray.every((s) => s !== null)).toBe(true);
+
+    const stoneBefore = stoneCount(game.board);
+    const overflow = deliverToBelt(game);
+    expect(overflow.overflowed).toBe(true);
+    expect(overflow.stoneDropped).not.toBeNull();
+    expect(stoneCount(overflow.state.board)).toBe(stoneBefore + 1);
+    // Still playable — the round ends the ordinary way, when nothing fits.
+    expect(overflow.state.over).toBe(false);
+  });
+
+  it("never delivers into a finished round", () => {
+    const game = { ...beltGame(), over: true };
+    const delivery = deliverToBelt(game);
+    expect(delivery.state).toBe(game);
+    expect(delivery.overflowed).toBe(false);
+  });
+
+  it("speeds up without ever reaching zero", () => {
+    // The third time this lesson has been paid for here — free play's ramp
+    // plateaued on stone, time attack's drain plateaued at 2.2x and a good
+    // enough player never died. Any dial meant to end a round has to grow
+    // without a ceiling.
+    let previous = Infinity;
+    for (const elapsed of [0, 30, 60, 120, 300, 600, 3600]) {
+      const gap = beltInterval(BELT, elapsed);
+      expect(gap).toBeGreaterThan(0);
+      expect(gap).toBeLessThanOrEqual(previous);
+      previous = gap;
+    }
+    // Genuinely unbounded: far enough out, the belt beats any human rate.
+    expect(beltInterval(BELT, 36_000)).toBeLessThan(0.2);
+    expect(beltInterval(BELT, 0)).toBe(BELT.opening);
+  });
+
+  it("keeps the engine pure — a delivery is a function of the state alone", () => {
+    // The belt's *timing* belongs to the screen for the same reason the clock
+    // does. What is in the engine must stay replayable and testable.
+    const game = beltGame();
+    expect(deliverToBelt(game).state.tray).toEqual(deliverToBelt(game).state.tray);
   });
 });
 

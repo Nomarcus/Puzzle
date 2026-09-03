@@ -831,6 +831,52 @@ cannot have a phase where clearing buys no time.
 `com.nomarcus.shiftle.time` — Time attack. Same settings as the other two
 (integer, high score is best, no decimals, at least one localisation).
 
+## The belt: the one mode that does not wait for you
+
+Marcus asked for something more Tetris-like, with pieces arriving continuously.
+This is that, as its own mode rather than a change to time attack — the two
+would otherwise be the same pressure twice.
+
+Everywhere else the tray refills only once all three slots are spent, so the
+game runs at exactly the speed you think at. Here a piece lands on a timer you
+do not control, the gap between arrivals shrinks for as long as you last, and a
+piece arriving with the tray already full is one you have failed to keep up
+with.
+
+**No clock, deliberately.** Time attack is the mode about racing a countdown,
+and a belt is a speed pressure too. Stacking them would give the game two modes
+that feel the same and neither of them itself.
+
+**Falling behind drops a stone, it does not end the round.** Stone is already
+how free play makes a board slowly unplayable — a line containing it does not
+clear — so the disc degrades a cell at a time and the round ends the ordinary
+way, when nothing fits and no spin or push is left. A cliff would make the whole
+mode one mistake long and give a player no way to see death coming.
+
+**The belt has no floor**, and that is the third time this lesson has been paid
+for here: free play's ramp plateaued on stone, time attack's drain plateaued at
+2.2x and a good enough player never died. Any dial meant to end a round has to
+grow without a ceiling. However fast you place, there is a point on this curve
+where the belt is faster.
+
+`npm run belt` models rates of placement rather than running the bot — the bot
+plays instantly, and instant play beats any belt. Measured at the shipping
+numbers (a piece every 3s, a gear every 30s):
+
+| | thinking | steady | ok | quick | flying |
+|---|---|---|---|---|---|
+| round lasts | 89 s | 125 s | 165 s | 231 s | 359 s |
+| pieces down | 21 | 40 | 65 | 113 | 233 |
+| first stone | 24 s | 63 s | 102 s | 168 s | 302 s |
+
+An eleven-fold spread in pieces placed, which is what makes the leaderboard
+worth having, and everybody dies.
+
+**One bug the model caught before it could ship:** the tray *is* the belt, so
+opening on the usual three pieces means the very first arrival overflows and an
+ordinary player takes a stone three seconds in having done nothing wrong. A
+belt round opens with one piece and two empty slots.
+
 ## Challenges: the same round, sent to somebody
 
 **Not on the menu.** The button was removed at Marcus's request — the mode
@@ -994,11 +1040,12 @@ Game Center boards stay for the daily and free play.
 | Game engine | Done. Pure, deterministic, 191 unit tests across two files. |
 | Levels | Done. Forty of them, difficulty measured with `npm run levels`. |
 | Free play ramp | Done. Every round ends on every setup; measured with `npm run ramp`. |
-| Time attack | Done. Clock tuned against five modelled standards of play. |
+| Time attack | Done. Clock tuned against five modelled standards of play, and retuned after play with `npm run timeattack` — an ordinary round went from 58s to 92s. |
 | The core | Done. Charge, tap-to-sweep, tuned with `npm run core`. |
 | Wild blocks | Done. Frequency measured against the pure-clear rate. |
 | Daily streak | Done. Badge, fortnight strip, and it survives midnight correctly. |
 | Progression | Done. Seven themes, four of them earned. Cosmetic only. |
+| The belt | Done. Pieces arrive on a timer that never stops shrinking; falling behind drops stone. Tuned with `npm run belt`. |
 | Challenges | Built and tested, but **not on the menu** — see below. |
 | Rendering, input, UI | Done. Swedish and English, seven themes. |
 | Depth visuals | Done. Rim counter, deepening ground, arrival sweep, a five-tier material ladder from candy to diamond, ten Depth Worlds every two depths, and patterns strengthened (`SHADE_CAP` 0.6→0.78) so block structures read apart. Free play only; the clock mode is untouched by construction. |
@@ -1232,11 +1279,12 @@ What is already in the repository:
 
 **What still needs a human, in App Store Connect:**
 
-1. Create three leaderboards with exactly these IDs:
+1. Create four leaderboards with exactly these IDs:
    - `com.nomarcus.shiftle.daily` — Today's puzzle
    - `com.nomarcus.shiftle.endless` — Free play
    - `com.nomarcus.shiftle.time` — Time attack
-   All three: integer score format, high score is best, no decimals.
+   - `com.nomarcus.shiftle.belt` — The belt
+   All four: integer score format, high score is best, no decimals.
 2. Add at least one localisation per leaderboard (English works; Swedish too if
    you want it) — App Store Connect will not accept a leaderboard without one.
 
