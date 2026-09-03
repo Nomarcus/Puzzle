@@ -763,11 +763,20 @@ directly competitive thing in the game. There is nothing in the score but how
 fast you can think — no ration to pace yourself against, no ramp to plan
 around, and no way to sit and stare at the board.
 
-- **Forty seconds on the clock**, and forty is also the ceiling.
+- **Fifty seconds on the clock**, and fifty is also the ceiling.
 - The clock **speeds up** the longer you last: +15% per 50 seconds survived,
   with no upper limit.
-- Clears buy time: a spoke **+1.5 s**, a ring **+4 s**, a bullseye **+8 s**,
-  each striped block **+1 s**.
+- Clears buy time: a spoke **+2.25 s**, a ring **+6 s**, a bullseye **+12 s**,
+  each striped block **+1.5 s**.
+
+These are the retuned numbers. The mode shipped at forty seconds and 1.5s a
+spoke, which gave an ordinary player a round of **58 seconds** — Marcus played
+it and said, correctly, that it was too hard. `npm run timeattack` is the tool
+that sweeps it, and what it found is that the cap and the payouts do different
+jobs: raising the payouts alone moves a struggling player barely at all (48s to
+54s at +66%), because what limits them is how *often* they clear rather than
+what a clear is worth, while it doubles a good player's round. Both moved
+together.
 - Always the standard disc and the mixed pack. The other modes let you choose;
   this one cannot, or two scores would not be comparable — and comparing scores
   is the whole point of it.
@@ -788,12 +797,19 @@ paid nothing.
 
 | | struggling | ok | good | strong | expert |
 |---|---|---|---|---|---|
-| round lasts | 48 s | 59 s | 80 s | 122 s | 209 s |
+| shipped first | 48 s | 58 s | 80 s | 127 s | 209 s |
+| **now** | **71 s** | **92 s** | **160 s** | **287 s** | **405 s** |
 
-A four-and-a-half-fold gap between a beginner and an expert — the widest of
-anything tried — and about a quarter of a good player's round spent in the red.
-It opened at thirty seconds first, which measured slightly tenser and felt mean
-to start on.
+The spread went *up* rather than down with the retune — 4.4x to **5.7x** — so
+the mode got kinder without getting flatter, which is the half that matters for
+a leaderboard. A quarter of an ordinary player's round is still spent under ten
+seconds on the clock, so it is still the tense mode; it is just no longer over
+before it has started. Nothing is wasted at the cap below expert play, and
+superhuman play (a spoke every second, a ring every five) still dies at 1,010
+seconds — the drain has no ceiling, so there is no rate that outruns it.
+
+It opened at thirty seconds in the very first version, which measured slightly
+tenser and felt mean to start on.
 
 Two things that measurement caught, both of which I had wrong first:
 

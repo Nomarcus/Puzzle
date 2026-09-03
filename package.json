@@ -25,7 +25,8 @@
     "core": "vite-node tools/core.ts",
     "verify:ios": "node tools/verify-ios.mjs",
     "audio": "node tools/audio-preview.mjs",
-    "worlds": "node tools/shot-worlds.mjs"
+    "worlds": "node tools/shot-worlds.mjs",
+    "timeattack": "vite-node tools/timeattack.ts"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",

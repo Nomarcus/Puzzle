@@ -39,6 +39,18 @@ export interface ClockSpec {
    * bound, or it stops being an ending and becomes a plateau.
    */
   readonly drainStep: number;
+  /**
+   * What each kind of clear buys back, in seconds.
+   *
+   * These used to be literals inside `timeBonus`, which meant the one dial the
+   * mode is actually tuned on could not be swept by a tool or varied by a test
+   * — the shipped numbers were read off a sweep that then went away. They are
+   * data now, and `npm run timeattack` sweeps them.
+   */
+  readonly spoke: number;
+  readonly ring: number;
+  readonly sweep: number;
+  readonly stripe: number;
 }
 
 /**
@@ -48,11 +60,32 @@ export interface ClockSpec {
  * the best and worst, how much of the round is spent under ten seconds, and how
  * many clears paid nothing.
  *
- * Forty seconds, draining slowly, gives rounds of about 50 seconds to three and
- * a half minutes, the widest gap between a beginner and an expert of anything
- * tried, and roughly a quarter of a good player's round spent under ten seconds
- * on the clock. It replaced a thirty-second version that measured slightly
- * tenser and simply felt mean to open on.
+ * **Retuned after Marcus played it: it was simply too hard.** The first version
+ * opened at forty seconds and paid 1.5s a spoke, which measured well and gave
+ * an ordinary player a round of **58 seconds**. A mode you are dead in under a
+ * minute is a punishment rather than a contest, however good its spread looks.
+ *
+ * `npm run timeattack` swept the payouts against the cap, and the interesting
+ * thing it found is that the two dials do not do the same job. Raising the
+ * payouts alone barely moves a struggling player — 48s to 54s at +66% — because
+ * what limits them is how *often* they clear, not what a clear is worth. It is
+ * the opening clock that decides their round. Raising the payouts alone,
+ * meanwhile, doubles a good player's round, because they clear often enough for
+ * the size of the payout to compound.
+ *
+ * So both moved together: the clock opens at fifty and a spoke pays 2.25s.
+ * Measured, against the same five standards of play as before:
+ *
+ * | | struggling | ok | good | strong | expert |
+ * |---|---|---|---|---|---|
+ * | was | 48s | 58s | 80s | 127s | 209s |
+ * | now | 71s | 92s | 160s | 287s | 405s |
+ *
+ * The spread went *up* rather than down — 4.4x to 5.7x — so the mode got kinder
+ * without getting flatter, which is the part that matters for a leaderboard.
+ * A quarter of an ordinary player's round is still spent under ten seconds on
+ * the clock, so it is still the tense mode; it is just no longer over before it
+ * starts. Nothing is wasted at the cap below expert play.
  *
  * The clock opens at what it caps at, and that is not an accident. An earlier
  * version opened at 45 and capped at 25, on the theory that a calm opening you
@@ -63,9 +96,13 @@ export interface ClockSpec {
  * where clearing buys no time.
  */
 export const TIME_ATTACK: ClockSpec = {
-  seconds: 40,
+  seconds: 50,
   drainEvery: 50,
   drainStep: 0.15,
+  spoke: 2.25,
+  ring: 6,
+  sweep: 12,
+  stripe: 1.5,
 };
 
 /**
@@ -89,16 +126,16 @@ export function drainRate(spec: ClockSpec, elapsed: number): number {
  * numbers are deliberately smaller than the drain — clearing has to be
  * *frequent*, not occasional, or the mode turns into waiting for one big move.
  */
-export function timeBonus(events: MoveEvents): number {
-  if (events.sweep) return 8;
+export function timeBonus(events: MoveEvents, spec: ClockSpec = TIME_ATTACK): number {
+  if (events.sweep) return spec.sweep;
 
   let seconds = 0;
-  seconds += events.clears.spokes.length * 1.5;
-  seconds += events.clears.rings.length * 4;
+  seconds += events.clears.spokes.length * spec.spoke;
+  seconds += events.clears.rings.length * spec.ring;
   // A stripe fires across lines that were not full, so it is not already
   // counted above. It is the one thing you can set up in advance, which is
   // worth something when there is no time to set anything up.
-  seconds += events.stripesFired * 1;
+  seconds += events.stripesFired * spec.stripe;
   return seconds;
 }
 
