@@ -759,51 +759,6 @@ check(
 await page.evaluate(() => window.__shiftle.menu());
 await page.waitForTimeout(250);
 
-// --- the belt --------------------------------------------------------------
-// The belt lives in the screen for the same reason the clock does — a piece
-// arriving is a wall-clock event and the engine is a pure function of moves —
-// so this is the only place the delivery loop can be exercised at all.
-{
-  await page.evaluate(() => window.__shiftle.belt());
-  await page.waitForTimeout(400);
-
-  const opening = await state();
-  const held = opening.tray.filter((s) => s !== null).length;
-  check("the belt opens with room to deliver into, not a full tray", held === 1, `${held} of 3`);
-
-  // Wind it on rather than waiting three real seconds per piece.
-  const filled = await page.evaluate(async () => {
-    for (let i = 0; i < 2; i++) {
-      window.__shiftle.rushBelt(5);
-      await new Promise((r) => setTimeout(r, 120));
-    }
-    return {
-      tray: window.__shiftle.state().tray.filter((s) => s !== null).length,
-      belt: window.__shiftle.beltState(),
-    };
-  });
-  check("pieces arrive on their own, without the player doing anything",
-    filled.tray === 3 && filled.belt.delivered >= 2,
-    `tray ${filled.tray}, delivered ${filled.belt.delivered}`);
-
-  // Now the tray is full, so the next arrival has nowhere to go. That must
-  // drop a stone rather than ending the round — the mode has to be a slope.
-  const overflow = await page.evaluate(async () => {
-    const before = window.__shiftle.stoneOnBoard();
-    window.__shiftle.rushBelt(5);
-    await new Promise((r) => setTimeout(r, 150));
-    return { before, after: window.__shiftle.stoneOnBoard(), belt: window.__shiftle.beltState(),
-      over: window.__shiftle.state()?.over ?? true };
-  });
-  check("falling behind drops a stone instead of ending the round",
-    overflow.after > overflow.before && overflow.belt.missed >= 1 && !overflow.over,
-    `stone ${overflow.before}->${overflow.after}, missed ${overflow.belt.missed}, over ${overflow.over}`);
-
-  await shot("27-belt");
-  await page.evaluate(() => window.__shiftle.menu());
-  await page.waitForTimeout(250);
-}
-
 // --- time attack -----------------------------------------------------------
 // The clock lives in the screen, not the engine, so this is the only place it
 // can be tested at all.
@@ -1041,13 +996,12 @@ await shot("15-menu");
       return { action: b.dataset.action, top: Math.round(box.top), height: Math.round(box.height) };
     }),
   );
-  check("the four other modes are all on the menu", tiles.length === 4,
+  check("the three other modes are all on the menu", tiles.length === 3,
     tiles.map((t) => t.action).join(","));
   check("side by side on one row", new Set(tiles.map((t) => t.top)).size === 1,
     tiles.map((t) => t.top).join(","));
-  // Swedish "Mot klockan" wraps to two lines inside its tile, and four tiles
-  // across leaves each one narrower than three did. The tiles have to stay the
-  // same height anyway, or the row reads as broken.
+  // Swedish "Mot klockan" wraps to two lines inside its tile. The tiles have to
+  // stay the same height anyway, or the row reads as broken.
   check("and the same height even where the label wraps",
     new Set(tiles.map((t) => t.height)).size === 1,
     tiles.map((t) => t.height).join(","));

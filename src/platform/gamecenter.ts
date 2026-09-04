@@ -12,7 +12,6 @@ export const LEADERBOARDS = {
   daily: "com.nomarcus.shiftle.daily",
   endless: "com.nomarcus.shiftle.endless",
   time: "com.nomarcus.shiftle.time",
-  belt: "com.nomarcus.shiftle.belt",
 } as const;
 
 export type LeaderboardId = (typeof LEADERBOARDS)[keyof typeof LEADERBOARDS];

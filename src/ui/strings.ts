@@ -103,16 +103,6 @@ const TABLE = {
     en: "The clock never stops. Every clear buys seconds back — stop clearing and you are dead in a minute.",
   },
   timeUp: { sv: "Tiden är ute!", en: "Time!" },
-  /** The menu tile. Deliberately one short word: four tiles share one row. */
-  belt: { sv: "Bandet", en: "Belt" },
-  beltTitle: { sv: "Löpande band", en: "Conveyor belt" },
-  beltBlurb: {
-    sv: "Bitarna kommer av sig själva, snabbare och snabbare. Hinner du inte lägga dem faller sten på skivan.",
-    en: "Pieces keep arriving, faster and faster. Fail to place them and stone falls on the disc.",
-  },
-  /** Shown when the tray was full and the belt dropped a stone instead. */
-  beltOverflow: { sv: "Hann inte!", en: "Too slow!" },
-  beltPlaced: { sv: "BITAR", en: "PIECES" },
   timeBest: { sv: "TIDSREKORD", en: "TIME BEST" },
   timeSurvived: { sv: "ÖVERLEVDE", en: "SURVIVED" },
   challenge: { sv: "Utmaning", en: "Challenge" },

@@ -15,14 +15,12 @@ import {
   RULES,
   applyMove,
   dealFreshTray,
-  deliverToBelt,
   depthOf,
   slotPiece,
 } from "../engine/game.js";
 import { rampActive } from "../engine/ramp.js";
 import { coreFraction, coreReady } from "../engine/core.js";
 import { type ClockSpec, addTime, drainRate, timeBonus } from "../engine/timeattack.js";
-import { type BeltSpec, beltInterval } from "../engine/belt.js";
 import type { Piece } from "../engine/pieces.js";
 import type { SpinDirection } from "../engine/rotate.js";
 import {
@@ -145,23 +143,6 @@ export interface GameScreenOptions {
    * daily's seed vetting and the balance bot possible.
    */
   readonly clock?: ClockSpec;
-  /**
-   * Runs the belt against the round. Belt mode only, and here rather than in
-   * the engine for exactly the reason the clock is: a piece arriving is a
-   * wall-clock event, and the engine must stay a pure function of moves.
-   */
-  readonly belt?: BeltSpec;
-}
-
-interface RunningBelt {
-  /** Seconds of play so far. Decides how fast the next piece comes. */
-  elapsed: number;
-  /** When the next piece is due, in seconds since the round opened. */
-  due: number;
-  /** Pieces the belt has handed over. The score of this mode is made of these. */
-  delivered: number;
-  /** Overflows so far — each one dropped a stone. */
-  missed: number;
 }
 
 interface RunningClock {
@@ -261,7 +242,6 @@ export class GameScreen {
   private diedAt = 0;
   private announced = false;
   private runningClock: RunningClock | null = null;
-  private runningBelt: RunningBelt | null = null;
   /** Set when the clock ran out, so the result can say so rather than "stuck". */
   private timeUp = false;
 
@@ -279,85 +259,6 @@ export class GameScreen {
 
     if (options.clock) {
       this.runningClock = { left: options.clock.seconds, elapsed: 0, lastTick: Math.ceil(options.clock.seconds) };
-    }
-    if (options.belt) {
-      this.runningBelt = {
-        elapsed: 0,
-        due: beltInterval(options.belt, 0),
-        delivered: 0,
-        missed: 0,
-      };
-    }
-  }
-
-  /** What the belt has done so far, or null when this round is not on one. */
-  getBelt(): { delivered: number; missed: number; next: number } | null {
-    const belt = this.runningBelt;
-    if (!belt) return null;
-    return {
-      delivered: belt.delivered,
-      missed: belt.missed,
-      next: Math.max(0, belt.due - belt.elapsed),
-    };
-  }
-
-  /** Seconds of play a belt round has lasted. */
-  beltElapsed(): number {
-    return this.runningBelt?.elapsed ?? 0;
-  }
-
-  /** Winds the belt forward without waiting for it, so a test can drive it. */
-  rushBelt(seconds: number): boolean {
-    if (!this.runningBelt) return false;
-    this.runningBelt.due -= seconds;
-    return true;
-  }
-
-  /**
-   * Advances the belt. Called once a frame, and only while the round is live —
-   * a piece must not land on the beat where the dead board is held on screen.
-   *
-   * More than one piece can be due in a single frame once the gap is short and
-   * a frame is slow, so this loops rather than delivering one and moving on.
-   * The guard is there because the gap tends to zero: without it a stalled tab
-   * coming back would deliver thousands at once.
-   */
-  private stepBelt(dt: number): void {
-    const spec = this.options.belt;
-    const belt = this.runningBelt;
-    if (!spec || !belt || this.state.over || this.diedAt) return;
-
-    belt.elapsed += dt / 1000;
-
-    let guard = 0;
-    while (belt.due <= belt.elapsed && guard++ < 8 && !this.state.over) {
-      const delivery = deliverToBelt(this.state);
-      this.state = delivery.state;
-      if (delivery.overflowed) {
-        belt.missed += 1;
-        if (delivery.stoneDropped) {
-          playSound("stone", 0, this.state.spec.rings - 1 - delivery.stoneDropped.r);
-          this.options.haptic?.("medium");
-          this.effects.push(shake());
-        }
-        const { cx, cy } = this.layout.board;
-        this.effects.push(floatText(cx, cy - 40, t("beltOverflow"), true));
-      } else {
-        belt.delivered += 1;
-        playSound("place", 0, belt.delivered % 5);
-      }
-      belt.due += beltInterval(spec, belt.elapsed);
-    }
-
-    this.refreshPlaceable();
-
-    // A delivery can be what kills you: the last empty slot filling with a
-    // piece that fits nowhere is exactly how this mode ends.
-    if (this.state.over && !this.diedAt) {
-      this.pointer = { kind: "none" };
-      this.diedAt = performance.now();
-      playSound("gameOver");
-      this.effects.push(shake());
     }
   }
 
@@ -458,7 +359,6 @@ export class GameScreen {
       this.lastTime = now;
       this.clock += dt / 1000;
       this.stepClock(dt);
-      this.stepBelt(dt);
       this.effects = stepEffects(this.effects, dt);
       this.particles = stepParticles(this.particles, dt);
       this.animateScore(dt);

@@ -6,14 +6,7 @@
  * hand-draw those.
  */
 
-import {
-  type GameState,
-  type TraySlot,
-  createGame,
-  depthOf,
-  isGameOver,
-  openBelt,
-} from "./engine/game.js";
+import { type GameState, type TraySlot, createGame, depthOf, isGameOver } from "./engine/game.js";
 import { filledCount, stoneCount } from "./engine/board.js";
 import { coreReady } from "./engine/core.js";
 import { BOT_POLICY_V2, chooseMove } from "./engine/bot.js";
@@ -23,7 +16,6 @@ import { WORLDS, finishAt, worldAt } from "./render/world.js";
 import { drawWorldSwatch } from "./render/canvas.js";
 import { eraAt } from "./render/palette.js";
 import { TIME_ATTACK } from "./engine/timeattack.js";
-import { BELT } from "./engine/belt.js";
 import { dateKey, hashSeed } from "./engine/rng.js";
 import { dailyPuzzle } from "./engine/daily.js";
 import { type DailyHistory, bestStreakOf, recentDays, streakOf } from "./engine/streak.js";
@@ -537,10 +529,7 @@ function confirmThen(title: string, body: string, onConfirm: () => void): void {
  * `restart` is passed in for a challenge, which cannot be restarted by looking
  * at the current mode — the round it has to rebuild is the one in the code.
  */
-function gameHud(
-  mode: "daily" | "endless" | "challenge" | "time" | "belt",
-  restartRound?: () => void,
-): void {
+function gameHud(mode: "daily" | "endless" | "challenge" | "time", restartRound?: () => void): void {
   const hud = el("div", "hud");
 
   const quit = el("button", "icon");
@@ -618,23 +607,17 @@ function showMenu(): void {
   const today = dailyPuzzle(new Date());
   node.append(el("div", "best", `#${today.number} · ${variantLabel(today.size, today.pack)}`));
 
-  // The other four modes, side by side.
+  // The other three modes, side by side.
   //
-  // They were full-width buttons with a record line between each, and between
-  // them they were most of why the column ran to 681 pixels on an 844-pixel
-  // phone — which left four fifths of the disc behind them. Tiles and one
-  // records row say the same things in a fraction of the height.
-  //
-  // Four across rather than two-by-two, and that is measured rather than
-  // preferred: the disc above is sized from whatever height this column
-  // leaves it, so a second row of tiles costs about 35px of radius and takes
-  // the logo under the floor `npm run play` pins it at.
+  // They were three full-width buttons with a record line between each, and
+  // between them they were most of why the column ran to 681 pixels on an
+  // 844-pixel phone — which left four fifths of the disc behind them. Three
+  // tiles and one records row say the same things in a third of the height.
   const modes = el("div", "mode-row");
   for (const [label, cls, action, go] of [
     [t("levels"), "warm", "levels", showLevels],
     [t("endless"), "alt", "endless", showSetup],
     [t("timeAttack"), "hot", "time", startTimeAttack],
-    [t("belt"), "hot", "belt", startBelt],
   ] as const) {
     const button = el("button", `big ${cls}`, label);
     button.dataset.action = action;
@@ -1255,104 +1238,6 @@ function showTimeResult(state: GameState): void {
   announceUnlocks(earnedByTime);
 }
 
-// ---------------------------------------------------------------------- belt
-
-/**
- * The belt: pieces arrive on their own, faster and faster.
- *
- * The only mode that does not wait for the player. Everything else refills the
- * tray when the last slot is spent, so the game runs at the speed you think at;
- * here a piece lands on a timer you do not control, and one that arrives with
- * nowhere to go drops a stone.
- *
- * No clock, deliberately. Time attack is the mode about racing a countdown, and
- * a belt is a *speed* pressure too — stacking the two would give the game two
- * modes that feel the same and neither of them itself.
- */
-function startBelt(): void {
-  stopEverything();
-  applyThemeChrome();
-  playSound("start");
-
-  const game = openBelt(
-    createGame({
-      seed: hashSeed(`belt:${Date.now()}`),
-      mode: "belt",
-      spec: sizeById("standard").spec,
-      pack: "mixed",
-      // Same reasoning as time attack, only more so: in a mode where you cannot
-      // stop to think, being handed a dead piece is not a puzzle, it is a tax.
-      fairDeal: true,
-    }),
-  );
-
-  screen = new GameScreen(canvas, game, {
-    theme,
-    haptic,
-    sensitivity: save.controls.sensitivity,
-    belt: BELT,
-    onChange: updateMusic,
-    onGameOver: (final) => showBeltResult(final),
-  });
-  screen.start();
-  startMusic();
-  gameHud("belt", startBelt);
-}
-
-function showBeltResult(state: GameState): void {
-  // Read before the screen is torn down: it owns the belt for the same reason
-  // it owns the clock — the engine is a pure function of moves and has no idea
-  // what time it is.
-  const belt = screen?.getBelt() ?? { delivered: 0, missed: 0, next: 0 };
-  const survived = screen?.beltElapsed() ?? 0;
-  stopEverything();
-  applyThemeChrome();
-  menu = new MenuScene(canvas, theme);
-  menu.start();
-
-  const earned = bankLifetime(state.score);
-  if (state.score > readNumber("best", 0)) writeNumber("best", state.score);
-  void submitScore(LEADERBOARDS.belt, state.score);
-  const outcome = bankRound("belt", state, survived);
-
-  const node = overlay("result");
-  node.append(el("div", "how-title", t("gameOver")));
-  node.append(el("div", "score-big", localeNumber(state.score)));
-
-  const stats = el("div", "stats");
-  for (const [value, label] of [
-    [String(belt.delivered), t("beltPlaced")],
-    [`${Math.round(survived)}s`, t("timeSurvived")],
-    [String(state.stats.ringsCleared), t("rings")],
-  ] as const) {
-    const stat = el("div", "stat");
-    stat.append(el("b", undefined, value));
-    stat.append(el("span", undefined, label));
-    stats.append(stat);
-  }
-  node.append(stats);
-
-  resultProgress(node, outcome, startBelt);
-  celebrate(outcome, earned.length > 0);
-
-  if (gameCenterAvailable()) {
-    const boards = el("button", "big alt", t("leaderboard"));
-    boards.dataset.action = "leaderboard";
-    boards.addEventListener("click", () => {
-      void showLeaderboard(LEADERBOARDS.belt).then((shown) => {
-        if (!shown) notice(t("gameCenter"), t("gameCenterSignedOut"));
-      });
-    });
-    node.append(boards);
-  }
-
-  const back = el("button", "big alt", t("menu"));
-  back.dataset.action = "menu";
-  back.addEventListener("click", showMenu);
-  node.append(back);
-  announceUnlocks(earned);
-}
-
 // ----------------------------------------------------------------- challenges
 
 /**
@@ -1804,15 +1689,6 @@ if (import.meta.env.DEV) {
       startTimeAttack();
       return true;
     },
-
-    /** The belt, for the browser tests. */
-    belt: () => {
-      startBelt();
-      return true;
-    },
-    beltState: () => screen?.getBelt() ?? null,
-    /** Winds the belt forward without waiting, so a test can reach an arrival. */
-    rushBelt: (seconds: number) => screen?.rushBelt(seconds) ?? false,
     clock: () => screen?.getClock() ?? null,
     ranOutOfTime: () => screen?.ranOutOfTime() ?? false,
     /** Winds the clock down without waiting for it, so a test can reach zero. */
